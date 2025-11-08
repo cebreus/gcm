@@ -1,5 +1,23 @@
 #!/usr/bin/env node
 
+/*
+ gcm.js — Generate conventional commit messages, branch names and PR
+ descriptions using Google Gemini (Generative Language API).
+
+ Usage:
+     - Default (staged changes):
+             ./gcm.js
+     - For a specific commit (SHA):
+             ./gcm.js --commit <sha>
+             ./gcm.js -c <sha>
+
+ Notes:
+     - You must set the environment variable `GOOGLE_GEMINI_API_KEY`.
+     - Run this script inside a git repository.
+     - On error the script prints a short message and exits with a non-zero status.
+     - The `--commit` to target a commit.
+*/
+
 import { execSync } from 'child_process';
 
 const CONFIG = {
@@ -12,6 +30,7 @@ const CONFIG = {
     MAX_CONTEXT_TOKENS: 1048576,
     MAX_OUTPUT_TOKENS: 8192
 };
+
 const SYSTEM_INSTRUCTIONS = `You are an expert at writing concise, professional conventional commit messages.
 
 Output format (follow exactly):
@@ -35,67 +54,77 @@ const C = {
     yellow: '\x1b[33m',
     magenta: '\x1b[35m'
 };
-
 const encoder = new TextEncoder();
+const args = process.argv.slice(2);
+const commitIdx = args.findIndex(a => a === '--commit' || a === '-c' || a.startsWith('--commit='));
+let TARGET_COMMIT = null;
+if (commitIdx >= 0) {
+    if (args[commitIdx].startsWith('--commit=')) {
+        TARGET_COMMIT = args[commitIdx].split('=')[1];
+    } else {
+        TARGET_COMMIT = args[commitIdx + 1];
+    }
+}
 
 function estimateTokens(text) {
     return Math.ceil(encoder.encode(text).length / CONFIG.TOKEN_BYTES_RATIO);
 }
 
-function loadStagedChanges() {
+function loadChanges(commit) {
     execSync('git rev-parse --is-inside-work-tree', { stdio: 'ignore' });
-
-    const stagedDiff = execSync('git diff --staged -w').toString();
-    if (!stagedDiff.trim()) {
-        console.log('No staged changes found. Use `git add` to stage files for commit.');
-        return null;
+    let diff, rawNames;
+    if (commit) {
+        diff = execSync(`git show -w ${commit}`).toString();
+        if (!diff.trim()) {
+            console.log(`No changes found in commit ${commit}.`);
+            return null;
+        }
+        rawNames = execSync(`git show -w --name-only --pretty=format: ${commit}`).toString().trim();
+    } else {
+        diff = execSync('git diff --staged -w').toString();
+        if (!diff.trim()) {
+            console.log('No staged changes found. Use `git add` to stage files for commit.');
+            return null;
+        }
+        rawNames = execSync('git diff --staged -w --name-only').toString().trim();
     }
-
-    const rawNames = execSync('git diff --staged -w --name-only').toString().trim();
-    const stagedFiles = rawNames ? rawNames.split('\n').filter(Boolean) : [];
-
-    return { stagedDiff, stagedFiles };
+    const files = rawNames ? rawNames.split('\n').filter(Boolean) : [];
+    return { stagedDiff: diff, stagedFiles: files };
 }
 
 function summarizeLargeDiff(stagedFiles) {
     const stats = execSync('git diff --staged -w --stat --stat-width=80').toString();
     const parts = ['File changes summary:', stats];
     const available = CONFIG.MAX_DIFF_CHARS - CONFIG.SUMMARY_PADDING - stats.length;
-
     const diffs = stagedFiles.map(file => {
         const diff = execSync(`git diff --staged -w -U1 -- "${file}"`).toString();
         return { file, diff, length: diff.length };
     });
-
     const totalSize = diffs.reduce((sum, d) => sum + d.length, 0);
-
     parts.push('\n--- Sample changes from all staged files ---');
     for (const { file, diff, length } of diffs) {
         const allocated = Math.floor((length / totalSize) * available);
         parts.push(`\nFile: ${file}`);
         parts.push(diff.length > allocated ? diff.substring(0, allocated) + '\n... (truncated)' : diff);
     }
-
     return parts.join('\n');
 }
 
 function displayResult(text) {
-    const formatted = text.trim().replace(/^(?<label>BRANCH|COMMIT_MESSAGE|PR_TITLE|PR_DESCRIPTION):\s*(?<value>.*)$/gm,
-        (...args) => {
-            const { label, value } = args.at(-1);
-            const color = (label === 'PR_TITLE' || label === 'PR_DESCRIPTION') ? C.magenta : C.cyan;
-            return `\n${color}${C.bright}${label}:${C.reset}\n${value}`;
-        }
-    );
+    const formatted = text.trim().replace(/^(?<label>BRANCH|COMMIT_MESSAGE|PR_TITLE|PR_DESCRIPTION):\s*(?<value>.*)$/gm, (...args) => {
+        const { label, value } = args.at(-1);
+        const color = (label === 'PR_TITLE' || label === 'PR_DESCRIPTION') ? C.magenta : C.cyan;
+        return `\n${color}${C.bright}${label}:${C.reset}\n${value}`;
+    });
     console.log('\n' + formatted + '\n');
 }
 
 function reportStats(modelName, usage, outputLength) {
-    const thinking = usage.thinkingTokens ? ` | thinking: ${usage.thinkingTokens}` : '';
-    console.log(
-        `${C.dim}${modelName} | actual usage → input: ${usage.promptTokens} tokens | ` +
-        `output: ${usage.outputTokens} tokens (${outputLength.toLocaleString()} chars)${thinking}${C.reset}\n`
-    );
+    let thinking = '';
+    if (usage.thinkingTokens) {
+        thinking = ` | thinking: ${usage.thinkingTokens}`;
+    }
+    console.log(`${C.dim}${modelName} | actual usage → input: ${usage.promptTokens} tokens | output: ${usage.outputTokens} tokens (${outputLength.toLocaleString()} chars)${thinking}${C.reset}\n`);
 }
 
 async function callGemini(apiKey, userContent, enableThinking) {
@@ -104,25 +133,19 @@ async function callGemini(apiKey, userContent, enableThinking) {
         systemInstruction: { role: 'system', parts: [{ text: SYSTEM_INSTRUCTIONS }] },
         generationConfig: { temperature: CONFIG.TEMPERATURE, maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS }
     };
-
     if (enableThinking) {
         body.generationConfig.thinkingConfig = { thinkingMode: 'THINKING_MODE_EXTENDED' };
     }
-
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.MODEL_NAME}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify(body)
     });
-
     if (!res.ok) throw new Error(`Gemini API failed: ${res.status} ${await res.text()}`);
-
     const json = await res.json();
-
     if (json.promptFeedback?.blockReason && json.promptFeedback.blockReason !== 'BLOCK_REASON_UNSPECIFIED') {
         throw new Error(`Gemini blocked request: ${json.promptFeedback.blockReason}`);
     }
-
     for (const candidate of json.candidates || []) {
         const parts = candidate?.content?.parts;
         if (Array.isArray(parts)) {
@@ -140,7 +163,6 @@ async function callGemini(apiKey, userContent, enableThinking) {
             }
         }
     }
-
     throw new Error(`Gemini returned no text (finishReason=${json.candidates?.[0]?.finishReason ?? 'unknown'})`);
 }
 
@@ -150,44 +172,46 @@ async function run() {
         console.error('Error: set GOOGLE_GEMINI_API_KEY before running.');
         process.exit(1);
     }
-
     try {
-        const staged = loadStagedChanges();
+        if (TARGET_COMMIT) {
+            console.log(`${C.dim}Using commit ${TARGET_COMMIT} for analysis${C.reset}`);
+        }
+        const staged = loadChanges(TARGET_COMMIT);
         if (!staged) return;
-
         let input = staged.stagedDiff;
-        let prompt = 'Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following diff.';
         const origLen = input.length;
-
+        let promptSuffix = 'diff';
         if (input.length > CONFIG.MAX_DIFF_CHARS) {
             console.log(`${C.yellow}Diff too large (${input.length.toLocaleString()} chars), creating smart summary...${C.reset}`);
             input = summarizeLargeDiff(staged.stagedFiles);
-            prompt = 'Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following summary and truncated diff.';
+            promptSuffix = 'summary and truncated diff';
         }
-
-        const userContent = `${prompt}\n\n${input}`;
+        const userContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix}.\n\n${input}`;
         const tokens = estimateTokens(userContent + '\n\n' + SYSTEM_INSTRUCTIONS);
         const total = tokens + CONFIG.MAX_OUTPUT_TOKENS;
-        
         if (total > CONFIG.MAX_CONTEXT_TOKENS) {
             console.log(`${C.yellow}⚠ Warning: Total tokens (${total}) exceeds context window (${CONFIG.MAX_CONTEXT_TOKENS})${C.reset}`);
         }
-
-        const summaryInfo = input.length !== origLen ? ` | ${origLen.toLocaleString()} → ${input.length.toLocaleString()} chars` : '';
-        const thinkingStatus = CONFIG.ENABLE_THINKING ? ` ${C.yellow}(thinking)${C.reset}` : '';
+        let summaryInfo = '';
+        if (input.length !== origLen) {
+            summaryInfo = ` | ${origLen.toLocaleString()} → ${input.length.toLocaleString()} chars`;
+        }
+        let thinkingStatus = '';
+        if (CONFIG.ENABLE_THINKING) {
+            thinkingStatus = ` ${C.yellow}(thinking)${C.reset}`;
+        }
         console.log(`${C.dim}${CONFIG.MODEL_NAME}${summaryInfo} | estimated input: ~${tokens} tokens${thinkingStatus}${C.reset}`);
-
         const response = await callGemini(apiKey, userContent, CONFIG.ENABLE_THINKING);
-
         displayResult(response.text);
         reportStats(CONFIG.MODEL_NAME, response.usage, response.text.length);
-
     } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        if (/Not a git repository/i.test(msg)) {
+        const errStr = String(error);
+        if (/Not a git repository/i.test(errStr)) {
             console.error('Error: Not inside a git repository.');
+        } else if (/unknown revision/i.test(errStr)) {
+            console.error(`Error: Invalid commit SHA: ${TARGET_COMMIT}`);
         } else {
-            console.error('Gemini commit helper failed:', msg);
+            console.error(`Gemini commit helper failed: ${error}`);
         }
         process.exit(1);
     }
