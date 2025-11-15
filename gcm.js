@@ -18,9 +18,11 @@
      - The `--commit` to target a commit.
 */
 
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 
 const CONFIG = {
+    // Maximum bytes to collect from stream; if exceeded, child is killed and an ENOBUFS-like error is thrown.
+    CHILD_PROCESS_MAX_BUFFER: Number(process.env.GCM_MAX_BUFFER) || 50 * 1024 * 1024,
     MAX_DIFF_CHARS: 10000,
     SUMMARY_PADDING: 500,
     MODEL_NAME: 'gemini-2.5-flash',
@@ -70,36 +72,75 @@ function estimateTokens(text) {
     return Math.ceil(encoder.encode(text).length / CONFIG.TOKEN_BYTES_RATIO);
 }
 
-function loadChanges(commit) {
+async function loadChanges(commit) {
     execSync('git rev-parse --is-inside-work-tree', { stdio: 'ignore' });
     let diff, rawNames;
     if (commit) {
-        diff = execSync(`git show -w ${commit}`).toString();
+        diff = await runCmdStream(`git show -w ${commit}`);
         if (!diff.trim()) {
             console.log(`No changes found in commit ${commit}.`);
             return null;
         }
-        rawNames = execSync(`git show -w --name-only --pretty=format: ${commit}`).toString().trim();
+        rawNames = (await runCmdStream(`git show -w --name-only --pretty=format: ${commit}`)).trim();
     } else {
-        diff = execSync('git diff --staged -w').toString();
+        diff = await runCmdStream('git diff --staged -w');
         if (!diff.trim()) {
             console.log('No staged changes found. Use `git add` to stage files for commit.');
             return null;
         }
-        rawNames = execSync('git diff --staged -w --name-only').toString().trim();
+        rawNames = (await runCmdStream('git diff --staged -w --name-only')).trim();
     }
     const files = rawNames ? rawNames.split('\n').filter(Boolean) : [];
     return { stagedDiff: diff, stagedFiles: files };
 }
+function runCmdStream(cmd, opts = {}) {
+    const maxBytes = opts.maxBytes ?? CONFIG.CHILD_PROCESS_MAX_BUFFER;
+    return new Promise((resolve, reject) => {
+        const child = spawn('sh', ['-c', cmd], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let stdout = '';
+        let bytes = 0;
+        let truncated = false;
+        child.stdout.setEncoding('utf8');
+        child.stdout.on('data', (chunk) => {
+            bytes += chunk.length;
+            if (bytes > maxBytes) {
+                truncated = true;
+                try { child.kill(); } catch { /* ignore */ }
+                return;
+            }
+            stdout += chunk;
+        });
+        let stderr = '';
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (chunk) => { stderr += chunk; });
+        child.on('error', (err) => reject(err));
+        child.on('close', (code, signal) => {
+            if (truncated) {
+                const err = new Error('Command output exceeded max bytes');
+                err.code = 'ENOBUFS';
+                err.stdout = stdout;
+                err.stderr = stderr;
+                return reject(err);
+            }
+            if (code !== 0) {
+                const err = new Error(`Command exited with ${code} ${signal ?? ''}: ${stderr}`);
+                err.code = code;
+                return reject(err);
+            }
+            resolve(stdout);
+        });
+    });
+}
 
-function summarizeLargeDiff(stagedFiles) {
-    const stats = execSync('git diff --staged -w --stat --stat-width=80').toString();
+async function summarizeLargeDiff(stagedFiles) {
+    const stats = await runCmdStream('git diff --staged -w --stat --stat-width=80');
     const parts = ['File changes summary:', stats];
     const available = CONFIG.MAX_DIFF_CHARS - CONFIG.SUMMARY_PADDING - stats.length;
-    const diffs = stagedFiles.map(file => {
-        const diff = execSync(`git diff --staged -w -U1 -- "${file}"`).toString();
-        return { file, diff, length: diff.length };
-    });
+    const diffs = [];
+    for (const file of stagedFiles) {
+        const diff = await runCmdStream(`git diff --staged -w -U1 -- "${file}"`);
+        diffs.push({ file, diff, length: diff.length });
+    }
     const totalSize = diffs.reduce((sum, d) => sum + d.length, 0);
     parts.push('\n--- Sample changes from all staged files ---');
     for (const { file, diff, length } of diffs) {
@@ -176,14 +217,14 @@ async function run() {
         if (TARGET_COMMIT) {
             console.log(`${C.dim}Using commit ${TARGET_COMMIT} for analysis${C.reset}`);
         }
-        const staged = loadChanges(TARGET_COMMIT);
+        const staged = await loadChanges(TARGET_COMMIT);
         if (!staged) return;
         let input = staged.stagedDiff;
         const origLen = input.length;
         let promptSuffix = 'diff';
         if (input.length > CONFIG.MAX_DIFF_CHARS) {
             console.log(`${C.yellow}Diff too large (${input.length.toLocaleString()} chars), creating smart summary...${C.reset}`);
-            input = summarizeLargeDiff(staged.stagedFiles);
+            input = await summarizeLargeDiff(staged.stagedFiles);
             promptSuffix = 'summary and truncated diff';
         }
         const userContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix}.\n\n${input}`;
