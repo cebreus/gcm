@@ -1,0 +1,263 @@
+import fs from 'node:fs';
+import { CONFIG } from '../../gcm.config.js';
+import { createLogger } from '../logger.js';
+import type { Logger, LoggerConfig } from '../logger.js';
+import { tryParseJSON, parseCandidates } from './parsers.js';
+import { getRetryMsFromResponse } from './backoff.js';
+import { buildRequestBody } from './requestBuilder.js';
+import { GeminiApiError } from './errors.js';
+
+export interface GeminiUsage {
+  promptTokens: number;
+  outputTokens: number;
+  thinkingTokens: number;
+}
+
+export interface GeminiResponse {
+  text: string;
+  usage: GeminiUsage;
+}
+
+export interface GeminiClient {
+  callGemini: (
+    apiKey: string,
+    userContent: string,
+    enableThinking: boolean,
+    telemetryMetaParam: any,
+    optsParam: any,
+  ) => Promise<GeminiResponse | null>;
+}
+
+interface GeminiClientOptions {
+  config?: any;
+  fetchImpl?: typeof fetch;
+  logger?: Logger;
+}
+
+function createDefaultLogger(): Logger {
+  return createLogger(CONFIG as LoggerConfig);
+}
+
+export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiClient {
+  const options = userOptions || {};
+  const config = options.config || CONFIG;
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const logger = options.logger || createLogger(config);
+
+  // Debug file stream
+  let debugStream: fs.WriteStream | null = null;
+  if (config.DEBUG_API && config.DEBUG_FILE) {
+    debugStream = fs.createWriteStream(config.DEBUG_FILE, { flags: 'a' });
+    debugStream.write(`\n\n=== Debug session started: ${new Date().toISOString()} ===\n\n`);
+
+    process.on('beforeExit', () => {
+      if (debugStream) {
+        debugStream.end();
+        debugStream = null;
+      }
+    });
+  }
+
+  function writeDebug(label: string, data: any): void {
+    if (!debugStream) return;
+    const timestamp = new Date().toISOString();
+    debugStream.write(`[${timestamp}] ${label}:\n`);
+    debugStream.write(typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+    debugStream.write('\n\n');
+  }
+
+  // Helper function to recursively unescape '\n' in 'text' fields
+  function unescapeNewlinesInText(obj: any): any {
+    if (typeof obj !== 'object' || obj === null) {
+      return obj;
+    }
+
+    // Create a deep clone to avoid modifying the original object
+    const clonedObj = JSON.parse(JSON.stringify(obj));
+
+    function recurse(current: any) {
+      if (typeof current === 'object' && current !== null) {
+        for (const key in current) {
+          if (Object.prototype.hasOwnProperty.call(current, key)) {
+            if (key === 'text' && typeof current[key] === 'string') {
+              current[key] = current[key].replace(/\\n/g, '\n');
+            } else {
+              recurse(current[key]);
+            }
+          }
+        }
+      }
+    }
+
+    recurse(clonedObj);
+    return clonedObj;
+  }
+  const maxRetries = config.GEMINI_MAX_RETRIES || 3;
+  const retryBaseMs = config.GEMINI_RETRY_BASE_MS || 1000;
+  const retryMaxMs = config.GEMINI_RETRY_MAX_MS || 60000;
+
+  async function callGemini(
+    apiKey: string,
+    userContent: string,
+    enableThinking: boolean,
+    telemetryMetaParam: any,
+    optsParam: any,
+  ): Promise<GeminiResponse | null> {
+    const telemetryMeta = telemetryMetaParam || {};
+    const opts = optsParam || {};
+    if (!apiKey) throw new Error('API key required');
+    const body = buildRequestBody(userContent, config, opts, enableThinking);
+    const start = Date.now();
+    let attempt = 0;
+    const urlBase =
+      'https://generativelanguage.googleapis.com/v1beta/models/' +
+      (config.MODEL_NAME || 'gemini-1.5-flash') +
+      ':generateContent';
+    for (;;) {
+      attempt += 1;
+      let controller: AbortController;
+      let timer: NodeJS.Timeout | null = null;
+      try {
+        controller = new AbortController();
+        const timeoutMs = opts.timeoutMs || 60000;
+        timer = setTimeout(function () {
+          controller.abort();
+        }, timeoutMs);
+        const bodyStr = JSON.stringify(body);
+        const reqUrl = urlBase + '?key=' + encodeURIComponent(apiKey);
+
+        if (config.DEBUG_API) {
+          const maxLog = Number(config.DEBUG_MAX_BODY_LOG_BYTES || 32768);
+          const bodyPreview =
+            bodyStr.length > maxLog ? bodyStr.slice(0, maxLog) + '...[TRUNCATED]' : bodyStr;
+
+          // Log the compact version as before
+          writeDebug('API REQUEST', {
+            attempt,
+            url: reqUrl,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            bodyLength: bodyStr.length,
+            body: bodyPreview, // This logs the compact string
+          });
+
+          // Log the pretty-printed version of the full body
+          const unescapedBody = unescapeNewlinesInText(body); // Use the helper
+          writeDebug('API REQUEST BODY (pretty-printed)', unescapedBody);
+        }
+
+        const res = await fetchImpl(reqUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          body: bodyStr,
+          signal: controller.signal,
+        });
+        const textRes = await res.text();
+
+        if (config.DEBUG_API) {
+          const maxLog = Number(config.DEBUG_MAX_BODY_LOG_BYTES || 32768);
+          const bodyPreview =
+            textRes.length > maxLog ? textRes.slice(0, maxLog) + '...[TRUNCATED]' : textRes;
+
+          // Log the compact version as before
+          writeDebug('API RESPONSE', {
+            attempt,
+            status: res.status,
+            statusText: res.statusText,
+            headers: Object.fromEntries(res.headers.entries()),
+            bodyLength: textRes.length,
+            body: bodyPreview,
+          });
+
+          // Log the pretty-printed version
+          try {
+            const jsonRes = JSON.parse(textRes);
+            const unescapedJsonRes = unescapeNewlinesInText(jsonRes); // Use the helper
+            writeDebug('API RESPONSE BODY (pretty-printed)', unescapedJsonRes);
+          } catch (_e) {
+            // Not a JSON response, do not log pretty-printed version
+          }
+        }
+        if (res.ok) {
+          const json = tryParseJSON(logger, textRes);
+          const durationMs = Date.now() - start;
+          logger.log('info', 'Gemini API call succeeded', {
+            durationMs,
+            attempt,
+            status: res.status,
+            ...telemetryMeta,
+          });
+          if (
+            json?.promptFeedback?.blockReason &&
+            json.promptFeedback.blockReason !== 'BLOCK_REASON_UNSPECIFIED'
+          ) {
+            throw new GeminiApiError('Gemini blocked request: ' + json.promptFeedback.blockReason, {
+              json,
+            });
+          }
+          const parsed = parseCandidates(json);
+          if (parsed) return parsed;
+          throw new GeminiApiError('Gemini returned no text', { json });
+        }
+        // handle HTTP errors
+        if (
+          (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) &&
+          attempt <= maxRetries
+        ) {
+          const retryMs = getRetryMsFromResponse(textRes, retryBaseMs, retryMaxMs, attempt);
+          logger.log(
+            'warn',
+            'Gemini API returned ' +
+              String(res.status) +
+              '; retrying after ' +
+              String(retryMs) +
+              ' ms (attempt ' +
+              String(attempt) +
+              ')',
+          );
+          await new Promise(function (r) {
+            setTimeout(r, retryMs);
+          });
+          continue;
+        }
+        logger.log('error', 'Gemini API failed: ' + String(res.status), {
+          text: textRes,
+          attempt,
+        });
+        throw new GeminiApiError('Gemini API failed: ' + String(res.status), {
+          status: res.status,
+          snippet: textRes.slice(0, 256),
+        });
+      } catch (err) {
+        if (attempt <= maxRetries) {
+          const backoff = Math.min(retryMaxMs, retryBaseMs * Math.pow(2, attempt - 1));
+          logger.log(
+            'warn',
+            'Network error calling Gemini; retrying (' +
+              String(attempt) +
+              '/' +
+              String(maxRetries) +
+              ') after ' +
+              String(backoff) +
+              'ms',
+            { error: String(err) },
+          );
+          await new Promise(function (r) {
+            setTimeout(r, backoff + Math.floor(Math.random() * 300));
+          });
+          continue;
+        }
+        throw err;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+  }
+  return { callGemini };
+}
+
+const defaultClient = createGeminiClient({ config: CONFIG, logger: createDefaultLogger() });
+export const { callGemini } = defaultClient;
+
+export { tryParseJSON, parseCandidates, getRetryMsFromResponse };
+export default createGeminiClient;
