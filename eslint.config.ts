@@ -13,5 +13,5 @@ export default tseslint.config({
       ...globals.node,
       Bun: true,
     },
-  }
+  },
 });

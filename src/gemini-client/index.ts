@@ -144,6 +144,8 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
           // Log the pretty-printed version of the full body
           const unescapedBody = unescapeNewlinesInText(body); // Use the helper
           writeDebug('API REQUEST BODY (pretty-printed)', unescapedBody);
+          // NEW: Log the raw user content for readability
+          writeDebug('USER CONTENT (raw)', userContent);
         }
 
         const res = await fetchImpl(reqUrl, {

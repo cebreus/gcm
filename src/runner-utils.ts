@@ -62,7 +62,6 @@ export function parseAndDisplay(
       logger?.log?.('warn', 'Failed to parse gemini output; printing raw output', {
         error: String(err),
       });
-       
     } catch (_e) {
       /* ignore */
     }

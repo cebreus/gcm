@@ -8,7 +8,6 @@ async function loggerFlushAndRedactionTest(): Promise<void> {
   // Cleanup just in case
   try {
     await fs.unlink(tmpFile);
-     
   } catch (__e) {
     /* ignore */
   }
@@ -23,7 +22,6 @@ async function loggerFlushAndRedactionTest(): Promise<void> {
   const tmpFile2 = './.telemetry_test2.log';
   try {
     await fs.unlink(tmpFile2);
-     
   } catch (__e) {
     /* ignore */
   }
