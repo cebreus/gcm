@@ -1,7 +1,6 @@
-import fs from 'node:fs';
 import { CONFIG } from '../../gcm.config.js';
 import { createLogger } from '../logger.js';
-import type { Logger, LoggerConfig } from '../logger.js';
+import type { Logger, LoggerConfig, LogMetadata } from '../logger.js';
 import { tryParseJSON, parseCandidates } from './parsers.js';
 import { getRetryMsFromResponse } from './backoff.js';
 import { buildRequestBody } from './requestBuilder.js';
@@ -19,18 +18,24 @@ export interface GeminiResponse {
   usage: GeminiUsage;
 }
 
+export interface GeminiCallOpts {
+  timeoutMs?: number;
+  systemInstructions?: string;
+  maxOutputTokens?: number;
+}
+
 export interface GeminiClient {
   callGemini: (
     apiKey: string,
     userContent: string,
     enableThinking: boolean,
-    telemetryMetaParam: any,
-    optsParam: any,
+    telemetryMetaParam: LogMetadata,
+    optsParam: GeminiCallOpts,
   ) => Promise<GeminiResponse | null>;
 }
 
 interface GeminiClientOptions {
-  config?: any;
+  config?: Partial<typeof CONFIG>;
   fetchImpl?: typeof fetch;
   logger?: Logger;
 }
@@ -39,32 +44,41 @@ function createDefaultLogger(): Logger {
   return createLogger(CONFIG as LoggerConfig);
 }
 
-function createDebugLogger(config: any): (label: string, data: any) => void {
-  let debugStream: fs.WriteStream | null = null;
-  if (config.DEBUG_API && config.DEBUG_FILE) {
-    debugStream = fs.createWriteStream(config.DEBUG_FILE, { flags: 'a' });
-    debugStream.write(`\n\n=== Debug session started: ${new Date().toISOString()} ===\n\n`);
+function createDebugLogger(config: Partial<typeof CONFIG>): (label: string, data: unknown) => void {
+  // Using Bun.file().writer() for debug logging
+  // Note: Bun.FileSink is async for flush/end, but write can be queued.
+  // We need to keep the writer open or open/close on demand?
+  // Keeping it open is better for performance.
+  let writer: ReturnType<ReturnType<typeof Bun.file>['writer']> | null = null;
 
-    process.on('beforeExit', () => {
-      if (debugStream) {
-        debugStream.end();
-        debugStream = null;
-      }
-    });
+  if (config.DEBUG_API && config.DEBUG_FILE) {
+    try {
+      const file = Bun.file(config.DEBUG_FILE);
+      writer = file.writer();
+      writer.write(`\n\n=== Debug session started: ${new Date().toISOString()} ===\n\n`);
+
+      // Ensure we flush/close on exit
+      // Note: Bun doesn't have a perfect equivalent to process.on('beforeExit') that guarantees async completion
+      // but we can try best effort.
+    } catch (e) {
+      console.error('Failed to create debug logger:', e);
+    }
   }
 
-  return function writeDebug(label: string, data: any): void {
-    if (!debugStream) return;
+  return function writeDebug(label: string, data: unknown): void {
+    if (!writer) return;
     const timestamp = new Date().toISOString();
-    debugStream.write(`[${timestamp}] ${label}:\n`);
-    debugStream.write(typeof data === 'string' ? data : JSON.stringify(data, null, 2));
-    debugStream.write('\n\n');
+    writer.write(`[${timestamp}] ${label}:\n`);
+    writer.write(typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+    writer.write('\n\n');
+    // We don't await flush here to avoid slowing down the main flow, relying on Bun's buffering
+    writer.flush();
   };
 }
 
 export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiClient {
   const options = userOptions || {};
-  const config = options.config || CONFIG;
+  const config = { ...CONFIG, ...options.config } as typeof CONFIG;
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const logger = options.logger || createLogger(config);
   const writeDebug = createDebugLogger(config);
@@ -77,8 +91,8 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
     apiKey: string,
     userContent: string,
     enableThinking: boolean,
-    telemetryMetaParam: any,
-    optsParam: any,
+    telemetryMetaParam: LogMetadata,
+    optsParam: GeminiCallOpts,
   ): Promise<GeminiResponse | null> {
     const telemetryMeta = telemetryMetaParam || {};
     const opts = optsParam || {};
@@ -96,7 +110,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
       let timer: NodeJS.Timeout | null = null;
       try {
         controller = new AbortController();
-        const timeoutMs = opts.timeoutMs || 60000;
+        const timeoutMs = typeof opts.timeoutMs === 'number' ? opts.timeoutMs : 60000;
         timer = setTimeout(function () {
           controller.abort();
         }, timeoutMs);
@@ -121,9 +135,9 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
           // Log the pretty-printed version of the full body
           const unescapedBody = unescapeNewlinesInText(body); // Use the helper
           writeDebug('API REQUEST BODY (pretty-printed)', unescapedBody);
-          
+
           if (body?.contents?.[0]?.parts?.[0]?.text) {
-             writeDebug('API REQUEST USER CONTENT (text)', body.contents[0].parts[0].text);
+            writeDebug('API REQUEST USER CONTENT (text)', body.contents[0].parts[0].text);
           }
         }
 
@@ -155,12 +169,16 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
             const jsonRes = JSON.parse(textRes);
             const unescapedJsonRes = unescapeNewlinesInText(jsonRes); // Use the helper
             writeDebug('API RESPONSE BODY (pretty-printed)', unescapedJsonRes);
-          } catch (_e) {
+          } catch {
             // Not a JSON response, do not log pretty-printed version
           }
         }
         if (res.ok) {
-          const json = tryParseJSON(logger, textRes);
+          const json = tryParseJSON(logger, textRes) as {
+            promptFeedback?: { blockReason?: string };
+            candidates?: unknown[];
+            usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+          };
           const durationMs = Date.now() - start;
           logger.log('info', 'Gemini API call succeeded', {
             durationMs,

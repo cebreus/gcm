@@ -1,4 +1,4 @@
-interface Hunk {
+export interface Hunk {
   file: string;
   header: string;
   content: string;
@@ -41,7 +41,7 @@ export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void 
 // (No concurrency helper; simplified, serial processing is used in summarizer)
 
 // Helper function to recursively unescape '\n' in 'text' fields
-export function unescapeNewlinesInText(obj: any): any {
+export function unescapeNewlinesInText(obj: unknown): unknown {
   if (typeof obj !== 'object' || obj === null) {
     return obj;
   }
@@ -49,14 +49,15 @@ export function unescapeNewlinesInText(obj: any): any {
   // Create a deep clone to avoid modifying the original object
   const clonedObj = JSON.parse(JSON.stringify(obj));
 
-  function recurse(current: any) {
+  function recurse(current: unknown) {
     if (typeof current === 'object' && current !== null) {
-      for (const key in current) {
+      for (const key in current as Record<string, unknown>) {
         if (Object.prototype.hasOwnProperty.call(current, key)) {
-          if (key === 'text' && typeof current[key] === 'string') {
-            current[key] = current[key].replace(/\\n/g, '\n');
+          const val = (current as Record<string, unknown>)[key];
+          if (key === 'text' && typeof val === 'string') {
+            (current as Record<string, unknown>)[key] = val.replace(/\\n/g, '\n');
           } else {
-            recurse(current[key]);
+            recurse(val);
           }
         }
       }

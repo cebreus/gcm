@@ -19,8 +19,8 @@ export function getRetryMsFromResponse(
         }
       }
     }
-  } catch (_err: any) {
-    // ignore parse error - we'll compute a backoff below
+  } catch {
+    // ignore
   }
   if (!retryMs) {
     const base = retryBaseMs;

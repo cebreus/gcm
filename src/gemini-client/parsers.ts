@@ -1,46 +1,57 @@
 import type { Logger } from '../logger.js';
 import type { GeminiResponse } from './index.js';
 
-export function tryParseJSON(logger: Logger, text: string): any {
+export function tryParseJSON(logger: Logger, text: string): unknown {
   try {
     return JSON.parse(text);
-  } catch (err: any) {
+  } catch (err: unknown) {
     const snippet = (text || '').slice(0, 1024);
     try {
       logger?.log?.('error', 'Invalid JSON received from Gemini', {
-        snippet,
         parseError: String(err),
       });
-    } catch (_e: any) {
+    } catch {
       /* ignore */
     }
-    const parseError: any = new Error('Gemini returned invalid JSON');
+    const parseError: Error & { snippet?: string; originalError?: unknown } = new Error(
+      'Gemini returned invalid JSON',
+    );
     parseError.snippet = snippet;
     parseError.originalError = err;
     throw parseError;
   }
 }
 
-export function parseCandidates(json: any): GeminiResponse | null {
-  const candidates = Array.isArray(json.candidates) ? json.candidates : [];
+export function extractText(candidate: unknown): string {
+  const parts = (candidate as { content?: { parts?: unknown[] } })?.content?.parts;
+  if (!Array.isArray(parts)) return '';
+  let text = '';
+  for (const p of parts) {
+    text += (p as { text?: string })?.text ? (p as { text?: string }).text : '';
+  }
+  return text.trim();
+}
+
+export function parseCandidates(json: unknown): GeminiResponse | null {
+  const candidates = Array.isArray((json as { candidates?: unknown[] })?.candidates)
+    ? (json as { candidates?: unknown[] }).candidates || []
+    : [];
   for (const candidate of candidates) {
-    const parts = candidate?.content ? candidate.content.parts : null;
-    if (!Array.isArray(parts)) continue;
-    let text = '';
-    for (const p of parts) {
-      text += p?.text ? p.text : '';
-    }
-    text = text.trim();
+    const text = extractText(candidate);
     if (text) {
-      const usage = json.usageMetadata || {};
+      const usage =
+        (json as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } })
+          .usageMetadata || {};
       return {
         text,
         usage: {
           promptTokens: usage.promptTokenCount || 0,
           outputTokens: usage.candidatesTokenCount || 0,
-          thinkingTokens: candidate?.thinkingMetadata
-            ? candidate.thinkingMetadata.thinkingTokenCount
-            : undefined,
+          thinkingTokens: (candidate as { thinkingMetadata?: { thinkingTokenCount?: number } })
+            ?.thinkingMetadata
+            ? (candidate as { thinkingMetadata?: { thinkingTokenCount?: number } })
+                .thinkingMetadata!.thinkingTokenCount || 0
+            : 0,
         },
       };
     }

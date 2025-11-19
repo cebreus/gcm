@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test';
 import { summarizeLargeDiff } from '../src/summarizer.ts';
 import type { SpawnGitStreamResult, SpawnGitLinesResult } from '../src/git-utils.ts';
 
-async function spawnStreamImpl(_args: string[]): Promise<SpawnGitStreamResult> {
+async function spawnStreamImpl(): Promise<SpawnGitStreamResult> {
   return { text: ' 2 files changed\n', truncated: false };
 }
 

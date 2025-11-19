@@ -31,10 +31,10 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
   const logs: string[] = [];
   const origLog = console.log;
   const origWarn = console.warn;
-  function consoleLogProxy(...args: any[]): void {
+  function consoleLogProxy(...args: unknown[]): void {
     logs.push(Array.prototype.join.call(args, ' '));
   }
-  function consoleWarnProxy(...args: any[]): void {
+  function consoleWarnProxy(...args: unknown[]): void {
     logs.push('[WARN] ' + Array.prototype.join.call(args, ' '));
   }
   console.log = consoleLogProxy;
