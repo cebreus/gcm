@@ -6,6 +6,7 @@ import { tryParseJSON, parseCandidates } from './parsers.js';
 import { getRetryMsFromResponse } from './backoff.js';
 import { buildRequestBody } from './requestBuilder.js';
 import { GeminiApiError } from './errors.js';
+import { unescapeNewlinesInText } from '../utils.js';
 
 export interface GeminiUsage {
   promptTokens: number;
@@ -38,13 +39,7 @@ function createDefaultLogger(): Logger {
   return createLogger(CONFIG as LoggerConfig);
 }
 
-export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiClient {
-  const options = userOptions || {};
-  const config = options.config || CONFIG;
-  const fetchImpl = options.fetchImpl || globalThis.fetch;
-  const logger = options.logger || createLogger(config);
-
-  // Debug file stream
+function createDebugLogger(config: any): (label: string, data: any) => void {
   let debugStream: fs.WriteStream | null = null;
   if (config.DEBUG_API && config.DEBUG_FILE) {
     debugStream = fs.createWriteStream(config.DEBUG_FILE, { flags: 'a' });
@@ -58,40 +53,22 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
     });
   }
 
-  function writeDebug(label: string, data: any): void {
+  return function writeDebug(label: string, data: any): void {
     if (!debugStream) return;
     const timestamp = new Date().toISOString();
     debugStream.write(`[${timestamp}] ${label}:\n`);
     debugStream.write(typeof data === 'string' ? data : JSON.stringify(data, null, 2));
     debugStream.write('\n\n');
-  }
+  };
+}
 
-  // Helper function to recursively unescape '\n' in 'text' fields
-  function unescapeNewlinesInText(obj: any): any {
-    if (typeof obj !== 'object' || obj === null) {
-      return obj;
-    }
+export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiClient {
+  const options = userOptions || {};
+  const config = options.config || CONFIG;
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const logger = options.logger || createLogger(config);
+  const writeDebug = createDebugLogger(config);
 
-    // Create a deep clone to avoid modifying the original object
-    const clonedObj = JSON.parse(JSON.stringify(obj));
-
-    function recurse(current: any) {
-      if (typeof current === 'object' && current !== null) {
-        for (const key in current) {
-          if (Object.prototype.hasOwnProperty.call(current, key)) {
-            if (key === 'text' && typeof current[key] === 'string') {
-              current[key] = current[key].replace(/\\n/g, '\n');
-            } else {
-              recurse(current[key]);
-            }
-          }
-        }
-      }
-    }
-
-    recurse(clonedObj);
-    return clonedObj;
-  }
   const maxRetries = config.GEMINI_MAX_RETRIES || 3;
   const retryBaseMs = config.GEMINI_RETRY_BASE_MS || 1000;
   const retryMaxMs = config.GEMINI_RETRY_MAX_MS || 60000;
@@ -144,8 +121,10 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
           // Log the pretty-printed version of the full body
           const unescapedBody = unescapeNewlinesInText(body); // Use the helper
           writeDebug('API REQUEST BODY (pretty-printed)', unescapedBody);
-          // NEW: Log the raw user content for readability
-          writeDebug('USER CONTENT (raw)', userContent);
+          
+          if (body?.contents?.[0]?.parts?.[0]?.text) {
+             writeDebug('API REQUEST USER CONTENT (text)', body.contents[0].parts[0].text);
+          }
         }
 
         const res = await fetchImpl(reqUrl, {
@@ -217,9 +196,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
               String(attempt) +
               ')',
           );
-          await new Promise(function (r) {
-            setTimeout(r, retryMs);
-          });
+          await Bun.sleep(retryMs);
           continue;
         }
         logger.log('error', 'Gemini API failed: ' + String(res.status), {
@@ -244,9 +221,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
               'ms',
             { error: String(err) },
           );
-          await new Promise(function (r) {
-            setTimeout(r, backoff + Math.floor(Math.random() * 300));
-          });
+          await Bun.sleep(backoff + Math.floor(Math.random() * 300));
           continue;
         }
         throw err;

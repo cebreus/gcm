@@ -147,6 +147,49 @@ interface GeminiCallOptions {
   timeoutMs: number;
 }
 
+async function handleTokenLimitFallback(
+  logger: Logger,
+  stagedFiles: string[],
+  input: string,
+  maxOutputTokens: number,
+  attempt: number,
+  summaryUsed: boolean
+): Promise<{ input: string; maxOutputTokens: number; summaryUsed: boolean }> {
+  if (!summaryUsed && Array.isArray(stagedFiles) && stagedFiles.length) {
+    logger.log(
+      'warn',
+      'Gemini returned MAX_TOKENS or no text; switching to top-hunks summary and retrying',
+      { attempt },
+    );
+    const summary = await summarizeLargeDiff(stagedFiles);
+    let newInput = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following summary and truncated diff.\n\n${summary.text}`;
+    if (summary.totalTruncated) {
+      newInput += '\n\nNote: The diff was truncated while being read due to per-file buffer limits.';
+    }
+    const newMaxOutput = Math.max(256, Math.floor(maxOutputTokens / 2));
+    await Bun.sleep(200 * attempt);
+    return { input: newInput, maxOutputTokens: newMaxOutput, summaryUsed: true };
+  }
+
+  const shrinkFactor = 0.5;
+  const allowedBytesNow = Math.max(0, Math.floor(input.length * shrinkFactor));
+  let newInput = input.substring(0, allowedBytesNow);
+  newInput = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following (input truncated to fit model context).\n\n${newInput}`;
+  const newMaxOutput = Math.max(256, Math.floor(maxOutputTokens / 2));
+  
+  logger.log(
+    'warn',
+    'Gemini returned MAX_TOKENS or no text; retrying with smaller input and lower maxOutputTokens',
+    {
+      attempt,
+      newInputLength: newInput.length,
+      maxOutputOverride: newMaxOutput,
+    },
+  );
+  await Bun.sleep(500 * attempt);
+  return { input: newInput, maxOutputTokens: newMaxOutput, summaryUsed };
+}
+
 async function callGeminiWithRetries(
   logger: Logger,
   client: GeminiClient,
@@ -162,8 +205,9 @@ async function callGeminiWithRetries(
   let attempt = 0;
   let maxOutputOverride = options.maxOutputTokens || CONFIG.MAX_OUTPUT_TOKENS;
   let summaryUsed = false;
+
   for (;;) {
-    attempt = attempt + 1;
+    attempt += 1;
     try {
       return await client.callGemini(apiKey, input, enableThinking, meta, {
         maxOutputTokens: maxOutputOverride,
@@ -173,47 +217,15 @@ async function callGeminiWithRetries(
     } catch (err: any) {
       const errStr = String(err);
       const isMaxTokens = /MAX_TOKENS/i.test(errStr) || /returned no text/i.test(errStr);
+      
       if (isMaxTokens && attempt < maxAttempts) {
-        if (!summaryUsed && Array.isArray(stagedFiles) && stagedFiles.length) {
-          logger.log(
-            'warn',
-            'Gemini returned MAX_TOKENS or no text; switching to top-hunks summary and retrying',
-            {
-              attempt,
-            },
-          );
-          const summary = await summarizeLargeDiff(stagedFiles);
-          input = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following summary and truncated diff.\n\n${summary.text}`;
-          if (summary.totalTruncated) {
-            input +=
-              '\n\nNote: The diff was truncated while being read due to per-file buffer limits.';
-          }
-          summaryUsed = true;
-          maxOutputOverride = Math.max(256, Math.floor(maxOutputOverride / 2));
-          await new Promise(function (resolve) {
-            setTimeout(resolve, 200 * attempt);
-          });
-          continue;
-        }
-        const shrinkFactor = 0.5;
-        const allowedBytesNow = Math.max(0, Math.floor(input.length * shrinkFactor));
-        input = input.substring(0, allowedBytesNow);
-        input = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following (input truncated to fit model context).\n\n${input}`;
-        maxOutputOverride = Math.max(256, Math.floor(maxOutputOverride / 2));
-        logger.log(
-          'warn',
-          'Gemini returned MAX_TOKENS or no text; retrying with smaller input and lower maxOutputTokens',
-          {
-            attempt,
-            newInputLength: input.length,
-            maxOutputOverride,
-          },
-        );
-        await new Promise(function (resolve) {
-          setTimeout(resolve, 500 * attempt);
-        });
-        continue;
+         const result = await handleTokenLimitFallback(logger, stagedFiles, input, maxOutputOverride, attempt, summaryUsed);
+         input = result.input;
+         maxOutputOverride = result.maxOutputTokens;
+         summaryUsed = result.summaryUsed;
+         continue;
       }
+      
       if (attempt >= maxAttempts) throw err;
       throw err;
     }
