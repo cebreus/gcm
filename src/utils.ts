@@ -39,3 +39,30 @@ export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void 
 // Minimal p-limit implementation (small, dependency-free)
 // Usage: const limit = pLimit(concurrency); await Promise.all(items.map(item => limit(() => doWork(item))));
 // (No concurrency helper; simplified, serial processing is used in summarizer)
+
+// Helper function to recursively unescape '\n' in 'text' fields
+export function unescapeNewlinesInText(obj: any): any {
+  if (typeof obj !== 'object' || obj === null) {
+    return obj;
+  }
+
+  // Create a deep clone to avoid modifying the original object
+  const clonedObj = JSON.parse(JSON.stringify(obj));
+
+  function recurse(current: any) {
+    if (typeof current === 'object' && current !== null) {
+      for (const key in current) {
+        if (Object.prototype.hasOwnProperty.call(current, key)) {
+          if (key === 'text' && typeof current[key] === 'string') {
+            current[key] = current[key].replace(/\\n/g, '\n');
+          } else {
+            recurse(current[key]);
+          }
+        }
+      }
+    }
+  }
+
+  recurse(clonedObj);
+  return clonedObj;
+}
