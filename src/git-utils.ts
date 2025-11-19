@@ -44,7 +44,6 @@ export async function spawnGitLines(
       killed = true;
       try {
         child.kill('SIGTERM');
-         
       } catch (_e) {
         /* ignore */
       }
@@ -52,7 +51,6 @@ export async function spawnGitLines(
       setTimeout(function () {
         try {
           child.kill('SIGKILL');
-           
         } catch (_e) {
           /* ignore */
         }
@@ -80,7 +78,6 @@ export async function spawnGitLines(
             buf = buf.slice(idx + 1);
           }
         }
-         
       } catch (_e) {
         reject(e);
       }
@@ -101,7 +98,6 @@ export async function spawnGitLines(
           stderrBytes += chunkBytes;
           if (stderrBytes <= maxStderrBytes) stderr += chunk;
         }
-         
       } catch (_e) {
         /* ignore */
       }
@@ -141,14 +137,12 @@ export async function spawnGitStream(
       killed = true;
       try {
         child.kill('SIGTERM');
-         
       } catch (_e) {
         /* ignore */
       }
       setTimeout(function () {
         try {
           child.kill('SIGKILL');
-           
         } catch (_e) {
           /* ignore */
         }
@@ -173,7 +167,6 @@ export async function spawnGitStream(
           }
           out += chunk;
         }
-         
       } catch (_e) {
         reject(e);
       }
@@ -194,7 +187,6 @@ export async function spawnGitStream(
           stderrBytes += chunkBytes;
           if (stderrBytes <= maxStderrBytes) stderr += chunk;
         }
-         
       } catch (_e) {
         /* ignore */
       }
@@ -219,7 +211,6 @@ export function ensureGitRepo(): boolean {
     });
     if (!res.success) throw new Error('not git');
     return true;
-     
   } catch (_err) {
     return false;
   }

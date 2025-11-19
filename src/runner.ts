@@ -3,7 +3,7 @@ import { parseArgs } from './cli.js';
 import type { ParsedOptions } from './cli.js';
 import { CONFIG } from '../gcm.config.js';
 import { createLogger } from './logger.js';
-import type { Logger } from './logger.js';
+import type { Logger, LoggerConfig } from './logger.js';
 import { ensureGitRepo, spawnGitStream } from './git-utils.js';
 import type { SpawnGitStreamResult } from './git-utils.js';
 import { summarizeLargeDiff } from './summarizer.js';
@@ -23,6 +23,42 @@ const C = {
   magenta: '\x1b[35m',
 };
 const SYSTEM_INSTRUCTIONS = `You are an expert at writing concise, professional conventional commit messages.\n\nOutput format (follow exactly):\n\nBRANCH: [Generated branch name]\nCOMMIT_MESSAGE: [Generated conventional commit message]\nPR_TITLE: [Generated pull request title]\nPR_DESCRIPTION: [Generated pull request description]\n\n--- RULES ---\n1. **Branch Name**: Format: \`type/short-description\`, Types: feat, fix, refactor, chore, docs\n2. **Commit Message** (MOST IMPORTANT): First line: \`type(scope): short summary\` (max 60 chars), Blank line, Body: Bullet points with dash (-), each line max 80 chars, Focus on WHAT changed, not WHY or HOW, Group related changes together, Be specific but concise, If breaking change, add \`BREAKING CHANGE:\` footer\n3. **PR Title**: Same as commit first line, Max 60 characters\n4. **PR Description**: 2-3 paragraphs maximum, Bulleted list of key changes, Use GitHub-flavored Markdown`;
+
+function showHelp() {
+  const helpText = `
+  ${C.bright}Gemini Commit Message Helper${C.reset}
+
+  Automatically generates professional commit messages, branch names, and PR descriptions using Gemini AI.
+
+  ${C.bright}Usage:${C.reset}
+    gcm [options]
+
+  ${C.bright}Options:${C.reset}
+    ${C.cyan}-c, --commit <hash>${C.reset}   Analyse a specific commit instead of staged changes.
+    ${C.cyan}-h, --help${C.reset}            Show this help message.
+    ${C.cyan}-v, --verbose${C.reset}         Show detailed logs (debug level) in the console.
+    ${C.cyan}-d, --debug${C.reset}           Save complete logs to a '.debug.log' file for debugging.
+    ${C.cyan}--model <name>${C.reset}        Specify an alternative Gemini model to use.
+
+  ${C.bright}Description:${C.reset}
+    This script takes all changes added to the Git staging area (using \`git add\`),
+    sends them to Gemini AI, and generates a suggested branch name, commit message,
+    pull request title, and description.
+
+    The script will fail if the GOOGLE_GEMINI_API_KEY is not set.
+
+  ${C.bright}Examples:${C.reset}
+    ${C.dim}# Generate a message for the current staged changes${C.reset}
+    $ gcm
+
+    ${C.dim}# Generate a message for a specific commit${C.reset}
+    $ gcm -c a1b2c3d
+
+    ${C.dim}# Run the script with detailed output for debugging${C.reset}
+    $ gcm -v -d
+  `;
+  console.log(helpText.trim());
+}
 
 function estimateTokens(text: string): number {
   return Math.ceil(encoder.encode(text).length / CONFIG.TOKEN_BYTES_RATIO);
@@ -193,8 +229,26 @@ interface RunnerOptions {
 export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promise<void> {
   const opts = runnerOptions || {};
   const parsedArgs: ParsedOptions = parseArgs(argv || process.argv.slice(2));
+
+  if (parsedArgs.help) {
+    showHelp();
+    return;
+  }
+
+  const loggerConfig: LoggerConfig = {
+    LOG_LEVEL: CONFIG.LOG_LEVEL,
+    TELEMETRY_FILE: CONFIG.TELEMETRY_FILE,
+  };
+  if (parsedArgs.verbose) {
+    loggerConfig.LOG_LEVEL = 'debug';
+  }
+  if (parsedArgs.debug) {
+    loggerConfig.TELEMETRY_FILE = CONFIG.DEBUG_FILE;
+  }
+  const modelName = parsedArgs.model || CONFIG.MODEL_NAME;
+
   const TARGET_COMMIT = parsedArgs.commit || null;
-  const logger = opts.logger || createLogger(CONFIG);
+  const logger = opts.logger || createLogger(loggerConfig);
   const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
   if (!apiKey) {
     logger.log('error', 'Error: set GOOGLE_GEMINI_API_KEY before running.');
@@ -281,19 +335,15 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
     if (CONFIG.ENABLE_THINKING) {
       logger.log(
         'info',
-        `${CONFIG.MODEL_NAME}${summaryInfo} (thinking) | estimated input: ~${tokens} tokens`,
+        `${modelName}${summaryInfo} (thinking) | estimated input: ~${tokens} tokens`,
         { summaryInfo, tokens, inputLength: input.length },
       );
     } else {
-      logger.log(
-        'info',
-        `${CONFIG.MODEL_NAME}${summaryInfo} | estimated input: ~${tokens} tokens`,
-        {
-          summaryInfo,
-          tokens,
-          inputLength: input.length,
-        },
-      );
+      logger.log('info', `${modelName}${summaryInfo} | estimated input: ~${tokens} tokens`, {
+        summaryInfo,
+        tokens,
+        inputLength: input.length,
+      });
     }
     const runtime = detectRuntime();
     logger.log('info', 'Run started', { targetCommit: TARGET_COMMIT ?? null, runtime });
@@ -329,7 +379,7 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
       displayResultStructured(logger, structured);
       reportStats(
         logger,
-        CONFIG.MODEL_NAME,
+        modelName,
         { promptTokens: 0, outputTokens: 0, thinkingTokens: 0 },
         fallbackText.length,
       );
@@ -343,13 +393,12 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
     let parsedOut: Labels | null = null;
     try {
       parsedOut = parseGeminiOutput(response.text);
-       
     } catch (__e) {
       parsedOut = null;
     }
     if (parsedOut) displayResultStructured(logger, parsedOut);
     else logger.log('info', response.text);
-    reportStats(logger, CONFIG.MODEL_NAME, response.usage, response.text.length);
+    reportStats(logger, modelName, response.usage, response.text.length);
   } catch (error: any) {
     const errStr = String(error);
     if (/Not a git repository/i.test(errStr)) {

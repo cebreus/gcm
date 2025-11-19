@@ -2,6 +2,25 @@ import { spawnGitLines, spawnGitStream } from './git-utils.js';
 import type { SpawnGitLinesResult, SpawnGitStreamResult } from './git-utils.js';
 import { fileImportanceWeight, pushHunkToTop } from './utils.js';
 import { CONFIG } from '../gcm.config.js';
+import path from 'node:path';
+
+function isConfigFile(filePath: string): boolean {
+  const lowerFilePath = filePath.toLowerCase();
+  const baseName = path.basename(lowerFilePath);
+
+  // Generic pattern-based checks
+  if (baseName.endsWith('.config.js') || baseName.endsWith('.config.ts')) return true;
+  if (baseName.startsWith('.') && (baseName.endsWith('rc') || baseName.startsWith('.env'))) return true;
+  if (lowerFilePath.includes('config.') || lowerFilePath.includes('.lock') || lowerFilePath.includes('-lock.')) return true;
+
+  // List of truly specific config files that don't fit a broader pattern
+  const specificConfigs = [
+    'bun.lockb',
+  ];
+  if (specificConfigs.includes(baseName)) return true;
+
+  return false;
+}
 
 interface SummarizeLargeDiffOptions {
   spawnLinesImpl?: (args: string[], options?: any) => Promise<SpawnGitLinesResult>;
@@ -42,8 +61,10 @@ export async function summarizeLargeDiff(
     if (/\.(png|jpg|jpeg|gif|ico|svg|eot|ttf|woff|woff2|map)$/.exec(lower)) {
       return { skipped: true };
     }
+
+    const contextLines = isConfigFile(file) ? 0 : 1;
     const { lines, truncated } = await spawnLinesImpl(
-      ['diff', '--staged', '-w', '-U1', '--', file],
+      ['diff', '--staged', '-w', `-U${contextLines}`, '--', file],
       {
         maxBytes: CONFIG.PER_FILE_BUFFER,
       },

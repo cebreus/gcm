@@ -44,7 +44,6 @@ export function createLogger(config?: LoggerConfig): Logger {
     await fsPromises.appendFile(TELEMETRY_FILE, payload).catch(function (err: Error) {
       try {
         console.error('Failed to write telemetry:', String(err));
-         
       } catch (_e) {
         /* ignore */
       }
@@ -62,7 +61,6 @@ export function createLogger(config?: LoggerConfig): Logger {
     } catch (err) {
       try {
         console.error('Failed to write telemetry sync:', String(err));
-         
       } catch (_e) {
         /* ignore */
       }

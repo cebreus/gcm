@@ -11,7 +11,6 @@ export function tryParseJSON(logger: Logger, text: string): any {
         snippet,
         parseError: String(err),
       });
-       
     } catch (_e: any) {
       /* ignore */
     }
