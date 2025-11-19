@@ -6,15 +6,6 @@ interface BunSpawnOptions {
   // For now, keeping it minimal
 }
 
-export function runGitCmdSync(args: string[], opts: BunSpawnOptions = {}): string {
-  const proc = Bun.spawnSync({ cmd: ['git', ...args], stdout: 'pipe', stderr: 'pipe', ...opts });
-  if (!proc.success) {
-    const stderr = proc.stderr ? proc.stderr.toString() : '';
-    throw new Error('git ' + args.join(' ') + ' failed: ' + stderr);
-  }
-  return proc.stdout ? proc.stdout.toString() : '';
-}
-
 interface SpawnGitOptions {
   maxBytes?: number;
   execName?: string;
@@ -23,6 +14,20 @@ interface SpawnGitOptions {
 export interface SpawnGitLinesResult {
   lines: string[];
   truncated: boolean;
+}
+
+export interface SpawnGitStreamResult {
+  text: string;
+  truncated: boolean;
+}
+
+export function runGitCmdSync(args: string[], opts: BunSpawnOptions = {}): string {
+  const proc = Bun.spawnSync({ cmd: ['git', ...args], stdout: 'pipe', stderr: 'pipe', ...opts });
+  if (!proc.success) {
+    const stderr = proc.stderr ? proc.stderr.toString() : '';
+    throw new Error('git ' + args.join(' ') + ' failed: ' + stderr);
+  }
+  return proc.stdout ? proc.stdout.toString() : '';
 }
 
 async function spawnCore(
@@ -45,13 +50,13 @@ async function spawnCore(
       killed = true;
       try {
         child.kill('SIGTERM');
-      } catch (_e) {
+      } catch {
         /* ignore */
       }
       setTimeout(function () {
         try {
           child.kill('SIGKILL');
-        } catch (_e) {
+        } catch {
           /* ignore */
         }
       }, 2000);
@@ -94,7 +99,7 @@ async function spawnCore(
           stderrBytes += chunkBytes;
           if (stderrBytes <= maxStderrBytes) stderr += chunk;
         }
-      } catch (_e) {
+      } catch {
         /* ignore */
       }
     })();
@@ -118,7 +123,7 @@ export async function spawnGitLines(
   let buf = '';
   const { truncated } = await spawnCore(
     args,
-    (chunk) => {
+    chunk => {
       buf += chunk;
       let idx;
       while ((idx = buf.indexOf('\n')) !== -1) {
@@ -132,22 +137,17 @@ export async function spawnGitLines(
   return { lines, truncated };
 }
 
-export interface SpawnGitStreamResult {
-  text: string;
-  truncated: boolean;
-}
-
 export async function spawnGitStream(
   args: string[],
   options: SpawnGitOptions = {},
 ): Promise<SpawnGitStreamResult> {
   // Default maxBytes for stream is higher
   if (options.maxBytes === undefined) options.maxBytes = 50 * 1024 * 1024;
-  
+
   let text = '';
   const { truncated } = await spawnCore(
     args,
-    (chunk) => {
+    chunk => {
       text += chunk;
     },
     options,
@@ -164,7 +164,7 @@ export function ensureGitRepo(): boolean {
     });
     if (!res.success) throw new Error('not git');
     return true;
-  } catch (_err) {
+  } catch {
     return false;
   }
 }

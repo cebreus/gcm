@@ -1,29 +1,15 @@
 import { spawnGitLines, spawnGitStream } from './git-utils.js';
 import type { SpawnGitLinesResult, SpawnGitStreamResult } from './git-utils.js';
 import { fileImportanceWeight, pushHunkToTop } from './utils.js';
+import type { Hunk } from './utils.js';
 import { CONFIG } from '../gcm.config.js';
-import path from 'node:path';
 
-function isConfigFile(filePath: string): boolean {
-  const lowerFilePath = filePath.toLowerCase();
-  const baseName = path.basename(lowerFilePath);
-
-  // Generic pattern-based checks
-  if (baseName.endsWith('.config.js') || baseName.endsWith('.config.ts')) return true;
-  if (baseName.startsWith('.') && (baseName.endsWith('rc') || baseName.startsWith('.env'))) return true;
-  if (lowerFilePath.includes('config.') || lowerFilePath.includes('.lock') || lowerFilePath.includes('-lock.')) return true;
-
-  // List of truly specific config files that don't fit a broader pattern
-  const specificConfigs = [
-    'bun.lockb',
-  ];
-  if (specificConfigs.includes(baseName)) return true;
-
-  return false;
-}
 
 interface SummarizeLargeDiffOptions {
-  spawnLinesImpl?: (args: string[], options?: any) => Promise<SpawnGitLinesResult>;
+  spawnLinesImpl?: (
+    args: string[],
+    options?: Record<string, unknown>,
+  ) => Promise<SpawnGitLinesResult>;
   spawnStreamImpl?: (args: string[]) => Promise<SpawnGitStreamResult>;
 }
 
@@ -33,14 +19,30 @@ interface SummarizeLargeDiffResult {
   totalTruncated: number;
 }
 
-interface Hunk {
-  file: string;
-  header: string;
-  content: string;
-  added: number;
-  removed: number;
-  bytes: number;
-  score: number;
+function getBasename(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() || '';
+}
+
+function isConfigFile(filePath: string): boolean {
+  const lowerFilePath = filePath.toLowerCase();
+  const baseName = getBasename(lowerFilePath);
+
+  // Generic pattern-based checks
+  if (baseName.endsWith('.config.js') || baseName.endsWith('.config.ts')) return true;
+  if (baseName.startsWith('.') && (baseName.endsWith('rc') || baseName.startsWith('.env')))
+    return true;
+  if (
+    lowerFilePath.includes('config.') ||
+    lowerFilePath.includes('.lock') ||
+    lowerFilePath.includes('-lock.')
+  )
+    return true;
+
+  // List of truly specific config files that don't fit a broader pattern
+  const specificConfigs = ['bun.lockb'];
+  if (specificConfigs.includes(baseName)) return true;
+
+  return false;
 }
 
 export async function summarizeLargeDiff(

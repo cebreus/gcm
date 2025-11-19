@@ -8,7 +8,7 @@ async function loggerFlushAndRedactionTest(): Promise<void> {
   // Cleanup just in case
   try {
     await fs.unlink(tmpFile);
-  } catch (__e) {
+  } catch {
     /* ignore */
   }
   const logger: Logger = createLogger({ LOG_LEVEL: 'info', TELEMETRY_FILE: tmpFile });
@@ -22,7 +22,7 @@ async function loggerFlushAndRedactionTest(): Promise<void> {
   const tmpFile2 = './.telemetry_test2.log';
   try {
     await fs.unlink(tmpFile2);
-  } catch (__e) {
+  } catch {
     /* ignore */
   }
   const logger2: Logger = createLogger({

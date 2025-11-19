@@ -1,3 +1,4 @@
+import { CONFIG } from '../../gcm.config.js';
 interface RequestBody {
   contents: { role: string; parts: { text: string }[] }[];
   systemInstruction: { parts: { text: string }[] };
@@ -8,15 +9,10 @@ interface RequestBody {
   };
 }
 
-interface BuildRequestBodyOptions {
-  systemInstructions?: string;
-  maxOutputTokens?: number;
-}
-
 export function buildRequestBody(
   userContent: string,
-  config: any,
-  opts: BuildRequestBodyOptions,
+  config: typeof CONFIG,
+  opts: { systemInstructions?: string; maxOutputTokens?: number },
   enableThinking: boolean,
 ): RequestBody {
   const body: RequestBody = {

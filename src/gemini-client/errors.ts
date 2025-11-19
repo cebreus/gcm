@@ -1,7 +1,9 @@
-export class GeminiError extends Error {
-  metadata: any;
+export type GeminiErrorMetadata = Record<string, unknown>;
 
-  constructor(message: string, metadata: any = {}) {
+export class GeminiError extends Error {
+  metadata: GeminiErrorMetadata;
+
+  constructor(message: string, metadata: GeminiErrorMetadata = {}) {
     super(message);
     this.name = 'GeminiError';
     this.metadata = metadata;
@@ -13,7 +15,7 @@ export class GeminiError extends Error {
 }
 
 export class GeminiJsonError extends GeminiError {
-  constructor(message: string, metadata: any = {}) {
+  constructor(message: string, metadata: GeminiErrorMetadata = {}) {
     super(message, metadata);
     this.name = 'GeminiJsonError';
     Object.setPrototypeOf(this, GeminiJsonError.prototype);
@@ -21,7 +23,7 @@ export class GeminiJsonError extends GeminiError {
 }
 
 export class GeminiApiError extends GeminiError {
-  constructor(message: string, metadata: any = {}) {
+  constructor(message: string, metadata: GeminiErrorMetadata = {}) {
     super(message, metadata);
     this.name = 'GeminiApiError';
     Object.setPrototypeOf(this, GeminiApiError.prototype);

@@ -3,15 +3,33 @@ import { parseArgs } from './cli.js';
 import type { ParsedOptions } from './cli.js';
 import { CONFIG } from '../gcm.config.js';
 import { createLogger } from './logger.js';
-import type { Logger, LoggerConfig } from './logger.js';
+import type { Logger, LoggerConfig, LogMetadata } from './logger.js';
 import { ensureGitRepo, spawnGitStream } from './git-utils.js';
 import type { SpawnGitStreamResult } from './git-utils.js';
 import { summarizeLargeDiff } from './summarizer.js';
 import { createGeminiClient } from './gemini-client.js';
-import type { GeminiClient, GeminiUsage, GeminiResponse } from './gemini-client.js';
+import type { GeminiClient, GeminiUsage, GeminiResponse, GeminiCallOpts } from './gemini-client.js';
 import { parseGeminiOutput } from './parser.js';
 import type { Labels } from './parser.js';
 import { estimateTokens as estimatePromptTokens, buildFallbackStructured } from './runner-utils.js';
+
+interface LoadChangesOptions {
+  spawnStreamImpl?: (args: string[]) => Promise<SpawnGitStreamResult>;
+}
+
+interface LoadChangesResult {
+  stagedDiff: string;
+  stagedFiles: string[];
+  truncated: boolean;
+}
+
+
+
+interface RunnerOptions {
+  logger?: Logger;
+  spawnStreamImpl?: (args: string[]) => Promise<SpawnGitStreamResult>;
+  createGeminiClient?: (opts: { config: unknown; logger: Logger }) => GeminiClient;
+}
 
 const encoder = new TextEncoder();
 const C = {
@@ -93,16 +111,6 @@ function detectRuntime(): string {
   return 'bun';
 }
 
-interface LoadChangesOptions {
-  spawnStreamImpl?: (args: string[]) => Promise<SpawnGitStreamResult>;
-}
-
-interface LoadChangesResult {
-  stagedDiff: string;
-  stagedFiles: string[];
-  truncated: boolean;
-}
-
 async function loadChanges(
   commit: string | null,
   options: LoadChangesOptions = {},
@@ -141,19 +149,13 @@ async function loadChanges(
   return { stagedDiff: diff, stagedFiles: files, truncated };
 }
 
-interface GeminiCallOptions {
-  maxOutputTokens: number;
-  systemInstructions: string;
-  timeoutMs: number;
-}
-
 async function handleTokenLimitFallback(
   logger: Logger,
   stagedFiles: string[],
   input: string,
   maxOutputTokens: number,
   attempt: number,
-  summaryUsed: boolean
+  summaryUsed: boolean,
 ): Promise<{ input: string; maxOutputTokens: number; summaryUsed: boolean }> {
   if (!summaryUsed && Array.isArray(stagedFiles) && stagedFiles.length) {
     logger.log(
@@ -164,7 +166,8 @@ async function handleTokenLimitFallback(
     const summary = await summarizeLargeDiff(stagedFiles);
     let newInput = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following summary and truncated diff.\n\n${summary.text}`;
     if (summary.totalTruncated) {
-      newInput += '\n\nNote: The diff was truncated while being read due to per-file buffer limits.';
+      newInput +=
+        '\n\nNote: The diff was truncated while being read due to per-file buffer limits.';
     }
     const newMaxOutput = Math.max(256, Math.floor(maxOutputTokens / 2));
     await Bun.sleep(200 * attempt);
@@ -176,7 +179,7 @@ async function handleTokenLimitFallback(
   let newInput = input.substring(0, allowedBytesNow);
   newInput = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following (input truncated to fit model context).\n\n${newInput}`;
   const newMaxOutput = Math.max(256, Math.floor(maxOutputTokens / 2));
-  
+
   logger.log(
     'warn',
     'Gemini returned MAX_TOKENS or no text; retrying with smaller input and lower maxOutputTokens',
@@ -196,8 +199,8 @@ async function callGeminiWithRetries(
   apiKey: string,
   userContentInitial: string,
   enableThinking: boolean,
-  meta: any,
-  options: GeminiCallOptions,
+  meta: LogMetadata,
+  options: GeminiCallOpts,
   stagedFiles: string[],
   maxAttempts: number,
 ): Promise<GeminiResponse | null> {
@@ -214,28 +217,29 @@ async function callGeminiWithRetries(
         systemInstructions: options.systemInstructions,
         timeoutMs: options.timeoutMs,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       const errStr = String(err);
       const isMaxTokens = /MAX_TOKENS/i.test(errStr) || /returned no text/i.test(errStr);
-      
+
       if (isMaxTokens && attempt < maxAttempts) {
-         const result = await handleTokenLimitFallback(logger, stagedFiles, input, maxOutputOverride, attempt, summaryUsed);
-         input = result.input;
-         maxOutputOverride = result.maxOutputTokens;
-         summaryUsed = result.summaryUsed;
-         continue;
+        const result = await handleTokenLimitFallback(
+          logger,
+          stagedFiles,
+          input,
+          maxOutputOverride,
+          attempt,
+          summaryUsed,
+        );
+        input = result.input;
+        maxOutputOverride = result.maxOutputTokens;
+        summaryUsed = result.summaryUsed;
+        continue;
       }
-      
+
       if (attempt >= maxAttempts) throw err;
       throw err;
     }
   }
-}
-
-interface RunnerOptions {
-  logger?: Logger;
-  spawnStreamImpl?: (args: string[]) => Promise<SpawnGitStreamResult>;
-  createGeminiClient?: (opts: { config: any; logger: Logger }) => GeminiClient;
 }
 
 export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promise<void> {
@@ -255,7 +259,7 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
     loggerConfig.LOG_LEVEL = 'debug';
   }
   if (parsedArgs.debug) {
-    loggerConfig.TELEMETRY_FILE = CONFIG.DEBUG_FILE;
+    CONFIG.DEBUG_API = true;
   }
   const modelName = parsedArgs.model || CONFIG.MODEL_NAME;
 
@@ -266,7 +270,7 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
     logger.log('error', 'Error: set GOOGLE_GEMINI_API_KEY before running.');
     throw new Error('Environment variable GOOGLE_GEMINI_API_KEY not set');
   }
-  let meta: any = {};
+  let meta: LogMetadata = {};
   try {
     if (TARGET_COMMIT) {
       logger.log('info', `${C.dim}Using commit ${TARGET_COMMIT} for analysis${C.reset}`);
@@ -363,7 +367,7 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
     const geminiClientFactory = opts.createGeminiClient || createGeminiClient;
     const geminiClient = geminiClientFactory({ config: CONFIG, logger });
     const geminiMaxAttemptsLocal = Math.max(1, CONFIG.GEMINI_MAX_RETRIES || 3);
-    const geminiOptions: GeminiCallOptions = {
+    const geminiOptions: GeminiCallOpts = {
       maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS,
       systemInstructions: SYSTEM_INSTRUCTIONS,
       timeoutMs: 60000,
@@ -405,13 +409,13 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
     let parsedOut: Labels | null = null;
     try {
       parsedOut = parseGeminiOutput(response.text);
-    } catch (__e) {
+    } catch {
       parsedOut = null;
     }
     if (parsedOut) displayResultStructured(logger, parsedOut);
     else logger.log('info', response.text);
     reportStats(logger, modelName, response.usage, response.text.length);
-  } catch (error: any) {
+  } catch (error: unknown) {
     const errStr = String(error);
     if (/Not a git repository/i.test(errStr)) {
       logger.log('error', 'Error: Not inside a git repository.');

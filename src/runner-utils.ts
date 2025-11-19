@@ -2,22 +2,23 @@ import { parseGeminiOutput } from './parser.js';
 import type { Labels } from './parser.js';
 import type { Logger } from './logger.js';
 
-const encoder = new TextEncoder();
-
-export function estimateTokens(text: string, tokenBytesRatio: number): number {
-  return Math.ceil(encoder.encode(text).length / tokenBytesRatio);
-}
-
 interface UserContentOptions {
   input: string;
   promptSuffix: string;
   truncated: boolean;
 }
 
-export function buildUserContent(
-  { input, promptSuffix, truncated }: UserContentOptions,
-  _systemInstructions: any,
-): string {
+interface ParseAndDisplayResult {
+  parsed: boolean;
+}
+
+const encoder = new TextEncoder();
+
+export function estimateTokens(text: string, tokenBytesRatio: number): number {
+  return Math.ceil(encoder.encode(text).length / tokenBytesRatio);
+}
+
+export function buildUserContent({ input, promptSuffix, truncated }: UserContentOptions): string {
   let userContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix}.\n\n${input}`;
   if (truncated) {
     userContent += '\n\nNote: The diff was truncated while being read due to buffer limits.';
@@ -43,10 +44,6 @@ export function buildFallbackStructured(stagedFiles: string[]): Labels {
   };
 }
 
-interface ParseAndDisplayResult {
-  parsed: boolean;
-}
-
 export function parseAndDisplay(
   rawText: string,
   displayStructured: (labels: Labels) => void,
@@ -62,7 +59,7 @@ export function parseAndDisplay(
       logger?.log?.('warn', 'Failed to parse gemini output; printing raw output', {
         error: String(err),
       });
-    } catch (_e) {
+    } catch {
       /* ignore */
     }
     displayRaw(rawText);

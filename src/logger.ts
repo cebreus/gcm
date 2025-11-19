@@ -1,11 +1,4 @@
-import fs from 'node:fs';
-const fsPromises = fs.promises;
-
-const DEFAULT_LEVEL = 'info';
-
-export const levels: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
-
-let globalExitHandlersInstalled = false;
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LoggerConfig {
   LOG_LEVEL?: string;
@@ -14,11 +7,19 @@ export interface LoggerConfig {
   LOG_FLUSH_MAX_BYTES?: number;
 }
 
+export type LogMetadata = Record<string, unknown>;
+
 export interface Logger {
-  log: (level: string, msg: string, meta?: any) => void;
+  log: (level: LogLevel, message: string, meta?: LogMetadata) => void;
   flush: () => Promise<void>;
   flushSync: () => void;
 }
+
+const DEFAULT_LEVEL = 'info';
+
+export const levels: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+
+let globalExitHandlersInstalled = false;
 
 export function createLogger(config?: LoggerConfig): Logger {
   const LOG_LEVEL = config?.LOG_LEVEL || DEFAULT_LEVEL;
@@ -41,13 +42,19 @@ export function createLogger(config?: LoggerConfig): Logger {
     const payload = queue.join('');
     queue.length = 0;
     queueBytes = 0;
-    await fsPromises.appendFile(TELEMETRY_FILE, payload).catch(function (err: Error) {
+
+    try {
+      const file = Bun.file(TELEMETRY_FILE);
+      const writer = file.writer();
+      writer.write(payload);
+      await writer.end();
+    } catch (err) {
       try {
         console.error('Failed to write telemetry:', String(err));
-      } catch (_e) {
+      } catch {
         /* ignore */
       }
-    });
+    }
   }
 
   function flushSync(): void {
@@ -57,43 +64,56 @@ export function createLogger(config?: LoggerConfig): Logger {
     queue.length = 0;
     queueBytes = 0;
     try {
-      fs.appendFileSync(TELEMETRY_FILE, payload);
+      Bun.spawnSync({
+        cmd: ['bash', '-c', `cat >> "${TELEMETRY_FILE}"`],
+        stdin: new TextEncoder().encode(payload),
+      });
     } catch (err) {
       try {
         console.error('Failed to write telemetry sync:', String(err));
-      } catch (_e) {
+      } catch {
         /* ignore */
       }
     }
   }
 
-  // Minimal sanitization for telemetry: redact likely secrets and truncate long fields.
   function sanitizeTextForLogs(text: string, maxLen = 256): string {
     if (!text || typeof text !== 'string') return text;
     let out = text;
-    // redact JWTs
     out = out.replace(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED-JWT]');
-    // redact known API keys prefixes and similar tokens
     out = out.replace(/\b(AKIA|AIza|ghp_|xoxb-|sk-)[A-Za-z0-9\-_]{8,}\b/g, '[REDACTED-KEY]');
-    // redact PEM blocks
     out = out.replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED-PEM]');
-    // truncate long strings
     if (out.length > maxLen) return out.substring(0, maxLen) + '...[TRUNCATED]';
     return out;
   }
 
-  function sanitizeMetaForTelemetry(meta: any): any {
-    if (!meta || typeof meta !== 'object') return meta;
-    const out: any = {};
+  function redact(obj: unknown): unknown {
+    if (typeof obj === 'string') {
+      return obj.replace(/(key|token|pass|secret)=[^&\s]+/gi, '$1=[REDACTED]');
+    }
+    if (typeof obj === 'object' && obj !== null) {
+      const newObj: LogMetadata = {};
+      const objRecord = obj as LogMetadata;
+      for (const key in objRecord) {
+        if (Object.prototype.hasOwnProperty.call(objRecord, key)) {
+          if (/key|token|pass|secret/i.test(key)) {
+            newObj[key] = '[REDACTED]';
+          } else {
+            newObj[key] = redact(objRecord[key]);
+          }
+        }
+      }
+      return newObj;
+    }
+    return obj;
+  }
+
+  function sanitizeMetaForTelemetry(meta: LogMetadata): LogMetadata {
+    const out: LogMetadata = {};
     for (const k of Object.keys(meta)) {
       const v = meta[k];
-      // redact fields that look like tokens/keys
-      if (/key|token|secret|password/i.test(k)) {
-        out[k] = '[REDACTED]';
-        continue;
-      }
       if (typeof v === 'string') out[k] = sanitizeTextForLogs(v);
-      else out[k] = v;
+      else out[k] = redact(v);
     }
     return out;
   }
@@ -130,12 +150,12 @@ export function createLogger(config?: LoggerConfig): Logger {
     }, flushIntervalMs);
   }
 
-  function log(level: string, msg: string, meta?: any): void {
+  function log(level: LogLevel, message: string, meta?: LogMetadata): void {
     const metaLocal = meta || {};
-    const current = levels[LOG_LEVEL] ?? levels.info;
+    const current = levels[LOG_LEVEL as LogLevel] ?? levels.info;
     if ((levels[level] ?? levels.info) < current) return;
     const ts = new Date().toISOString();
-    const out = '[' + ts + '] ' + level.toUpperCase() + ': ' + msg;
+    const out = '[' + ts + '] ' + level.toUpperCase() + ': ' + message;
     if (level === 'error') {
       if (meta) console.error(out, metaLocal);
       else console.error(out);
@@ -146,12 +166,11 @@ export function createLogger(config?: LoggerConfig): Logger {
     if (TELEMETRY_FILE && (level === 'info' || level === 'error')) {
       ensureExitHandlers();
       const sanitizedMeta = sanitizeMetaForTelemetry(metaLocal);
-      const line = JSON.stringify({ ts, level, msg, meta: sanitizedMeta }) + '\n';
+      const line = JSON.stringify({ ts, level, msg: message, meta: sanitizedMeta }) + '\n';
       const bytes = Buffer.byteLength(line, 'utf8');
       queue.push(line);
       queueBytes += bytes;
       if (queueBytes >= maxQueueBytes) {
-        // immediate flush
         flush();
       } else {
         scheduleFlush();

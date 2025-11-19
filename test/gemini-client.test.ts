@@ -5,7 +5,9 @@ import type { GeminiClient, GeminiResponse } from '../src/gemini-client';
 async function geminiClientSuccessTest(): Promise<void> {
   let called = false;
   const origFetch = globalThis.fetch;
-  async function fetchStub(_url: string, _opts: any): Promise<any> {
+  async function fetchStub(input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
+    void input;
+    void _init;
     called = true;
     return {
       ok: true,
@@ -21,7 +23,7 @@ async function geminiClientSuccessTest(): Promise<void> {
           usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 15 },
         });
       },
-    };
+    } as unknown as Response;
   }
   globalThis.fetch = fetchStub;
   try {
@@ -48,7 +50,9 @@ test('gemini-client: successTest', geminiClientSuccessTest);
 async function geminiClientRetryTest(): Promise<void> {
   let callCount = 0;
   const origFetch = globalThis.fetch;
-  async function fetchStub(_url: string, _opts: any): Promise<any> {
+  async function fetchStub(input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
+    void input;
+    void _init;
     callCount = callCount + 1;
     if (callCount === 1) {
       return {
@@ -72,7 +76,7 @@ async function geminiClientRetryTest(): Promise<void> {
           usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 7 },
         });
       },
-    };
+    } as unknown as Response;
   }
   globalThis.fetch = fetchStub;
   try {
@@ -99,7 +103,9 @@ test('gemini-client: retryTest', geminiClientRetryTest);
 async function geminiClientNetworkErrorTest(): Promise<void> {
   let callCount = 0;
   const origFetch = globalThis.fetch;
-  async function fetchStub(_url: string, _opts: any): Promise<any> {
+  async function fetchStub(input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
+    void input;
+    void _init;
     callCount = callCount + 1;
     if (callCount <= 3) throw new Error('network fail');
     return {
@@ -117,7 +123,7 @@ async function geminiClientNetworkErrorTest(): Promise<void> {
           usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 4 },
         });
       },
-    };
+    } as unknown as Response;
   }
   globalThis.fetch = fetchStub;
   try {
@@ -142,14 +148,16 @@ test('gemini-client: networkErrorTest', geminiClientNetworkErrorTest);
 
 async function geminiClientInvalidJsonTest(): Promise<void> {
   const origFetch = globalThis.fetch;
-  async function fetchStub(_url: string, _opts: any): Promise<any> {
+  async function fetchStub(input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
+    void input;
+    void _init;
     return {
       ok: true,
       status: 200,
       text: async function (): Promise<string> {
         return 'this is not json';
       },
-    };
+    } as unknown as Response;
   }
   globalThis.fetch = fetchStub;
   try {
@@ -168,15 +176,16 @@ test('gemini-client: invalidJsonTest', geminiClientInvalidJsonTest);
 
 async function geminiClientTimeoutTest(): Promise<void> {
   const origFetch = globalThis.fetch;
-  async function fetchStub(_url: string, _opts: any): Promise<any> {
-    return await new Promise(function (resolve, reject) {
+  async function fetchStub(input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
+    const _opts = _init as { signal?: AbortSignal };
+    return (await new Promise(function (resolve, reject) {
       if (_opts?.signal) {
         _opts.signal.addEventListener('abort', function () {
           reject(new Error('Aborted')); // simulate AbortError
         });
       }
       // Do not resolve or reject otherwise (simulate a hang)
-    });
+    })) as unknown as Response;
   }
   globalThis.fetch = fetchStub;
   try {
