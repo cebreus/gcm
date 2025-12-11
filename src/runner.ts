@@ -12,6 +12,7 @@ import type { GeminiClient, GeminiUsage, GeminiResponse, GeminiCallOpts } from '
 import { parseGeminiOutput } from './parser.js';
 import type { Labels } from './parser.js';
 import { estimateTokens as estimatePromptTokens, buildFallbackStructured } from './runner-utils.js';
+import { getScopeSuggestions } from './scope-detector.js';
 
 interface LoadChangesOptions {
   spawnStreamImpl?: (args: string[]) => Promise<SpawnGitStreamResult>;
@@ -22,8 +23,6 @@ interface LoadChangesResult {
   stagedFiles: string[];
   truncated: boolean;
 }
-
-
 
 interface RunnerOptions {
   logger?: Logger;
@@ -276,7 +275,7 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
       logger.log('info', `${C.dim}Using commit ${TARGET_COMMIT} for analysis${C.reset}`);
     }
     logger.log(
-      'info',
+      'debug',
       `${C.dim}Using top ${CONFIG.MAX_HUNKS} hunks (K=${CONFIG.MAX_HUNKS}); per-file weights enabled: ${CONFIG.ENABLE_HUNK_WEIGHTS}${C.reset}`,
     );
     const staged = await loadChanges(
@@ -287,6 +286,7 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
       logger,
     );
     if (!staged) return;
+
     let input = staged.stagedDiff;
     const origLen = input.length;
     meta = {
@@ -311,7 +311,24 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
       });
       promptSuffix = 'summary and truncated diff';
     }
-    let userContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix}.\n\n${input}`;
+
+    let userContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix}.\n\n`;
+
+    try {
+      const scopeSuggestions = await getScopeSuggestions(staged.stagedFiles);
+      if (scopeSuggestions.length > 0) {
+        const hint = `To help you determine the best scope, here are some scopes that have been used previously for these files or are derived from the project structure: [${scopeSuggestions.join(
+          ', ',
+        )}]. Please consider using one of these if it is relevant to the current changes.\n\n`;
+        userContent += hint;
+        logger.log('info', `Found scope suggestions: ${scopeSuggestions.join(', ')}`);
+      }
+    } catch (e) {
+      logger.log('debug', 'Failed to get scope suggestions', { error: String(e) });
+    }
+
+    userContent += `--- GIT DIFF ---\n${input}`;
+
     if (staged.truncated) {
       userContent += '\n\nNote: The diff was truncated while being read due to buffer limits.';
     }
@@ -329,6 +346,7 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
         Math.floor(usableTokens * CONFIG.TOKEN_BYTES_RATIO * CONFIG.MAX_INPUT_TOKENS_SAFETY_FACTOR),
       );
       input = input.substring(0, allowedBytes);
+      // Re-construct userContent with truncated input
       userContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix} (input truncated to fit model context).\n\n${input}`;
       if (staged.truncated) {
         userContent +=
@@ -344,26 +362,20 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
         `${C.dim}After truncation → estimated input: ~${truncatedTokens} tokens${C.reset}`,
       );
     }
-    let summaryInfo = '';
-    if (input.length !== origLen) {
-      summaryInfo = ` | ${origLen.toLocaleString()} → ${input.length.toLocaleString()} chars`;
-    }
     if (CONFIG.ENABLE_THINKING) {
       logger.log(
         'info',
-        `${modelName}${summaryInfo} (thinking) | estimated input: ~${tokens} tokens`,
-        { summaryInfo, tokens, inputLength: input.length },
+        `model: ${modelName} (thinking) | estimated input: ~${tokens} tokens | length: ${input.length}`,
       );
     } else {
-      logger.log('info', `${modelName}${summaryInfo} | estimated input: ~${tokens} tokens`, {
-        summaryInfo,
-        tokens,
-        inputLength: input.length,
-      });
+      logger.log(
+        'info',
+        `model: ${modelName} | estimated input: ~${tokens} tokens | length: ${input.length}`,
+      );
     }
     const runtime = detectRuntime();
-    logger.log('info', 'Run started', { targetCommit: TARGET_COMMIT ?? null, runtime });
-    logger.log('info', `${C.dim}Runtime: ${runtime}${C.reset}`);
+    logger.log('debug', 'Run started', { targetCommit: TARGET_COMMIT ?? null, runtime });
+    logger.log('debug', `${C.dim}Runtime: ${runtime}${C.reset}`);
     const geminiClientFactory = opts.createGeminiClient || createGeminiClient;
     const geminiClient = geminiClientFactory({ config: CONFIG, logger });
     const geminiMaxAttemptsLocal = Math.max(1, CONFIG.GEMINI_MAX_RETRIES || 3);
@@ -401,7 +413,7 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
       );
       return;
     }
-    logger.log('info', 'LLM response received', {
+    logger.log('debug', 'LLM response received', {
       promptTokens: response.usage.promptTokens,
       outputTokens: response.usage.outputTokens,
       ...meta,

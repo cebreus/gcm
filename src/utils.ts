@@ -22,7 +22,7 @@ export function fileImportanceWeight(file: string): number {
   }
   if (lower.endsWith('.html') || lower.endsWith('.hbs') || lower.endsWith('.njk')) return 6;
   if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.sass')) return 4;
-  if (/\.(png|jpg|jpeg|gif|ico|svg)$/.exec(lower)) return 0;
+  if (/(png|jpg|jpeg|gif|ico|svg|heic)$/.test(lower)) return 0;
   return 1;
 }
 
@@ -37,10 +37,9 @@ export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void 
 }
 
 // Minimal p-limit implementation (small, dependency-free)
-// Usage: const limit = pLimit(concurrency); await Promise.all(items.map(item => limit(() => doWork(item))));
+// Usage: const limit = pLimit(concurrency); await Promise.all(items.map(item => limit(() => doWork(item)));
 // (No concurrency helper; simplified, serial processing is used in summarizer)
 
-// Helper function to recursively unescape '\n' in 'text' fields
 export function unescapeNewlinesInText(obj: unknown): unknown {
   if (typeof obj !== 'object' || obj === null) {
     return obj;
@@ -66,4 +65,22 @@ export function unescapeNewlinesInText(obj: unknown): unknown {
 
   recurse(clonedObj);
   return clonedObj;
+}
+
+/**
+ * Detects the repository type based on common monorepo indicators.
+ */
+export async function detectRepoType(): Promise<'monorepo' | 'single'> {
+  const [hasLerna, hasPnpmWorkspace, hasPackagesDir, hasAppsDir] = await Promise.all([
+    Bun.file('lerna.json').exists(),
+    Bun.file('pnpm-workspace.yaml').exists(),
+    Bun.file('packages').exists(),
+    Bun.file('apps').exists(),
+  ]);
+
+  if (hasLerna || hasPnpmWorkspace || (hasPackagesDir && hasAppsDir)) {
+    return 'monorepo';
+  }
+
+  return 'single';
 }

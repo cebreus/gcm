@@ -3,7 +3,7 @@ export const CONFIG = {
   MAX_HUNKS: Number(process.env.GCM_MAX_HUNKS || 16),
   FILE_CONCURRENCY: Number(process.env.GCM_FILE_CONCURRENCY || 4),
   PER_FILE_BUFFER: Number(process.env.GCM_PER_FILE_BUFFER || 1 * 1024 * 1024),
-  MODEL_NAME: process.env.GCM_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite',
+  MODEL_NAME: process.env.GCM_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash',
   TEMPERATURE: Number(process.env.GCM_TEMPERATURE || process.env.GEMINI_TEMP || 1),
   ENABLE_THINKING: (process.env.GCM_ENABLE_THINKING || 'false') === 'true',
   TOKEN_BYTES_RATIO: Number(process.env.GCM_TOKEN_BYTES_RATIO || 3.5),

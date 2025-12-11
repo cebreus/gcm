@@ -4,7 +4,6 @@ import { fileImportanceWeight, pushHunkToTop } from './utils.js';
 import type { Hunk } from './utils.js';
 import { CONFIG } from '../gcm.config.js';
 
-
 interface SummarizeLargeDiffOptions {
   spawnLinesImpl?: (
     args: string[],
@@ -60,7 +59,8 @@ export async function summarizeLargeDiff(
 
   async function processFile(file: string): Promise<{ skipped?: boolean; truncated?: boolean }> {
     const lower = file.toLowerCase();
-    if (/\.(png|jpg|jpeg|gif|ico|svg|eot|ttf|woff|woff2|map)$/.exec(lower)) {
+    if (/\.(png|jpg|jpeg|gif|ico|svg|eot|ttf|woff|woff2|map|heic)$/.exec(lower)) {
+      // Record we skipped a binary-like file — contents are not useful for AI summarization.
       return { skipped: true };
     }
 
@@ -98,9 +98,12 @@ export async function summarizeLargeDiff(
     return { truncated };
   }
   const results = [];
+  const skippedFiles: string[] = [];
   for (const file of stagedFiles) {
     // process sequentially (no concurrency)
-    results.push(await processFile(file));
+    const r = await processFile(file);
+    results.push(r);
+    if (r?.skipped) skippedFiles.push(file);
   }
   const totalTruncated = results.filter(function (r) {
     return r?.truncated;
@@ -112,6 +115,33 @@ export async function summarizeLargeDiff(
   });
   const limitBytes = Math.floor(CONFIG.CHILD_PROCESS_MAX_BUFFER / 2);
   let out = `File changes summary:\n${stats}\n\n`;
+  if (skippedFiles.length) {
+    // Group skipped binary files by parent directory and show up to a per-dir cap so
+    // we don't flood output when many files were moved/renamed in bulk.
+    const perDirLimit = 15;
+    const grouped = new Map<string, string[]>();
+    for (const f of skippedFiles) {
+      const parts = f.split(/[\\/]/);
+      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
+      const arr = grouped.get(dir) || [];
+      arr.push(f);
+      grouped.set(dir, arr);
+    }
+
+    out += `Skipped binary files (content omitted):\n`;
+    for (const [dir, files] of grouped) {
+      if (files.length <= perDirLimit) {
+        out += `  ${dir}/\n`;
+        for (const f of files) out += `    - ${f}\n`;
+      } else {
+        out += `  ${dir}/ (showing ${perDirLimit} of ${files.length})\n`;
+        for (let i = 0; i < perDirLimit; i++) out += `    - ${files[i]}\n`;
+        out += `    - ... and ${files.length - perDirLimit} more\n`;
+      }
+    }
+    out += '\n';
+  }
+
   for (const h of topHunks) {
     const hText = `File: ${h.file}\n${h.header}\n${h.content}\n`;
     if (out.length + hText.length > limitBytes) {
