@@ -180,7 +180,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
             usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
           };
           const durationMs = Date.now() - start;
-          logger.log('info', 'Gemini API call succeeded', {
+          logger.log('debug', 'Gemini API call succeeded', {
             durationMs,
             attempt,
             status: res.status,
