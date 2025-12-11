@@ -28,3 +28,46 @@ async function summarizerBasicTest(): Promise<void> {
   console.log('  summarizerBasicTest -> passed');
 }
 test('summarizer: basic', summarizerBasicTest);
+
+async function summarizerBinarySkipTest(): Promise<void> {
+  async function spawnStreamImpl2(): Promise<SpawnGitStreamResult> {
+    return { text: ' 3 files changed\n', truncated: false };
+  }
+
+  // spawnLinesImpl defined above will only return lines for .js files — .jpg/.heic are skipped
+  const stagedFiles = ['images/pic.jpg', 'images/photo.heic', 'src/foo.js'];
+  const res = await summarizeLargeDiff(stagedFiles, {
+    spawnLinesImpl,
+    spawnStreamImpl: spawnStreamImpl2,
+  });
+  expect(res.text).toContain('Skipped binary files');
+  expect(res.text).toContain('images/pic.jpg');
+  expect(res.text).toContain('images/photo.heic');
+  console.log('  summarizerBinarySkipTest -> passed');
+}
+test('summarizer: binary files are skipped and summarised concisely', summarizerBinarySkipTest);
+
+async function summarizerLargeSkipGroupTest(): Promise<void> {
+  async function spawnStreamImpl3(): Promise<SpawnGitStreamResult> {
+    return { text: ' 25 files changed\n', truncated: false };
+  }
+
+  // Create a lot of skipped files in the same folder to verify the per-folder cap
+  const many = [] as string[];
+  for (let i = 0; i < 20; i++) many.push(`assets/photos/event/image_${i}.jpg`);
+  for (let i = 0; i < 3; i++) many.push(`assets/icons/icon_${i}.png`);
+  many.push('src/foo.js');
+
+  const res = await summarizeLargeDiff(many, {
+    spawnLinesImpl,
+    spawnStreamImpl: spawnStreamImpl3,
+  });
+
+  // We expect the large folder to be shown with a cap of 15 and a "... and X more" line
+  expect(res.text).toContain('assets/photos/event/ (showing 15 of 20)');
+  expect(res.text).toMatch(/\.\.\. and 5 more/);
+  // small folder should list all
+  expect(res.text).toContain('assets/icons/');
+  console.log('  summarizerLargeSkipGroupTest -> passed');
+}
+test('summarizer: large skip groups are limited per-folder', summarizerLargeSkipGroupTest);

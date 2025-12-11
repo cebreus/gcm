@@ -24,6 +24,7 @@ async function metaParserUtilsSmokeTest(): Promise<void> {
   expect(fileImportanceWeight('index.js')).toBe(10);
   expect(fileImportanceWeight('styles.css')).toBe(4);
   expect(fileImportanceWeight('image.png')).toBe(0);
+  expect(fileImportanceWeight('image.heic')).toBe(0);
 
   const arr: Partial<Hunk>[] = [];
   pushHunkToTop(arr as Hunk[], { score: 5 } as Hunk, 2);
