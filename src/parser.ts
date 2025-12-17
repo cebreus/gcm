@@ -35,7 +35,7 @@ export function parseGeminiOutput(text: string): Labels {
   // Trim each
   {
     const trimmed: Partial<Labels> = {};
-    for (const k of Object.keys(labels) as (keyof Labels)[]) {
+    for (const k of Object.keys(labels) as Array<keyof Labels>) {
       trimmed[k] = labels[k].trim();
     }
     Object.assign(labels, trimmed);

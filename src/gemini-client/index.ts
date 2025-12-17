@@ -6,6 +6,7 @@ import { getRetryMsFromResponse } from './backoff.js';
 import { buildRequestBody } from './requestBuilder.js';
 import { GeminiApiError } from './errors.js';
 import { unescapeNewlinesInText } from '../utils.js';
+import { RETRYABLE_HTTP_CODES, DEFAULT_MAX_DEBUG_LOG_BYTES } from '../constants.js';
 
 export interface GeminiUsage {
   promptTokens: number;
@@ -29,8 +30,8 @@ export interface GeminiClient {
     apiKey: string,
     userContent: string,
     enableThinking: boolean,
-    telemetryMetaParam: LogMetadata,
-    optsParam: GeminiCallOpts,
+    telemetryMeta: LogMetadata,
+    callOptions: GeminiCallOpts,
   ) => Promise<GeminiResponse | null>;
 }
 
@@ -91,11 +92,10 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
     apiKey: string,
     userContent: string,
     enableThinking: boolean,
-    telemetryMetaParam: LogMetadata,
-    optsParam: GeminiCallOpts,
+    telemetryMeta: LogMetadata,
+    callOptions: GeminiCallOpts,
   ): Promise<GeminiResponse | null> {
-    const telemetryMeta = telemetryMetaParam || {};
-    const opts = optsParam || {};
+    const opts = callOptions || {};
     if (!apiKey) throw new Error('API key required');
     const body = buildRequestBody(userContent, config, opts, enableThinking);
     const start = Date.now();
@@ -110,15 +110,15 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
       let timer: NodeJS.Timeout | null = null;
       try {
         controller = new AbortController();
-        const timeoutMs = typeof opts.timeoutMs === 'number' ? opts.timeoutMs : 60000;
-        timer = setTimeout(function () {
+        const timeoutMs = typeof callOptions.timeoutMs === 'number' ? callOptions.timeoutMs : 60000;
+        timer = setTimeout(() => {
           controller.abort();
         }, timeoutMs);
         const bodyStr = JSON.stringify(body);
         const reqUrl = urlBase + '?key=' + encodeURIComponent(apiKey);
 
         if (config.DEBUG_API) {
-          const maxLog = Number(config.DEBUG_MAX_BODY_LOG_BYTES || 32768);
+          const maxLog = Number(config.DEBUG_MAX_BODY_LOG_BYTES || DEFAULT_MAX_DEBUG_LOG_BYTES);
           const bodyPreview =
             bodyStr.length > maxLog ? bodyStr.slice(0, maxLog) + '...[TRUNCATED]' : bodyStr;
 
@@ -150,7 +150,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
         const textRes = await res.text();
 
         if (config.DEBUG_API) {
-          const maxLog = Number(config.DEBUG_MAX_BODY_LOG_BYTES || 32768);
+          const maxLog = Number(config.DEBUG_MAX_BODY_LOG_BYTES || DEFAULT_MAX_DEBUG_LOG_BYTES);
           const bodyPreview =
             textRes.length > maxLog ? textRes.slice(0, maxLog) + '...[TRUNCATED]' : textRes;
 
@@ -199,10 +199,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
           throw new GeminiApiError('Gemini returned no text', { json });
         }
         // handle HTTP errors
-        if (
-          (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) &&
-          attempt <= maxRetries
-        ) {
+        if (RETRYABLE_HTTP_CODES.includes(res.status) && attempt <= maxRetries) {
           const retryMs = getRetryMsFromResponse(textRes, retryBaseMs, retryMaxMs, attempt);
           logger.log(
             'warn',
@@ -227,7 +224,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
         });
       } catch (err) {
         if (attempt <= maxRetries) {
-          const backoff = Math.min(retryMaxMs, retryBaseMs * Math.pow(2, attempt - 1));
+          const backoff = Math.min(retryMaxMs, retryBaseMs * 2 ** (attempt - 1));
           logger.log(
             'warn',
             'Network error calling Gemini; retrying (' +

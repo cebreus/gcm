@@ -174,18 +174,18 @@ afterEach(() => {
 });
 
 test('runner: callGeminiWithRetries - should return on first successful attempt', async () => {
-  const response = await callGeminiWithRetries(
-    mockLogger,
-    mockGeminiClient,
-    'api-key',
-    'input',
-    false,
-    {},
-    {},
-    [],
-    3,
-    handleTokenLimitFallbackMock,
-  );
+  const response = await callGeminiWithRetries({
+    logger: mockLogger,
+    client: mockGeminiClient,
+    apiKey: 'api-key',
+    userContent: 'input',
+    enableThinking: false,
+    telemetryMeta: {},
+    callOptions: {},
+    stagedFiles: [],
+    maxAttempts: 3,
+    fallbackHandler: handleTokenLimitFallbackMock,
+  });
 
   expect(response).toEqual(mockSuccessResponse);
   expect(callGeminiMock).toHaveBeenCalledTimes(1);
@@ -196,18 +196,18 @@ test('runner: callGeminiWithRetries - should trigger fallback on MAX_TOKENS erro
   callGeminiMock.mockRejectedValueOnce(new Error('MAX_TOKENS'));
   callGeminiMock.mockResolvedValueOnce(mockSuccessResponse);
 
-  const response = await callGeminiWithRetries(
-    mockLogger,
-    mockGeminiClient,
-    'api-key',
-    'input',
-    false,
-    {},
-    {},
-    [],
-    3,
-    handleTokenLimitFallbackMock,
-  );
+  const response = await callGeminiWithRetries({
+    logger: mockLogger,
+    client: mockGeminiClient,
+    apiKey: 'api-key',
+    userContent: 'input',
+    enableThinking: false,
+    telemetryMeta: {},
+    callOptions: {},
+    stagedFiles: [],
+    maxAttempts: 3,
+    fallbackHandler: handleTokenLimitFallbackMock,
+  });
 
   expect(response).toEqual(mockSuccessResponse);
   expect(callGeminiMock).toHaveBeenCalledTimes(2);
@@ -226,18 +226,18 @@ test('runner: callGeminiWithRetries - should trigger fallback on "returned no te
   callGeminiMock.mockRejectedValueOnce(new Error('Gemini returned no text'));
   callGeminiMock.mockResolvedValueOnce(mockSuccessResponse);
 
-  await callGeminiWithRetries(
-    mockLogger,
-    mockGeminiClient,
-    'api-key',
-    'input',
-    false,
-    {},
-    {},
-    [],
-    3,
-    handleTokenLimitFallbackMock,
-  );
+  await callGeminiWithRetries({
+    logger: mockLogger,
+    client: mockGeminiClient,
+    apiKey: 'api-key',
+    userContent: 'input',
+    enableThinking: false,
+    telemetryMeta: {},
+    callOptions: {},
+    stagedFiles: [],
+    maxAttempts: 3,
+    fallbackHandler: handleTokenLimitFallbackMock,
+  });
 
   expect(callGeminiMock).toHaveBeenCalledTimes(2);
   expect(handleTokenLimitFallbackMock).toHaveBeenCalledTimes(1);
@@ -246,18 +246,18 @@ test('runner: callGeminiWithRetries - should trigger fallback on "returned no te
 test('runner: callGeminiWithRetries - should throw after max attempts are reached', async () => {
   callGeminiMock.mockRejectedValue(new Error('MAX_TOKENS'));
 
-  const promise = callGeminiWithRetries(
-    mockLogger,
-    mockGeminiClient,
-    'api-key',
-    'input',
-    false,
-    {},
-    {},
-    [],
-    2,
-    handleTokenLimitFallbackMock,
-  );
+  const promise = callGeminiWithRetries({
+    logger: mockLogger,
+    client: mockGeminiClient,
+    apiKey: 'api-key',
+    userContent: 'input',
+    enableThinking: false,
+    telemetryMeta: {},
+    callOptions: {},
+    stagedFiles: [],
+    maxAttempts: 2,
+    fallbackHandler: handleTokenLimitFallbackMock,
+  });
 
   await expect(promise).rejects.toThrow('MAX_TOKENS');
   expect(callGeminiMock).toHaveBeenCalledTimes(2);
@@ -274,18 +274,18 @@ test('runner: callGeminiWithRetries - should modify input through fallback chain
     summaryUsed: true,
   });
 
-  await callGeminiWithRetries(
-    mockLogger,
-    mockGeminiClient,
-    'api-key',
-    'original input',
-    false,
-    {},
-    {},
-    [],
-    3,
-    handleTokenLimitFallbackMock,
-  );
+  await callGeminiWithRetries({
+    logger: mockLogger,
+    client: mockGeminiClient,
+    apiKey: 'api-key',
+    userContent: 'original input',
+    enableThinking: false,
+    telemetryMeta: {},
+    callOptions: {},
+    stagedFiles: [],
+    maxAttempts: 3,
+    fallbackHandler: handleTokenLimitFallbackMock,
+  });
 
   expect(handleTokenLimitFallbackMock).toHaveBeenCalledWith(
     mockLogger,
@@ -323,18 +323,18 @@ test('runner: callGeminiWithRetries - should toggle summaryUsed flag correctly',
     summaryUsed: true,
   });
 
-  await callGeminiWithRetries(
-    mockLogger,
-    mockGeminiClient,
-    'api-key',
-    'original',
-    false,
-    {},
-    {},
-    ['file.ts'],
-    3,
-    handleTokenLimitFallbackMock,
-  );
+  await callGeminiWithRetries({
+    logger: mockLogger,
+    client: mockGeminiClient,
+    apiKey: 'api-key',
+    userContent: 'original',
+    enableThinking: false,
+    telemetryMeta: {},
+    callOptions: {},
+    stagedFiles: ['file.ts'],
+    maxAttempts: 3,
+    fallbackHandler: handleTokenLimitFallbackMock,
+  });
 
   expect(handleTokenLimitFallbackMock).toHaveBeenCalledTimes(2);
   expect(handleTokenLimitFallbackMock).toHaveBeenCalledWith(

@@ -3,6 +3,7 @@ import type { SpawnGitLinesResult, SpawnGitStreamResult } from './git-utils.js';
 import { fileImportanceWeight, pushHunkToTop } from './utils.js';
 import type { Hunk } from './utils.js';
 import { CONFIG } from '../gcm.config.js';
+import { BINARY_EXTENSIONS } from './constants.js';
 
 interface SummarizeLargeDiffOptions {
   spawnLinesImpl?: (
@@ -28,14 +29,16 @@ function isConfigFile(filePath: string): boolean {
 
   // Generic pattern-based checks
   if (baseName.endsWith('.config.js') || baseName.endsWith('.config.ts')) return true;
-  if (baseName.startsWith('.') && (baseName.endsWith('rc') || baseName.startsWith('.env')))
+  if (baseName.startsWith('.') && (baseName.endsWith('rc') || baseName.startsWith('.env'))) {
     return true;
+  }
   if (
     lowerFilePath.includes('config.') ||
     lowerFilePath.includes('.lock') ||
     lowerFilePath.includes('-lock.')
-  )
+  ) {
     return true;
+  }
 
   // List of truly specific config files that don't fit a broader pattern
   const specificConfigs = ['bun.lockb'];
@@ -59,7 +62,8 @@ export async function summarizeLargeDiff(
 
   async function processFile(file: string): Promise<{ skipped?: boolean; truncated?: boolean }> {
     const lower = file.toLowerCase();
-    if (/\.(png|jpg|jpeg|gif|ico|svg|eot|ttf|woff|woff2|map|heic)$/.exec(lower)) {
+    const binaryPattern = new RegExp(`\\.(${BINARY_EXTENSIONS.join('|')})$`);
+    if (binaryPattern.test(lower)) {
       // Record we skipped a binary-like file — contents are not useful for AI summarization.
       return { skipped: true };
     }
@@ -105,14 +109,10 @@ export async function summarizeLargeDiff(
     results.push(r);
     if (r?.skipped) skippedFiles.push(file);
   }
-  const totalTruncated = results.filter(function (r) {
-    return r?.truncated;
-  }).length;
+  const totalTruncated = results.filter(r => r?.truncated).length;
   // Scores were computed before insertion into topHunks to allow pushHunkToTop
   // to operate on valid scores; no additional per-hunk compute needed here.
-  topHunks.sort(function (a, b) {
-    return b.score - a.score;
-  });
+  topHunks.sort((a, b) => b.score - a.score);
   const limitBytes = Math.floor(CONFIG.CHILD_PROCESS_MAX_BUFFER / 2);
   let out = `File changes summary:\n${stats}\n\n`;
   if (skippedFiles.length) {

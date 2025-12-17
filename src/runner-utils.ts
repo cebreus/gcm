@@ -1,32 +1,12 @@
-import { parseGeminiOutput } from './parser.js';
 import type { Labels } from './parser.js';
-import type { Logger } from './logger.js';
-
-interface UserContentOptions {
-  input: string;
-  promptSuffix: string;
-  truncated: boolean;
-}
-
-interface ParseAndDisplayResult {
-  parsed: boolean;
-}
 
 const encoder = new TextEncoder();
 
-export function estimateTokens(text: string, tokenBytesRatio: number): number {
+export function estimateTokenCount(text: string, tokenBytesRatio: number): number {
   return Math.ceil(encoder.encode(text).length / tokenBytesRatio);
 }
 
-export function buildUserContent({ input, promptSuffix, truncated }: UserContentOptions): string {
-  let userContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix}.\n\n${input}`;
-  if (truncated) {
-    userContent += '\n\nNote: The diff was truncated while being read due to buffer limits.';
-  }
-  return userContent;
-}
-
-export function buildFallbackStructured(stagedFiles: string[]): Labels {
+export function generateFallbackCommitDetails(stagedFiles: string[]): Labels {
   const files = stagedFiles || [];
   const n = files.length;
   const branch = `chore/update-${n}-files`;
@@ -42,27 +22,4 @@ export function buildFallbackStructured(stagedFiles: string[]): Labels {
     PR_TITLE: commitTitle,
     PR_DESCRIPTION: prDesc,
   };
-}
-
-export function parseAndDisplay(
-  rawText: string,
-  displayStructured: (labels: Labels) => void,
-  displayRaw: (text: string) => void,
-  logger?: Logger,
-): ParseAndDisplayResult {
-  try {
-    const parsed = parseGeminiOutput(rawText);
-    displayStructured(parsed);
-    return { parsed: true };
-  } catch (err) {
-    try {
-      logger?.log?.('warn', 'Failed to parse gemini output; printing raw output', {
-        error: String(err),
-      });
-    } catch {
-      /* ignore */
-    }
-    displayRaw(rawText);
-    return { parsed: false };
-  }
 }

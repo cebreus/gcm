@@ -5,7 +5,7 @@ const listMock = mock(() => Promise.resolve(['models/gemini-2.5-flash', 'models/
 mock.module('../src/gemini-client/listModels', () => ({ listGeminiModels: listMock }));
 
 test('cli: --list-models prints available models', async () => {
-  const runner = await import('../src/runner');
+  const { executeCommitMessageGeneration } = await import('../src/runner-refactored.js'); // Use named export
   const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
   process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
 
@@ -13,7 +13,7 @@ test('cli: --list-models prints available models', async () => {
   const originalConsoleLog = console.log;
   console.log = consoleLogMock;
 
-  await runner.run(['--list-models']);
+  await executeCommitMessageGeneration(['--list-models']);
 
   expect(listMock).toHaveBeenCalledWith('test-key');
   expect(consoleLogMock).toHaveBeenCalled();
@@ -32,7 +32,7 @@ test('cli: --list-models prints available models', async () => {
 });
 
 test('cli: --list-models without API key exits with code 1', async () => {
-  const runner = await import('../src/runner');
+  const { executeCommitMessageGeneration } = await import('../src/runner-refactored.js');
   const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
   delete process.env.GOOGLE_GEMINI_API_KEY;
 
@@ -47,7 +47,7 @@ test('cli: --list-models without API key exits with code 1', async () => {
   // @ts-ignore - override for test
   process.exit = exitMock as any;
 
-  await expect(runner.run(['--list-models'])).rejects.toThrow('EXIT:1');
+  await expect(executeCommitMessageGeneration(['--list-models'])).rejects.toThrow('EXIT:1');
 
   // restore
   console.error = originalConsoleError;
