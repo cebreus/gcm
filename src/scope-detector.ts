@@ -18,7 +18,7 @@ async function getScopesFromHistory(files: string[], depth = 50): Promise<string
 
     for (const line of text.split('\n')) {
       const match = line.match(regex);
-      if (match && match[1]) {
+      if (match?.[1]) {
         scopes.add(match[1].trim());
       }
     }
@@ -38,7 +38,7 @@ export async function getScopeSuggestions(changedFiles: string[]): Promise<strin
   if (repoType === 'monorepo') {
     const packageRegex = /^(apps|packages)\/([^/]+)/;
     for (const file of changedFiles) {
-      const match = file.match(packageRegex);
+      const match = packageRegex.exec(file);
       if (match && match[2]) {
         allScopes.add(match[2]);
       }

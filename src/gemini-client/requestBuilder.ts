@@ -1,7 +1,7 @@
-import { CONFIG } from '../../gcm.config.js';
+import type { CONFIG } from '../../gcm.config.js';
 interface RequestBody {
-  contents: { role: string; parts: { text: string }[] }[];
-  systemInstruction: { parts: { text: string }[] };
+  contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+  systemInstruction: { parts: Array<{ text: string }> };
   generationConfig: {
     temperature: number;
     maxOutputTokens: number;

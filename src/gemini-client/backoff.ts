@@ -25,7 +25,7 @@ export function getRetryMsFromResponse(
   if (!retryMs) {
     const base = retryBaseMs;
     const cap = retryMaxMs;
-    retryMs = Math.min(cap, base * Math.pow(2, attempt - 1));
+    retryMs = Math.min(cap, base * 2 ** (attempt - 1));
     retryMs += Math.floor(Math.random() * 1000);
   }
   return retryMs;

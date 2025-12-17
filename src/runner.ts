@@ -13,6 +13,9 @@ import { parseGeminiOutput } from './parser.js';
 import type { Labels } from './parser.js';
 import { estimateTokens as estimatePromptTokens, buildFallbackStructured } from './runner-utils.js';
 import { getScopeSuggestions } from './scope-detector.js';
+import { logOrWrite } from './utils.js';
+
+import { listGeminiModels } from './gemini-client/listModels.js';
 
 interface LoadChangesOptions {
   spawnStreamImpl?: (args: string[]) => Promise<SpawnGitStreamResult>;
@@ -28,6 +31,26 @@ interface RunnerOptions {
   logger?: Logger;
   spawnStreamImpl?: (args: string[]) => Promise<SpawnGitStreamResult>;
   createGeminiClient?: (opts: { config: unknown; logger: Logger }) => GeminiClient;
+}
+
+interface GeminiRetryConfig {
+  logger: Logger;
+  client: GeminiClient;
+  apiKey: string;
+  userContent: string;
+  enableThinking: boolean;
+  telemetryMeta: LogMetadata;
+  callOptions: GeminiCallOpts;
+  stagedFiles: string[];
+  maxAttempts: number;
+  fallbackHandler?: (
+    logger: Logger,
+    stagedFiles: string[],
+    input: string,
+    maxOutputTokens: number,
+    attempt: number,
+    summaryUsed: boolean,
+  ) => Promise<GeminiResponse | null>;
 }
 
 const encoder = new TextEncoder();
@@ -123,8 +146,7 @@ export async function loadChanges(
     const diff = r.text;
     const { truncated } = r;
     if (!diff.trim()) {
-      if (logger) logger.log('info', `No changes found in commit ${commit}.`);
-      else process.stdout.write(`No changes found in commit ${commit}.\n`);
+      logOrWrite(logger, 'info', `No changes found in commit ${commit}.`);
       return null;
     }
     const names = (
@@ -137,11 +159,7 @@ export async function loadChanges(
   const diff = r.text;
   const { truncated } = r;
   if (!diff.trim()) {
-    if (logger) {
-      logger.log('info', 'No staged changes found. Use `git add` to stage files for commit.');
-    } else {
-      process.stdout.write('No staged changes found. Use `git add` to stage files for commit.\n');
-    }
+    logOrWrite(logger, 'info', 'No staged changes found. Use `git add` to stage files for commit.');
     return null;
   }
   const names = (await spawnStreamImpl(['diff', '--staged', '-w', '--name-only'])).text.trim();
@@ -194,48 +212,37 @@ export async function handleTokenLimitFallback(
 }
 
 export async function callGeminiWithRetries(
-  logger: Logger,
-  client: GeminiClient,
-  apiKey: string,
-  userContentInitial: string,
-  enableThinking: boolean,
-  meta: LogMetadata,
-  options: GeminiCallOpts,
-  stagedFiles: string[],
-  maxAttempts: number,
-  // Optional injectable fallback handler for testing/mocking
-  fallbackHandler?: (
-    logger: Logger,
-    stagedFiles: string[],
-    input: string,
-    maxOutputTokens: number,
-    attempt: number,
-    summaryUsed: boolean,
-  ) => Promise<{ input: string; maxOutputTokens: number; summaryUsed: boolean }>,
+  config: GeminiRetryConfig,
 ): Promise<GeminiResponse | null> {
-  let input = userContentInitial;
+  let input = config.userContent;
   let attempt = 0;
-  let maxOutputOverride = options.maxOutputTokens || CONFIG.MAX_OUTPUT_TOKENS;
+  let maxOutputOverride = config.callOptions.maxOutputTokens || CONFIG.MAX_OUTPUT_TOKENS;
   let summaryUsed = false;
 
-  const fallbackFn = fallbackHandler || handleTokenLimitFallback;
+  const fallbackFn = config.fallbackHandler || handleTokenLimitFallback;
 
   for (;;) {
     attempt += 1;
     try {
-      return await client.callGemini(apiKey, input, enableThinking, meta, {
-        maxOutputTokens: maxOutputOverride,
-        systemInstructions: options.systemInstructions,
-        timeoutMs: options.timeoutMs,
-      });
+      return await config.client.callGemini(
+        config.apiKey,
+        input,
+        config.enableThinking,
+        config.telemetryMeta,
+        {
+          maxOutputTokens: maxOutputOverride,
+          systemInstructions: config.callOptions.systemInstructions,
+          timeoutMs: config.callOptions.timeoutMs,
+        },
+      );
     } catch (err: unknown) {
       const errStr = String(err);
       const isMaxTokens = /MAX_TOKENS/i.test(errStr) || /returned no text/i.test(errStr);
 
-      if (isMaxTokens && attempt < maxAttempts) {
+      if (isMaxTokens && attempt < config.maxAttempts) {
         const result = await fallbackFn(
-          logger,
-          stagedFiles,
+          config.logger,
+          config.stagedFiles,
           input,
           maxOutputOverride,
           attempt,
@@ -247,21 +254,132 @@ export async function callGeminiWithRetries(
         continue;
       }
 
-      if (attempt >= maxAttempts) throw err;
+      if (attempt >= config.maxAttempts) throw err;
       throw err;
     }
   }
 }
 
-import { listGeminiModels } from './gemini-client/listModels.js';
+function prepareUserContent(
+  promptSuffix: string,
+  input: string,
+  staged: LoadChangesResult,
+  scopeSuggestions: string[],
+  logger: Logger,
+): string {
+  let userContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix}.\n\n`;
 
-export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promise<void> {
-  const opts = runnerOptions || {};
-  const parsedArgs: ParsedOptions = parseArgs(argv || process.argv.slice(2));
+  if (scopeSuggestions.length > 0) {
+    const hint = `To help you determine the best scope, here are some scopes that have been used previously for these files or are derived from the project structure: [${scopeSuggestions.join(
+      ', ',
+    )}]. Please consider using one of these if it is relevant to the current changes.\n\n`;
+    userContent += hint;
+    logger.log('info', `Found scope suggestions: ${scopeSuggestions.join(', ')}`);
+  }
 
+  userContent += `--- GIT DIFF ---\n${input}`;
+
+  if (staged.truncated) {
+    userContent += '\n\nNote: The diff was truncated while being read due to buffer limits.';
+  }
+
+  return userContent;
+}
+
+function logTokenInfo(
+  modelName: string,
+  tokens: number,
+  inputLength: number,
+  enableThinking: boolean,
+  logger: Logger,
+): void {
+  if (enableThinking) {
+    logger.log(
+      'info',
+      `model: ${modelName} (thinking) | estimated input: ~${tokens} tokens | length: ${inputLength}`,
+    );
+  } else {
+    logger.log(
+      'info',
+      `model: ${modelName} | estimated input: ~${tokens} tokens | length: ${inputLength}`,
+    );
+  }
+}
+
+function handleTokenTruncation(
+  userContent: string,
+  input: string,
+  tokens: number,
+  usableTokens: number,
+  staged: LoadChangesResult,
+  promptSuffix: string,
+  logger: Logger,
+): { userContent: string; input: string; tokens: number } {
+  if (tokens > usableTokens) {
+    const allowedBytes = Math.max(
+      0,
+      Math.floor(usableTokens * CONFIG.TOKEN_BYTES_RATIO * CONFIG.MAX_INPUT_TOKENS_SAFETY_FACTOR),
+    );
+    const truncatedInput = input.substring(0, allowedBytes);
+    const updatedUserContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix} (input truncated to fit model context).\n\n${truncatedInput}`;
+
+    let finalUserContent = updatedUserContent;
+    if (staged.truncated) {
+      finalUserContent +=
+        '\n\nNote: Original diff was truncated by buffer limit, and prompt truncated to fit model context.';
+    }
+
+    logger.log(
+      'info',
+      `${C.yellow}Input truncated to fit model context and avoid API quota limits.${C.reset}`,
+    );
+    const truncatedTokens = estimateTokens(finalUserContent + '\n\n' + SYSTEM_INSTRUCTIONS);
+    logger.log(
+      'info',
+      `${C.dim}After truncation → estimated input: ~${truncatedTokens} tokens${C.reset}`,
+    );
+
+    return { userContent: finalUserContent, input: truncatedInput, tokens: truncatedTokens };
+  }
+
+  return { userContent, input, tokens };
+}
+
+async function summarizeDiffIfNeeded(
+  input: string,
+  staged: LoadChangesResult,
+  logger: Logger,
+): Promise<{ input: string; promptSuffix: string; meta: Partial<LogMetadata> }> {
+  const meta: Partial<LogMetadata> = {};
+
+  if (input.length <= CONFIG.CHILD_PROCESS_MAX_BUFFER) {
+    return { input, promptSuffix: 'diff', meta };
+  }
+
+  logger.log(
+    'info',
+    `${C.yellow}Diff larger than buffer limit, creating concise summary...${C.reset}`,
+  );
+
+  const summary = await summarizeLargeDiff(staged.stagedFiles);
+  const summaryInput = summary.text;
+  meta.numHunks = summary.numHunks;
+  meta.totalTruncated = summary.totalTruncated;
+  logger.log('info', 'Built summary using top-hunks', {
+    numHunks: summary.numHunks,
+    totalTruncated: summary.totalTruncated,
+  });
+
+  return { input: summaryInput, promptSuffix: 'summary and truncated diff', meta };
+}
+
+async function handleSpecialModes(
+  parsedArgs: ParsedOptions,
+  opts: RunnerOptions,
+): Promise<boolean> {
   if (parsedArgs.help) {
     showHelp();
-    return;
+    return true;
   }
 
   if (parsedArgs.listModels) {
@@ -282,6 +400,17 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
       console.error('Failed to fetch models:', e);
       process.exit(2);
     }
+    return true;
+  }
+
+  return false;
+}
+
+export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promise<void> {
+  const opts = runnerOptions || {};
+  const parsedArgs: ParsedOptions = parseArgs(argv || process.argv.slice(2));
+
+  if (await handleSpecialModes(parsedArgs, opts)) {
     return;
   }
 
@@ -330,43 +459,30 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
       origLen,
       truncated: staged.truncated,
     };
-    let promptSuffix = 'diff';
-    if (input.length > CONFIG.CHILD_PROCESS_MAX_BUFFER) {
-      logger.log(
-        'info',
-        `${C.yellow}Diff larger than buffer limit, creating concise summary...${C.reset}`,
-      );
-      const summary = await summarizeLargeDiff(staged.stagedFiles);
-      input = summary.text;
-      meta.numHunks = summary.numHunks;
-      meta.totalTruncated = summary.totalTruncated;
-      logger.log('info', 'Built summary using top-hunks', {
-        numHunks: summary.numHunks,
-        totalTruncated: summary.totalTruncated,
-      });
-      promptSuffix = 'summary and truncated diff';
-    }
 
-    let userContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix}.\n\n`;
+    // Summarize diff if needed
+    const summaryResult = await summarizeDiffIfNeeded(input, staged, logger);
+    input = summaryResult.input;
+    meta = { ...meta, ...summaryResult.meta };
 
+    // Get scope suggestions
+    let scopeSuggestions: string[] = [];
     try {
-      const scopeSuggestions = await getScopeSuggestions(staged.stagedFiles);
-      if (scopeSuggestions.length > 0) {
-        const hint = `To help you determine the best scope, here are some scopes that have been used previously for these files or are derived from the project structure: [${scopeSuggestions.join(
-          ', ',
-        )}]. Please consider using one of these if it is relevant to the current changes.\n\n`;
-        userContent += hint;
-        logger.log('info', `Found scope suggestions: ${scopeSuggestions.join(', ')}`);
-      }
+      scopeSuggestions = await getScopeSuggestions(staged.stagedFiles);
     } catch (e) {
       logger.log('debug', 'Failed to get scope suggestions', { error: String(e) });
     }
 
-    userContent += `--- GIT DIFF ---\n${input}`;
+    // Prepare user content
+    let userContent = prepareUserContent(
+      summaryResult.promptSuffix,
+      input,
+      staged,
+      scopeSuggestions,
+      logger,
+    );
 
-    if (staged.truncated) {
-      userContent += '\n\nNote: The diff was truncated while being read due to buffer limits.';
-    }
+    // Estimate tokens and handle truncation
     const tokens = estimatePromptTokens(
       userContent + '\n\n' + SYSTEM_INSTRUCTIONS,
       CONFIG.TOKEN_BYTES_RATIO,
@@ -375,39 +491,20 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
       CONFIG.MAX_CONTEXT_TOKENS - CONFIG.MAX_OUTPUT_TOKENS - 32,
       CONFIG.MAX_INPUT_TOKENS,
     );
-    if (tokens > usableTokens) {
-      const allowedBytes = Math.max(
-        0,
-        Math.floor(usableTokens * CONFIG.TOKEN_BYTES_RATIO * CONFIG.MAX_INPUT_TOKENS_SAFETY_FACTOR),
-      );
-      input = input.substring(0, allowedBytes);
-      // Re-construct userContent with truncated input
-      userContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix} (input truncated to fit model context).\n\n${input}`;
-      if (staged.truncated) {
-        userContent +=
-          '\n\nNote: Original diff was truncated by buffer limit, and prompt truncated to fit model context.';
-      }
-      logger.log(
-        'info',
-        `${C.yellow}Input truncated to fit model context and avoid API quota limits.${C.reset}`,
-      );
-      const truncatedTokens = estimateTokens(userContent + '\n\n' + SYSTEM_INSTRUCTIONS);
-      logger.log(
-        'info',
-        `${C.dim}After truncation → estimated input: ~${truncatedTokens} tokens${C.reset}`,
-      );
-    }
-    if (CONFIG.ENABLE_THINKING) {
-      logger.log(
-        'info',
-        `model: ${modelName} (thinking) | estimated input: ~${tokens} tokens | length: ${input.length}`,
-      );
-    } else {
-      logger.log(
-        'info',
-        `model: ${modelName} | estimated input: ~${tokens} tokens | length: ${input.length}`,
-      );
-    }
+    const truncationResult = handleTokenTruncation(
+      userContent,
+      input,
+      tokens,
+      usableTokens,
+      staged,
+      summaryResult.promptSuffix,
+      logger,
+    );
+    userContent = truncationResult.userContent;
+    input = truncationResult.input;
+
+    // Log token info
+    logTokenInfo(modelName, truncationResult.tokens, input.length, CONFIG.ENABLE_THINKING, logger);
     const runtime = detectRuntime();
     logger.log('debug', 'Run started', { targetCommit: TARGET_COMMIT ?? null, runtime });
     logger.log('debug', `${C.dim}Runtime: ${runtime}${C.reset}`);
@@ -419,17 +516,17 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
       systemInstructions: SYSTEM_INSTRUCTIONS,
       timeoutMs: 60000,
     };
-    const response = await callGeminiWithRetries(
+    const response = await callGeminiWithRetries({
       logger,
-      geminiClient,
+      client: geminiClient,
       apiKey,
       userContent,
-      CONFIG.ENABLE_THINKING,
-      meta,
-      geminiOptions,
-      staged.stagedFiles,
-      geminiMaxAttemptsLocal,
-    );
+      enableThinking: CONFIG.ENABLE_THINKING,
+      telemetryMeta: meta,
+      callOptions: geminiOptions,
+      stagedFiles: staged.stagedFiles,
+      maxAttempts: geminiMaxAttemptsLocal,
+    });
     if (!response) {
       logger.log('warn', 'Gemini did not return text after retries; using deterministic fallback', {
         numFiles: staged.stagedFiles.length,
@@ -470,14 +567,10 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
       logger.log('error', `Error: Invalid commit SHA: ${TARGET_COMMIT}`);
     } else {
       logger.log('error', `Gemini commit helper failed: ${error}`);
-      try {
-        opts.logger?.log('error', `Gemini commit helper failed: ${error}`, {
-          error: errStr,
-          meta: meta || {},
-        });
-      } catch {
-        /* ignore */
-      }
+      opts.logger?.log('error', `Gemini commit helper failed: ${error}`, {
+        error: errStr,
+        meta: meta || {},
+      });
     }
     throw error;
   }

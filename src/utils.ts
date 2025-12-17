@@ -1,3 +1,12 @@
+import type { Logger } from './logger.js';
+import {
+  CODE_EXTENSIONS,
+  MARKUP_EXTENSIONS,
+  STYLE_EXTENSIONS,
+  BINARY_EXTENSIONS,
+  FILE_IMPORTANCE_WEIGHTS,
+} from './constants.js';
+
 export interface Hunk {
   file: string;
   header: string;
@@ -8,22 +17,75 @@ export interface Hunk {
   score: number;
 }
 
+/**
+ * Determines file importance weight for prioritizing hunks
+ */
 export function fileImportanceWeight(file: string): number {
   if (!file) return 0;
   const lower = file.toLowerCase();
-  if (
-    lower.endsWith('.js') ||
-    lower.endsWith('.ts') ||
-    lower.endsWith('.jsx') ||
-    lower.endsWith('.tsx') ||
-    lower.endsWith('.svelte')
-  ) {
-    return 10;
+
+  if (CODE_EXTENSIONS.some(ext => lower.endsWith(`.${ext}`))) {
+    return FILE_IMPORTANCE_WEIGHTS.CODE;
   }
-  if (lower.endsWith('.html') || lower.endsWith('.hbs') || lower.endsWith('.njk')) return 6;
-  if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.sass')) return 4;
-  if (/(png|jpg|jpeg|gif|ico|svg|heic)$/.test(lower)) return 0;
-  return 1;
+  if (MARKUP_EXTENSIONS.some(ext => lower.endsWith(`.${ext}`))) {
+    return FILE_IMPORTANCE_WEIGHTS.MARKUP;
+  }
+  if (STYLE_EXTENSIONS.some(ext => lower.endsWith(`.${ext}`))) {
+    return FILE_IMPORTANCE_WEIGHTS.STYLE;
+  }
+  if (BINARY_EXTENSIONS.some(ext => new RegExp(`\\.(${ext})$`).test(lower))) {
+    return FILE_IMPORTANCE_WEIGHTS.BINARY;
+  }
+  return FILE_IMPORTANCE_WEIGHTS.DEFAULT;
+}
+
+/**
+ * Logs a message using logger if available, otherwise writes to stdout
+ */
+export function logOrWrite(
+  logger: Logger | null | undefined,
+  level: 'info' | 'warn' | 'error',
+  message: string,
+): void {
+  if (logger) {
+    logger.log(level, message);
+  } else {
+    process.stdout.write(message + '\n');
+  }
+}
+
+/**
+ * Safely logs an error to console.error, catching any failures
+ */
+export function safeLogError(message: string, error?: unknown): void {
+  try {
+    if (error) {
+      console.error(message, error);
+    } else {
+      console.error(message);
+    }
+  } catch {
+    // Ignore logging errors
+  }
+}
+
+/**
+ * Builds a truncation note message based on truncation flags
+ */
+export function buildTruncationNote(
+  wasBufferTruncated: boolean,
+  wasPromptTruncated: boolean,
+): string {
+  if (wasBufferTruncated && wasPromptTruncated) {
+    return '\n\nNote: Original diff was truncated by buffer limit, and prompt truncated to fit model context.';
+  }
+  if (wasBufferTruncated) {
+    return '\n\nNote: The diff was truncated while being read due to buffer limits.';
+  }
+  if (wasPromptTruncated) {
+    return '\n\nNote: The prompt was truncated to fit within model context limits.';
+  }
+  return '';
 }
 
 export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void {

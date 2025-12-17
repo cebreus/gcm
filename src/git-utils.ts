@@ -38,7 +38,7 @@ async function spawnCore(
   const maxBytes = options.maxBytes === undefined ? 1024 * 1024 : options.maxBytes;
   const execName = options.execName || 'git';
 
-  return await new Promise(function (resolve, reject) {
+  return await new Promise((resolve, reject) => {
     const child = Bun.spawn({ cmd: [execName, ...args], stdout: 'pipe', stderr: 'pipe' });
     const dec = new TextDecoder();
     let bytes = 0;
@@ -53,7 +53,7 @@ async function spawnCore(
       } catch {
         /* ignore */
       }
-      setTimeout(function () {
+      setTimeout(() => {
         try {
           child.kill('SIGKILL');
         } catch {
