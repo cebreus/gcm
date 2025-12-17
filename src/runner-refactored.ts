@@ -19,6 +19,7 @@ import { createContextService } from './services/context-service.js';
 import { createGeminiService } from './services/gemini-service.js';
 import { generateFallbackCommitDetails } from './runner-utils.js'; // Keep this for now
 import { intro, outro, spinner, note, select, text, isCancel, cancel } from '@clack/prompts';
+import { KNOWN_MODELS, getModelSpec } from './model-registry.js';
 
 const C = {
   reset: '\x1b[0m',
@@ -79,7 +80,9 @@ function detectRuntime(): string {
 }
 
 // SYSTEM_INSTRUCTIONS
-const SYSTEM_INSTRUCTIONS = `You are an expert at writing concise, professional conventional commit messages.\n\nOutput format (follow exactly):\n\nBRANCH: [Generated branch name]\nCOMMIT_MESSAGE: [Generated conventional commit message]\nPR_TITLE: [Generated pull request title]\nPR_DESCRIPTION: [Generated pull request description]\n\n--- RULES ---\n1. **Branch Name**: Format: \`type/short-description\`, Types: feat, fix, refactor, chore, docs\n2. **Commit Message** (MOST IMPORTANT): First line: \`type(scope): short summary\` (max 60 chars), Blank line, Body: Bullet points with dash (-), each line max 80 chars, Focus on WHAT changed, not WHY or HOW, Group related changes together, Be specific but concise, If breaking change, add \`BREAKING CHANGE:\` footer\n3. **PR Title**: Same as commit first line, Max 60 characters\n4. **PR Description**: 2-3 paragraphs maximum, Bulleted list of key changes, Use GitHub-flavored Markdown`;
+const SYSTEM_INSTRUCTIONS_FULL = `You are an expert at writing concise, professional conventional commit messages.\n\nOutput format (follow exactly):\n\nBRANCH: [Generated branch name]\nCOMMIT_MESSAGE: [Generated conventional commit message]\nPR_TITLE: [Generated pull request title]\nPR_DESCRIPTION: [Generated pull request description]\n\n--- RULES ---\n1. **Branch Name**: Format: \`type/short-description\`, Types: feat, fix, refactor, chore, docs\n2. **Commit Message** (MOST IMPORTANT): First line: \`type(scope): short summary\` (max 60 chars), Blank line, Body: Bullet points with dash (-), each line max 80 chars, Focus on WHAT changed, not WHY or HOW, Group related changes together, Be specific but concise, If breaking change, add \`BREAKING CHANGE:\` footer\n3. **PR Title**: Same as commit first line, Max 60 characters\n4. **PR Description**: 2-3 paragraphs maximum, Bulleted list of key changes, Use GitHub-flavored Markdown`;
+
+const SYSTEM_INSTRUCTIONS_COMMIT_ONLY = `You are an expert at writing concise, professional conventional commit messages.\n\nOutput format (follow exactly):\n\nCOMMIT_MESSAGE: [Generated conventional commit message]\n\n--- RULES ---\n1. **Commit Message** (MOST IMPORTANT): First line: \`type(scope): short summary\` (max 60 chars), Blank line, Body: Bullet points with dash (-), each line max 80 chars, Focus on WHAT changed, not WHY or HOW, Group related changes together, Be specific but concise, If breaking change, add \`BREAKING CHANGE:\` footer`;
 
 function logTokenInfo(
   modelName: string,
@@ -163,7 +166,8 @@ export async function executeCommitMessageGeneration(
   }
 
   const TARGET_COMMIT = parsedArgs.commit || null;
-  const modelName = parsedArgs.model || CONFIG.MODEL_NAME;
+  let modelName = parsedArgs.model || CONFIG.MODEL_NAME;
+  let outputMode: 'full' | 'commit-only' = 'commit-only'; // Default as requested
 
   try {
     // 3. Initialize Services
@@ -176,6 +180,68 @@ export async function executeCommitMessageGeneration(
     if (TARGET_COMMIT) {
       logger.log('info', `${C.dim}Using commit ${TARGET_COMMIT} for analysis${C.reset}`);
     }
+
+    // PRE-FLIGHT LOOP
+    // Skip if model is explicitly provided via CLI args
+    const skipPreFlight = !!parsedArgs.model;
+
+    if (!skipPreFlight) {
+      while (true) {
+        const modeLabel = outputMode === 'full' ? 'Full Report' : 'Commit Msg Only';
+        const action = await select({
+          message: `Settings: [Model: ${modelName}] [Mode: ${modeLabel}]`,
+          options: [
+            { value: 'generate', label: 'Generate' },
+            { value: 'configure', label: 'Configure...' },
+            { value: 'exit', label: 'Exit' },
+          ],
+        });
+
+        if (isCancel(action) || action === 'exit') {
+          outro('Bye!');
+          return;
+        }
+
+        if (action === 'configure') {
+          const configAction = await select({
+            message: 'Configure Settings',
+            options: [
+              { value: 'model', label: 'Change Model' },
+              { value: 'mode', label: 'Change Output Mode' },
+              { value: 'back', label: 'Back' },
+            ],
+          });
+
+          if (configAction === 'model') {
+            const selectedModel = await select({
+              message: 'Select AI Model',
+              options: KNOWN_MODELS.map(m => ({
+                value: m.name,
+                label: m.label,
+                hint: m.description,
+              })),
+            });
+            if (!isCancel(selectedModel)) modelName = String(selectedModel);
+          } else if (configAction === 'mode') {
+            const selectedMode = await select({
+              message: 'Select Output Mode',
+              options: [
+                {
+                  value: 'commit-only',
+                  label: 'Commit Message Only (Default)',
+                  hint: 'Faster, concise',
+                },
+                { value: 'full', label: 'Full Report (Branch, PR)', hint: 'Detailed' },
+              ],
+            });
+            if (!isCancel(selectedMode)) outputMode = selectedMode as 'full' | 'commit-only';
+          }
+          continue; // Loop back to Pre-flight
+        }
+        // If 'generate', break loop
+        break;
+      }
+    } // End if (!skipPreFlight)
 
     // 4. Load Changes
     s.start('Analyzing repository changes...');
@@ -202,115 +268,169 @@ export async function executeCommitMessageGeneration(
       logger.log('debug', 'Failed to get scope suggestions', { error: String(e) });
     }
 
-    // 6. Build Context (Prompt)
-    const { promptContext, processedDiffContent, tokens } =
-      await contextService.constructLLMPromptContext(
-        staged.stagedDiff,
-        staged.truncated ? 'truncated diff' : 'diff',
-        CONFIG.MAX_CONTEXT_TOKENS - CONFIG.MAX_OUTPUT_TOKENS - 500, // Safe buffer
-        CONFIG.TOKEN_BYTES_RATIO,
+    // GENERATION LOOP
+    while (true) {
+      const modelSpec = getModelSpec(modelName);
+      const safeMaxTokens = modelSpec.maxInputTokens - CONFIG.MAX_OUTPUT_TOKENS - 1000;
+
+      // 6. Build Context (Prompt)
+      const { promptContext, processedDiffContent, tokens } =
+        await contextService.constructLLMPromptContext(
+          staged.stagedDiff,
+          staged.truncated ? 'truncated diff' : 'diff',
+          safeMaxTokens,
+          CONFIG.TOKEN_BYTES_RATIO,
+          staged.stagedFiles,
+          scopeSuggestions,
+          logger,
+        );
+
+      // 7. Call Gemini
+      const runtime = detectRuntime();
+      logTokenInfo(modelName, tokens, processedDiffContent.length, CONFIG.ENABLE_THINKING, logger);
+      logger.log('debug', 'Run started', { targetCommit: TARGET_COMMIT ?? null, runtime });
+
+      s.start(`Generating commit message with ${modelName}...`);
+
+      const systemPrompt =
+        outputMode === 'full' ? SYSTEM_INSTRUCTIONS_FULL : SYSTEM_INSTRUCTIONS_COMMIT_ONLY;
+
+      const response = await geminiService.callGeminiAPI(
+        promptContext,
+        systemPrompt,
         staged.stagedFiles,
-        scopeSuggestions,
-        logger,
+        meta,
       );
+      s.stop('Gemini response received');
 
-    // 7. Call Gemini
-    const runtime = detectRuntime();
-    logTokenInfo(modelName, tokens, processedDiffContent.length, CONFIG.ENABLE_THINKING, logger);
-    logger.log('debug', 'Run started', { targetCommit: TARGET_COMMIT ?? null, runtime });
+      // 8. Handle Response / Fallback
+      if (!response) {
+        logger.log(
+          'warn',
+          'Gemini did not return text after retries; using deterministic fallback',
+        );
+        const structured = generateFallbackCommitDetails(staged.stagedFiles);
+        // Fallback display logic remains simple for now
+        displayResultStructured(logger, structured);
+        return;
+      }
 
-    s.start(`Generating commit message with ${modelName}...`);
+      logger.log('debug', 'LLM response received', {
+        promptTokens: response.usage.promptTokens,
+        outputTokens: response.usage.outputTokens,
+        ...meta,
+      });
 
-    const response = await geminiService.callGeminiAPI(
-      promptContext,
-      SYSTEM_INSTRUCTIONS,
-      staged.stagedFiles,
-      meta,
-    );
-    s.stop('Gemini response received');
+      // 9. Parse and Display
+      let parsedOut: Labels | null = null;
+      try {
+        parsedOut = parseGeminiOutput(response.text);
+      } catch {
+        if (outputMode === 'commit-only') {
+          // In commit-only, the whole text IS the commit message essentially,
+          // or we try to parse if structure is kept.
+          // Since update to system instructions likely removes keys, we might need robust parsing.
+          // For commit-only, let's assume the response IS the message if parse fails.
+          parsedOut = { COMMIT_MESSAGE: response.text.trim() } as Labels;
+        } else {
+          parsedOut = null;
+        }
+      }
 
-    // 8. Handle Response / Fallback
-    if (!response) {
-      logger.log('warn', 'Gemini did not return text after retries; using deterministic fallback');
-      const structured = generateFallbackCommitDetails(staged.stagedFiles);
-      displayResultStructured(logger, structured);
-      return;
-    }
+      // If still null check
+      if (!parsedOut && outputMode === 'commit-only') {
+        parsedOut = { COMMIT_MESSAGE: response.text.trim() } as Labels;
+      }
 
-    logger.log('debug', 'LLM response received', {
-      promptTokens: response.usage.promptTokens,
-      outputTokens: response.usage.outputTokens,
-      ...meta,
-    });
-
-    // 9. Parse and Display
-    let parsedOut: Labels | null = null;
-    try {
-      parsedOut = parseGeminiOutput(response.text);
-    } catch {
-      parsedOut = null;
-    }
-
-    if (parsedOut) {
-      const message = `BRANCH: ${parsedOut.BRANCH}\n\n${parsedOut.COMMIT_MESSAGE}`;
-      note(message, 'Generated Commit Details');
-
-      let finalMessage = parsedOut.COMMIT_MESSAGE;
-      let action = null;
-
-      while (true) {
-        action = await select({
-          message: 'What would you like to do?',
-          options: [
-            { value: 'commit', label: 'Commit' },
-            { value: 'edit', label: 'Edit message' },
-            { value: 'cancel', label: 'Cancel' },
-          ],
-        });
-
-        if (isCancel(action) || action === 'cancel') {
-          outro('Commit cancelled.');
-          return;
+      if (parsedOut) {
+        let noteContent = '';
+        if (outputMode === 'full') {
+          noteContent = `BRANCH: ${parsedOut.BRANCH || 'N/A'}\n\n${parsedOut.COMMIT_MESSAGE}`;
+        } else {
+          noteContent = parsedOut.COMMIT_MESSAGE;
         }
 
-        if (action === 'edit') {
-          const edited = await text({
-            message: 'Edit commit message',
-            initialValue: finalMessage,
-            placeholder: 'Enter commit message',
+        note(noteContent, outputMode === 'full' ? 'Generated Report' : 'Generated Commit Message');
+
+        let finalMessage = parsedOut.COMMIT_MESSAGE;
+        let action = null;
+
+        const integrityLoop = true;
+        while (integrityLoop) {
+          // Inner loop for Action Menu
+          action = await select({
+            message: 'What would you like to do?',
+            options: [
+              { value: 'commit', label: 'Commit' },
+              { value: 'edit', label: 'Edit message' },
+              { value: 'regenerate', label: 'Switch Model & Regenerate' },
+              { value: 'cancel', label: 'Cancel' },
+            ],
           });
 
-          if (isCancel(edited)) {
-            outro('Commit cancelled during edit.');
+          if (isCancel(action) || action === 'cancel') {
+            outro('Commit cancelled.');
             return;
           }
-          finalMessage = String(edited);
-          // Show updated note
-          note(`BRANCH: ${parsedOut.BRANCH}\n\n${finalMessage}`, 'Updated Commit Details');
-          continue; // Loop back to menu
-        }
 
-        if (action === 'commit') {
-          s.start('Committing changes...');
-          try {
-            await gitService.commitChanges(finalMessage, logger);
-            s.stop('Changes committed successfully');
-            outro(`${C.cyan}Commit successfully created!${C.reset}`);
-          } catch (e) {
-            s.stop('Commit failed');
-            cancel(`Failed to commit changes: ${e}`);
-            logger.log('error', `Commit failed: ${e}`);
+          if (action === 'edit') {
+            const edited = await text({
+              message: 'Edit commit message',
+              initialValue: finalMessage,
+              placeholder: 'Enter commit message',
+            });
+
+            if (isCancel(edited)) {
+              // Don't exit, just back to menu
+              continue;
+            }
+            finalMessage = String(edited);
+            note(finalMessage, 'Updated Commit Message');
+            continue;
           }
-          return;
-        }
-        break;
-      }
-    } else {
-      logger.log('info', response.text);
-      outro('Failed to parse structured output.');
-    }
 
-    reportStats(logger, modelName, response.usage, response.text.length);
+          if (action === 'regenerate') {
+            const selectedModel = await select({
+              message: 'Select AI Model for Regeneration',
+              options: KNOWN_MODELS.map(m => ({
+                value: m.name,
+                label: m.label,
+                hint: m.description,
+              })),
+            });
+            if (!isCancel(selectedModel)) {
+              modelName = String(selectedModel);
+              break; // BREAK inner loop to OUTER generation loop
+            }
+            continue; // If cancelled, stay in menu
+          }
+
+          if (action === 'commit') {
+            s.start('Committing changes...');
+            try {
+              await gitService.commitChanges(finalMessage, logger);
+              s.stop('Changes committed successfully');
+              outro(`${C.cyan}Commit successfully created!${C.reset}`);
+            } catch (e) {
+              s.stop('Commit failed');
+              cancel(`Failed to commit changes: ${e}`);
+              logger.log('error', `Commit failed: ${e}`);
+            }
+            return;
+          }
+        } // End Action Loop
+
+        // If we broke out here with action === 'regenerate', we loop back to GENERATION loop
+        if (action === 'regenerate') continue;
+      } else {
+        logger.log('info', response.text);
+        outro('Failed to parse structured output.');
+        return;
+      }
+
+      reportStats(logger, modelName, response.usage, response.text.length);
+      break; // Exit Generation Loop if done or error
+    } // End Generation Loop
   } catch (error: unknown) {
     s.stop('An error occurred'); // Stop spinner if running
     const errStr = String(error);

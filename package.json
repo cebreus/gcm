@@ -10,10 +10,9 @@
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "format": "prettier -l -w .",
-    "build": "bun build ./gcm.ts --outfile ./dist/gcm --target=node --minify"
+    "build": "bun build ./gcm.ts --outfile ./dist/gcm --target=bun --minify"
   },
   "devDependencies": {
-    "@clack/prompts": "^0.11.0",
     "@types/bun": "^1.3.4",
     "@types/minimist": "^1.2.5",
     "@typescript-eslint/eslint-plugin": "^8.50.0",
@@ -27,5 +26,8 @@
   },
   "engines": {
     "bun": ">=1"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.11.0"
   }
 }
