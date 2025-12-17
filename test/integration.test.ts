@@ -4,6 +4,27 @@ import { createGitService } from '../src/services/git-service.js';
 import { createGeminiService } from '../src/services/gemini-service.js';
 import { createContextService } from '../src/services/context-service.js';
 
+// Mock @clack/prompts
+const mockIntro = mock();
+const mockOutro = mock();
+const mockSpinner = mock(() => ({ start: mock(), stop: mock() }));
+const mockNote = mock();
+const mockSelect = mock(() => Promise.resolve('commit'));
+const mockText = mock(() => Promise.resolve('edited message'));
+const mockIsCancel = mock(() => false);
+const mockCancel = mock();
+
+mock.module('@clack/prompts', () => ({
+  intro: mockIntro,
+  outro: mockOutro,
+  spinner: mockSpinner,
+  note: mockNote,
+  select: mockSelect,
+  text: mockText,
+  isCancel: mockIsCancel,
+  cancel: mockCancel,
+}));
+
 // Mock high-level application modules - using dependency injection instead of global mocks
 const mockCallGemini = mock(async () => ({
   text: 'BRANCH: feat/test\nCOMMIT_MESSAGE: feat(test): initial commit\nPR_TITLE: Feat: initial commit\nPR_DESCRIPTION: Initial commit description.',
@@ -39,6 +60,14 @@ afterEach(() => {
   mockCreateGeminiClient.mockClear();
   mockLoggerInstance.log.mockClear();
   mockGetScopeSuggestions.mockClear();
+
+  mockIntro.mockClear();
+  mockOutro.mockClear();
+  mockSpinner.mockClear();
+  mockNote.mockClear();
+  mockSelect.mockClear();
+  mockText.mockClear();
+  mockCancel.mockClear();
 });
 
 // Mock spawn implementations for git commands
