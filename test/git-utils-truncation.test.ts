@@ -3,15 +3,19 @@ import { spawnGitStream } from '../src/git-utils';
 import type { SpawnGitStreamResult } from '../src/git-utils';
 
 async function gitUtilsTruncationTest(): Promise<void> {
-  // Run a bun command that emits a lot of output. Use execName: 'bun' to avoid git.
-  const args = ['-e', 'for(let i=0;i<10000;i++){ console.log("line"+i); }'];
+  // Generate large output using bash to ensure it's large enough to exceed 1KB
+  const args = [
+    '-c',
+    'for i in {1..500}; do echo "line-$i-with-some-padding-to-make-it-longer"; done',
+  ];
   const maxBytes = 1024; // 1 KB cap
-  const res: SpawnGitStreamResult = await spawnGitStream(args, { maxBytes, execName: 'bun' });
+  const res: SpawnGitStreamResult = await spawnGitStream(args, { maxBytes, execName: 'bash' });
   console.log('  got truncated:', res.truncated);
+  console.log('  actual length:', res.text.length);
   expect(res.truncated).toBe(true);
-  // We expect some content returned but less than or equal to maxBytes
-  // Allow some additional bytes to be captured after truncation to capture useful context
-  expect(res.text.length).toBeLessThanOrEqual(maxBytes + 4096);
-  expect(res.text).toContain('line0');
+  // We expect some content returned but truncated around maxBytes
+  // Allow some buffer for incomplete lines
+  expect(res.text.length).toBeLessThanOrEqual(maxBytes + 2048);
+  expect(res.text).toContain('line-1');
 }
 test('git-utils: truncationTest', gitUtilsTruncationTest);

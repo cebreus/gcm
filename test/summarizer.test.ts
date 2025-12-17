@@ -40,9 +40,10 @@ async function summarizerBinarySkipTest(): Promise<void> {
     spawnLinesImpl,
     spawnStreamImpl: spawnStreamImpl2,
   });
-  expect(res.text).toContain('Skipped binary files');
+  expect(res.text).toContain('Skipped binary files (content omitted):');
   expect(res.text).toContain('images/pic.jpg');
   expect(res.text).toContain('images/photo.heic');
+  expect(res.text).toContain('File: src/foo.js');
   console.log('  summarizerBinarySkipTest -> passed');
 }
 test('summarizer: binary files are skipped and summarised concisely', summarizerBinarySkipTest);

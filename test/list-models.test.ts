@@ -19,7 +19,9 @@ test('cli: --list-models prints available models', async () => {
   expect(consoleLogMock).toHaveBeenCalled();
   const firstCall = String(consoleLogMock.mock.calls[0][0]);
   expect(firstCall).toContain('Available Gemini models:');
-  const allCallsJoined = consoleLogMock.mock.calls.map((c) => (Array.isArray(c) ? c.join(' ') : String(c))).join('\n');
+  const allCallsJoined = consoleLogMock.mock.calls
+    .map(c => (Array.isArray(c) ? c.join(' ') : String(c)))
+    .join('\n');
   expect(allCallsJoined).toContain('models/gemini-2.5-flash');
   expect(allCallsJoined).toContain('models/gemini-1.5-pro');
 
