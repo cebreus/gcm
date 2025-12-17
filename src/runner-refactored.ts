@@ -18,6 +18,7 @@ import { createGitService } from './services/git-service.js';
 import { createContextService } from './services/context-service.js';
 import { createGeminiService } from './services/gemini-service.js';
 import { generateFallbackCommitDetails } from './runner-utils.js'; // Keep this for now
+import { intro, outro, spinner, note, select, text, isCancel, cancel } from '@clack/prompts';
 
 const C = {
   reset: '\x1b[0m',
@@ -114,24 +115,28 @@ export async function executeCommitMessageGeneration(
   const opts = dependencies || {};
   const parsedArgs: ParsedOptions = parseArgs(argv || process.argv.slice(2));
 
+  // Initialize Clack Intro
+  intro(`${C.bright}Gemini Commit Message Helper${C.reset}`);
+
   if (parsedArgs.help) {
     showHelp();
     return;
   }
 
   if (parsedArgs.listModels) {
-    // Handle list models logic (simplified)
     const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
     if (!apiKey) {
-      console.error('Error: set GOOGLE_GEMINI_API_KEY before running.');
+      cancel('Error: GOOGLE_GEMINI_API_KEY is not set.');
       process.exit(1);
     }
     try {
       const models = await listGeminiModels(apiKey);
-      console.log('Available Gemini models:');
-      for (const m of models) console.log('  -', m);
+      let modelList = 'Available Gemini models:\n';
+      for (const m of models) modelList += `  - ${m}\n`;
+      note(modelList);
+      outro('Done.');
     } catch (e) {
-      console.error('Failed to fetch models:', e);
+      cancel(`Failed to fetch models: ${e}`);
       process.exit(2);
     }
     return;
@@ -146,12 +151,15 @@ export async function executeCommitMessageGeneration(
   if (parsedArgs.debug) CONFIG.DEBUG_API = true;
 
   const logger = opts.logger || createLogger(loggerConfig);
+  const s = spinner();
 
   // 2. Validate Env
   const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
   if (!apiKey) {
-    logger.log('error', 'Error: set GOOGLE_GEMINI_API_KEY before running.');
-    throw new Error('Environment variable GOOGLE_GEMINI_API_KEY not set');
+    cancel('Error: Environment variable GOOGLE_GEMINI_API_KEY not set.');
+    // We throw here to exit the flow, but the catch block will handle it gracefully if we structured it right.
+    // Or simply return.
+    return;
   }
 
   const TARGET_COMMIT = parsedArgs.commit || null;
@@ -170,8 +178,14 @@ export async function executeCommitMessageGeneration(
     }
 
     // 4. Load Changes
+    s.start('Analyzing repository changes...');
     const staged = await gitService.retrieveStagedChanges(TARGET_COMMIT, logger);
-    if (!staged) return;
+    if (!staged) {
+      s.stop('No changes found');
+      cancel('No staged changes found. Use "git add" to stage files.');
+      return;
+    }
+    s.stop(`Found ${staged.stagedFiles.length} file(s) changed`);
 
     const meta: LogMetadata = {
       targetCommit: TARGET_COMMIT || null,
@@ -205,12 +219,15 @@ export async function executeCommitMessageGeneration(
     logTokenInfo(modelName, tokens, processedDiffContent.length, CONFIG.ENABLE_THINKING, logger);
     logger.log('debug', 'Run started', { targetCommit: TARGET_COMMIT ?? null, runtime });
 
+    s.start(`Generating commit message with ${modelName}...`);
+
     const response = await geminiService.callGeminiAPI(
       promptContext,
       SYSTEM_INSTRUCTIONS,
       staged.stagedFiles,
       meta,
     );
+    s.stop('Gemini response received');
 
     // 8. Handle Response / Fallback
     if (!response) {
@@ -234,20 +251,81 @@ export async function executeCommitMessageGeneration(
       parsedOut = null;
     }
 
-    if (parsedOut) displayResultStructured(logger, parsedOut);
-    else logger.log('info', response.text);
+    if (parsedOut) {
+      const message = `BRANCH: ${parsedOut.BRANCH}\n\n${parsedOut.COMMIT_MESSAGE}`;
+      note(message, 'Generated Commit Details');
+
+      let finalMessage = parsedOut.COMMIT_MESSAGE;
+      let action = null;
+
+      while (true) {
+        action = await select({
+          message: 'What would you like to do?',
+          options: [
+            { value: 'commit', label: 'Commit' },
+            { value: 'edit', label: 'Edit message' },
+            { value: 'cancel', label: 'Cancel' },
+          ],
+        });
+
+        if (isCancel(action) || action === 'cancel') {
+          outro('Commit cancelled.');
+          return;
+        }
+
+        if (action === 'edit') {
+          const edited = await text({
+            message: 'Edit commit message',
+            initialValue: finalMessage,
+            placeholder: 'Enter commit message',
+          });
+
+          if (isCancel(edited)) {
+            outro('Commit cancelled during edit.');
+            return;
+          }
+          finalMessage = String(edited);
+          // Show updated note
+          note(`BRANCH: ${parsedOut.BRANCH}\n\n${finalMessage}`, 'Updated Commit Details');
+          continue; // Loop back to menu
+        }
+
+        if (action === 'commit') {
+          s.start('Committing changes...');
+          try {
+            await gitService.commitChanges(finalMessage, logger);
+            s.stop('Changes committed successfully');
+            outro(`${C.cyan}Commit successfully created!${C.reset}`);
+          } catch (e) {
+            s.stop('Commit failed');
+            cancel(`Failed to commit changes: ${e}`);
+            logger.log('error', `Commit failed: ${e}`);
+          }
+          return;
+        }
+        break;
+      }
+    } else {
+      logger.log('info', response.text);
+      outro('Failed to parse structured output.');
+    }
 
     reportStats(logger, modelName, response.usage, response.text.length);
   } catch (error: unknown) {
+    s.stop('An error occurred'); // Stop spinner if running
     const errStr = String(error);
     if (/Not a git repository/i.test(errStr)) {
-      logger.log('error', 'Error: Not inside a git repository.');
+      cancel('Error: Not inside a git repository.');
     } else if (/unknown revision/i.test(errStr)) {
-      logger.log('error', `Error: Invalid commit SHA: ${TARGET_COMMIT}`);
+      cancel(`Error: Invalid commit SHA: ${TARGET_COMMIT}`);
     } else {
+      // Log full details for debugging
       logger.log('error', `Gemini commit helper failed: ${error}`, { error: errStr });
+      // Show user friendly message
+      cancel(`An unexpected error occurred: ${errStr}`);
     }
-    throw error;
+    // process.exit(1); // Optional: ensure non-zero exit code if wrapper doesn't handle it
+    throw error; // Re-throw if the caller needs to know, but CLI likely ends here.
   }
 }
 

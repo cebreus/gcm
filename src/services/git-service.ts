@@ -13,6 +13,7 @@ export interface GitService {
     commitHash: string | null,
     logger: Logger | null,
   ): Promise<StagedChangesResult | null>;
+  commitChanges(message: string, logger: Logger | null): Promise<void>;
 }
 
 export type GitCommandRunner = typeof spawnGitStream;
@@ -85,7 +86,15 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
     };
   }
 
+  async function commitChanges(message: string, logger: Logger | null = null): Promise<void> {
+    if (logger) logger.log('debug', 'Executing git commit');
+    // We use 'git commit -m'
+    // Note: multiline messages work fine with array args in spawn
+    await gitCommandRunner(['commit', '-m', message]);
+  }
+
   return {
     retrieveStagedChanges,
+    commitChanges,
   };
 }
