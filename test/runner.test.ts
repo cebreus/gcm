@@ -2,18 +2,25 @@ import { test, expect, mock, afterEach, afterAll } from 'bun:test';
 import { CONFIG } from '../gcm.config.js';
 
 // Mock dependencies before importing the SUT
-const summarizeLargeDiffMock = mock(async () => ({ text: 'summary', numHunks: 1, totalTruncated: 0 }));
+const summarizeLargeDiffMock = mock(async () => ({
+  text: 'summary',
+  numHunks: 1,
+  totalTruncated: 0,
+}));
 const sleepMock = mock((ms: number) => Promise.resolve());
 const ensureGitRepoMock = mock(() => true);
-const spawnGitStreamMock = mock(async (args: string[]) => ({ text: '', truncated: false, exitCode: 0 }));
-
+const spawnGitStreamMock = mock(async (args: string[]) => ({
+  text: '',
+  truncated: false,
+  exitCode: 0,
+}));
 
 mock.module('../src/summarizer', () => ({
   summarizeLargeDiff: summarizeLargeDiffMock,
 }));
 mock.module('../src/git-utils', () => ({
-    ensureGitRepo: ensureGitRepoMock,
-    spawnGitStream: spawnGitStreamMock,
+  ensureGitRepo: ensureGitRepoMock,
+  spawnGitStream: spawnGitStreamMock,
 }));
 
 // Simple patch for Bun.sleep as mock.patch.object is not available
@@ -25,9 +32,15 @@ afterAll(() => {
   Bun.sleep = originalSleep;
 });
 
-
 // Now import the module to be tested
-import { handleTokenLimitFallback, callGeminiWithRetries, loadChanges, displayResultStructured, reportStats, showHelp } from '../src/runner';
+import {
+  handleTokenLimitFallback,
+  callGeminiWithRetries,
+  loadChanges,
+  displayResultStructured,
+  reportStats,
+  showHelp,
+} from '../src/runner';
 import type { Logger } from '../src/logger';
 import type { GeminiClient, GeminiResponse } from '../src/gemini-client';
 import type { Labels } from '../src/parser';
@@ -58,14 +71,16 @@ test('runner: handleTokenLimitFallback - should use summary mode on first fallba
     input,
     maxOutputTokens,
     attempt,
-    summaryUsed
+    summaryUsed,
   );
 
   expect(summarizeLargeDiffMock).toHaveBeenCalledWith(stagedFiles);
   expect(sleepMock).toHaveBeenCalledWith(200 * attempt);
   expect(result.summaryUsed).toBe(true);
   expect(result.input).toContain('summary');
-  expect(result.input).toContain('Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following summary and truncated diff.');
+  expect(result.input).toContain(
+    'Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following summary and truncated diff.',
+  );
   expect(result.maxOutputTokens).toBe(512); // 1024 / 2
 });
 
@@ -82,7 +97,7 @@ test('runner: handleTokenLimitFallback - should shrink input on second fallback'
     input,
     maxOutputTokens,
     attempt,
-    summaryUsed
+    summaryUsed,
   );
 
   expect(summarizeLargeDiffMock).not.toHaveBeenCalled();
@@ -101,26 +116,46 @@ test('runner: handleTokenLimitFallback - should reduce maxOutputTokens by half',
 });
 
 test('runner: handleTokenLimitFallback - should cap maxOutputTokens at 256', async () => {
-    const { maxOutputTokens: max1 } = await handleTokenLimitFallback(mockLogger, [], '', 400, 1, true);
-    expect(max1).toBe(256);
+  const { maxOutputTokens: max1 } = await handleTokenLimitFallback(
+    mockLogger,
+    [],
+    '',
+    400,
+    1,
+    true,
+  );
+  expect(max1).toBe(256);
 
-    const { maxOutputTokens: max2 } = await handleTokenLimitFallback(mockLogger, [], '', 256, 1, true);
-    expect(max2).toBe(256);
-    
-    const { maxOutputTokens: max3 } = await handleTokenLimitFallback(mockLogger, [], '', 100, 1, true);
-    expect(max3).toBe(256);
+  const { maxOutputTokens: max2 } = await handleTokenLimitFallback(
+    mockLogger,
+    [],
+    '',
+    256,
+    1,
+    true,
+  );
+  expect(max2).toBe(256);
+
+  const { maxOutputTokens: max3 } = await handleTokenLimitFallback(
+    mockLogger,
+    [],
+    '',
+    100,
+    1,
+    true,
+  );
+  expect(max3).toBe(256);
 });
 
 test('runner: handleTokenLimitFallback - should calculate retry delay correctly', async () => {
-    // First fallback (summary)
-    await handleTokenLimitFallback(mockLogger, ['file.ts'], '', 1024, 1, false);
-    expect(sleepMock).toHaveBeenCalledWith(200); // 200 * 1
+  // First fallback (summary)
+  await handleTokenLimitFallback(mockLogger, ['file.ts'], '', 1024, 1, false);
+  expect(sleepMock).toHaveBeenCalledWith(200); // 200 * 1
 
-    // Second fallback (shrink)
-    await handleTokenLimitFallback(mockLogger, [], '', 1024, 3, true);
-    expect(sleepMock).toHaveBeenCalledWith(1500); // 500 * 3
+  // Second fallback (shrink)
+  await handleTokenLimitFallback(mockLogger, [], '', 1024, 3, true);
+  expect(sleepMock).toHaveBeenCalledWith(1500); // 500 * 3
 });
-
 
 // --- Tests for callGeminiWithRetries ---
 
@@ -134,233 +169,361 @@ const mockGeminiClient: GeminiClient = {
   callGemini: callGeminiMock,
 };
 const handleTokenLimitFallbackMock = mock(async (logger, files, input, max, attempt, summary) => ({
-    input: 'fallback input',
-    maxOutputTokens: max / 2,
-    summaryUsed: true,
+  input: 'fallback input',
+  maxOutputTokens: max / 2,
+  summaryUsed: true,
 }));
 
 afterEach(() => {
-    callGeminiMock.mockClear();
-    handleTokenLimitFallbackMock.mockClear();
+  callGeminiMock.mockClear();
+  handleTokenLimitFallbackMock.mockClear();
 });
 
 test('runner: callGeminiWithRetries - should return on first successful attempt', async () => {
-    const response = await callGeminiWithRetries(mockLogger, mockGeminiClient, 'api-key', 'input', false, {}, {}, [], 3, handleTokenLimitFallbackMock);
-    
-    expect(response).toEqual(mockSuccessResponse);
-    expect(callGeminiMock).toHaveBeenCalledTimes(1);
-    expect(handleTokenLimitFallbackMock).not.toHaveBeenCalled();
+  const response = await callGeminiWithRetries(
+    mockLogger,
+    mockGeminiClient,
+    'api-key',
+    'input',
+    false,
+    {},
+    {},
+    [],
+    3,
+    handleTokenLimitFallbackMock,
+  );
+
+  expect(response).toEqual(mockSuccessResponse);
+  expect(callGeminiMock).toHaveBeenCalledTimes(1);
+  expect(handleTokenLimitFallbackMock).not.toHaveBeenCalled();
 });
 
 test('runner: callGeminiWithRetries - should trigger fallback on MAX_TOKENS error', async () => {
-    callGeminiMock.mockRejectedValueOnce(new Error('MAX_TOKENS'));
-    callGeminiMock.mockResolvedValueOnce(mockSuccessResponse);
+  callGeminiMock.mockRejectedValueOnce(new Error('MAX_TOKENS'));
+  callGeminiMock.mockResolvedValueOnce(mockSuccessResponse);
 
-    const response = await callGeminiWithRetries(mockLogger, mockGeminiClient, 'api-key', 'input', false, {}, {}, [], 3, handleTokenLimitFallbackMock);
+  const response = await callGeminiWithRetries(
+    mockLogger,
+    mockGeminiClient,
+    'api-key',
+    'input',
+    false,
+    {},
+    {},
+    [],
+    3,
+    handleTokenLimitFallbackMock,
+  );
 
-    expect(response).toEqual(mockSuccessResponse);
-    expect(callGeminiMock).toHaveBeenCalledTimes(2);
-    expect(handleTokenLimitFallbackMock).toHaveBeenCalledTimes(1);
-    expect(handleTokenLimitFallbackMock).toHaveBeenCalledWith(mockLogger, [], 'input', CONFIG.MAX_OUTPUT_TOKENS, 1, false);
+  expect(response).toEqual(mockSuccessResponse);
+  expect(callGeminiMock).toHaveBeenCalledTimes(2);
+  expect(handleTokenLimitFallbackMock).toHaveBeenCalledTimes(1);
+  expect(handleTokenLimitFallbackMock).toHaveBeenCalledWith(
+    mockLogger,
+    [],
+    'input',
+    CONFIG.MAX_OUTPUT_TOKENS,
+    1,
+    false,
+  );
 });
 
 test('runner: callGeminiWithRetries - should trigger fallback on "returned no text" error', async () => {
-    callGeminiMock.mockRejectedValueOnce(new Error('Gemini returned no text'));
-    callGeminiMock.mockResolvedValueOnce(mockSuccessResponse);
+  callGeminiMock.mockRejectedValueOnce(new Error('Gemini returned no text'));
+  callGeminiMock.mockResolvedValueOnce(mockSuccessResponse);
 
-    await callGeminiWithRetries(mockLogger, mockGeminiClient, 'api-key', 'input', false, {}, {}, [], 3, handleTokenLimitFallbackMock);
+  await callGeminiWithRetries(
+    mockLogger,
+    mockGeminiClient,
+    'api-key',
+    'input',
+    false,
+    {},
+    {},
+    [],
+    3,
+    handleTokenLimitFallbackMock,
+  );
 
-    expect(callGeminiMock).toHaveBeenCalledTimes(2);
-    expect(handleTokenLimitFallbackMock).toHaveBeenCalledTimes(1);
+  expect(callGeminiMock).toHaveBeenCalledTimes(2);
+  expect(handleTokenLimitFallbackMock).toHaveBeenCalledTimes(1);
 });
 
-
 test('runner: callGeminiWithRetries - should throw after max attempts are reached', async () => {
-    callGeminiMock.mockRejectedValue(new Error('MAX_TOKENS'));
-    
-    const promise = callGeminiWithRetries(mockLogger, mockGeminiClient, 'api-key', 'input', false, {}, {}, [], 2, handleTokenLimitFallbackMock);
-    
-    await expect(promise).rejects.toThrow('MAX_TOKENS');
-    expect(callGeminiMock).toHaveBeenCalledTimes(2);
-    expect(handleTokenLimitFallbackMock).toHaveBeenCalledTimes(1);
+  callGeminiMock.mockRejectedValue(new Error('MAX_TOKENS'));
+
+  const promise = callGeminiWithRetries(
+    mockLogger,
+    mockGeminiClient,
+    'api-key',
+    'input',
+    false,
+    {},
+    {},
+    [],
+    2,
+    handleTokenLimitFallbackMock,
+  );
+
+  await expect(promise).rejects.toThrow('MAX_TOKENS');
+  expect(callGeminiMock).toHaveBeenCalledTimes(2);
+  expect(handleTokenLimitFallbackMock).toHaveBeenCalledTimes(1);
 });
 
 test('runner: callGeminiWithRetries - should modify input through fallback chain', async () => {
-    callGeminiMock.mockRejectedValueOnce(new Error('MAX_TOKENS'));
-    callGeminiMock.mockResolvedValueOnce(mockSuccessResponse);
+  callGeminiMock.mockRejectedValueOnce(new Error('MAX_TOKENS'));
+  callGeminiMock.mockResolvedValueOnce(mockSuccessResponse);
 
-    handleTokenLimitFallbackMock.mockResolvedValueOnce({
-        input: 'new input',
-        maxOutputTokens: 1024,
-        summaryUsed: true,
-    });
+  handleTokenLimitFallbackMock.mockResolvedValueOnce({
+    input: 'new input',
+    maxOutputTokens: 1024,
+    summaryUsed: true,
+  });
 
-    await callGeminiWithRetries(mockLogger, mockGeminiClient, 'api-key', 'original input', false, {}, {}, [], 3, handleTokenLimitFallbackMock);
+  await callGeminiWithRetries(
+    mockLogger,
+    mockGeminiClient,
+    'api-key',
+    'original input',
+    false,
+    {},
+    {},
+    [],
+    3,
+    handleTokenLimitFallbackMock,
+  );
 
-    expect(handleTokenLimitFallbackMock).toHaveBeenCalledWith(mockLogger, [], 'original input', CONFIG.MAX_OUTPUT_TOKENS, 1, false);
-    // The second call to gemini should have the modified input
-    expect(callGeminiMock).toHaveBeenCalledWith('api-key', 'new input', false, {}, expect.any(Object));
+  expect(handleTokenLimitFallbackMock).toHaveBeenCalledWith(
+    mockLogger,
+    [],
+    'original input',
+    CONFIG.MAX_OUTPUT_TOKENS,
+    1,
+    false,
+  );
+  // The second call to gemini should have the modified input
+  expect(callGeminiMock).toHaveBeenCalledWith(
+    'api-key',
+    'new input',
+    false,
+    {},
+    expect.any(Object),
+  );
 });
 
 test('runner: callGeminiWithRetries - should toggle summaryUsed flag correctly', async () => {
-    callGeminiMock.mockRejectedValueOnce(new Error('MAX_TOKENS'));
-    callGeminiMock.mockRejectedValueOnce(new Error('MAX_TOKENS'));
-    callGeminiMock.mockResolvedValueOnce(mockSuccessResponse);
+  callGeminiMock.mockRejectedValueOnce(new Error('MAX_TOKENS'));
+  callGeminiMock.mockRejectedValueOnce(new Error('MAX_TOKENS'));
+  callGeminiMock.mockResolvedValueOnce(mockSuccessResponse);
 
-    // First fallback will set summaryUsed to true
-    handleTokenLimitFallbackMock.mockResolvedValueOnce({ input: 'summary input', maxOutputTokens: 4096, summaryUsed: true });
-    // Second fallback will receive summaryUsed=true
-    handleTokenLimitFallbackMock.mockResolvedValueOnce({ input: 'shrunk input', maxOutputTokens: 2048, summaryUsed: true });
-    
-    await callGeminiWithRetries(mockLogger, mockGeminiClient, 'api-key', 'original', false, {}, {}, ['file.ts'], 3, handleTokenLimitFallbackMock);
+  // First fallback will set summaryUsed to true
+  handleTokenLimitFallbackMock.mockResolvedValueOnce({
+    input: 'summary input',
+    maxOutputTokens: 4096,
+    summaryUsed: true,
+  });
+  // Second fallback will receive summaryUsed=true
+  handleTokenLimitFallbackMock.mockResolvedValueOnce({
+    input: 'shrunk input',
+    maxOutputTokens: 2048,
+    summaryUsed: true,
+  });
 
-    expect(handleTokenLimitFallbackMock).toHaveBeenCalledTimes(2);
-    expect(handleTokenLimitFallbackMock).toHaveBeenCalledWith(mockLogger, ['file.ts'], 'original', CONFIG.MAX_OUTPUT_TOKENS, 1, false);
-    expect(handleTokenLimitFallbackMock).toHaveBeenCalledWith(mockLogger, ['file.ts'], 'summary input', 4096, 2, true);
+  await callGeminiWithRetries(
+    mockLogger,
+    mockGeminiClient,
+    'api-key',
+    'original',
+    false,
+    {},
+    {},
+    ['file.ts'],
+    3,
+    handleTokenLimitFallbackMock,
+  );
+
+  expect(handleTokenLimitFallbackMock).toHaveBeenCalledTimes(2);
+  expect(handleTokenLimitFallbackMock).toHaveBeenCalledWith(
+    mockLogger,
+    ['file.ts'],
+    'original',
+    CONFIG.MAX_OUTPUT_TOKENS,
+    1,
+    false,
+  );
+  expect(handleTokenLimitFallbackMock).toHaveBeenCalledWith(
+    mockLogger,
+    ['file.ts'],
+    'summary input',
+    4096,
+    2,
+    true,
+  );
 });
 
 // --- Tests for loadChanges ---
 test('runner: loadChanges - should get staged changes by default', async () => {
-    ensureGitRepoMock.mockReturnValue(true);
-    spawnGitStreamMock.mockImplementation(async (args: string[]) => {
-        if (args.includes('--name-only')) {
-            return { text: 'file1.ts\nfile2.ts', truncated: false, exitCode: 0 };
-        }
-        return { text: 'diff --staged', truncated: false, exitCode: 0 };
-    });
+  ensureGitRepoMock.mockReturnValue(true);
+  spawnGitStreamMock.mockImplementation(async (args: string[]) => {
+    if (args.includes('--name-only')) {
+      return { text: 'file1.ts\nfile2.ts', truncated: false, exitCode: 0 };
+    }
+    return { text: 'diff --staged', truncated: false, exitCode: 0 };
+  });
 
-    const result = await loadChanges(null, { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
+  const result = await loadChanges(null, { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
 
-    expect(result?.stagedDiff).toBe('diff --staged');
-    expect(result?.stagedFiles).toEqual(['file1.ts', 'file2.ts']);
-    expect(spawnGitStreamMock).toHaveBeenCalledWith(['diff', '--staged', '-w']);
-    expect(spawnGitStreamMock).toHaveBeenCalledWith(['diff', '--staged', '-w', '--name-only']);
+  expect(result?.stagedDiff).toBe('diff --staged');
+  expect(result?.stagedFiles).toEqual(['file1.ts', 'file2.ts']);
+  expect(spawnGitStreamMock).toHaveBeenCalledWith(['diff', '--staged', '-w']);
+  expect(spawnGitStreamMock).toHaveBeenCalledWith(['diff', '--staged', '-w', '--name-only']);
 });
 
 test('runner: loadChanges - should get commit changes when hash is provided', async () => {
-    ensureGitRepoMock.mockReturnValue(true);
-    spawnGitStreamMock.mockImplementation(async (args: string[]) => {
-        if (args.includes('--name-only')) {
-            return { text: 'file1.ts\nfile2.ts', truncated: false, exitCode: 0 };
-        }
-        if (args.includes('show')) {
-            return { text: 'diff for commit', truncated: false, exitCode: 0 };
-        }
-        return { text: '', truncated: false, exitCode: 0 };
-    });
+  ensureGitRepoMock.mockReturnValue(true);
+  spawnGitStreamMock.mockImplementation(async (args: string[]) => {
+    if (args.includes('--name-only')) {
+      return { text: 'file1.ts\nfile2.ts', truncated: false, exitCode: 0 };
+    }
+    if (args.includes('show')) {
+      return { text: 'diff for commit', truncated: false, exitCode: 0 };
+    }
+    return { text: '', truncated: false, exitCode: 0 };
+  });
 
-    const result = await loadChanges('a1b2c3d', { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
+  const result = await loadChanges('a1b2c3d', { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
 
-    expect(result?.stagedDiff).toBe('diff for commit');
-    expect(result?.stagedFiles).toEqual(['file1.ts', 'file2.ts']);
-    expect(spawnGitStreamMock).toHaveBeenCalledWith(['show', '-w', 'a1b2c3d']);
-    expect(spawnGitStreamMock).toHaveBeenCalledWith(['show', '-w', '--name-only', '--pretty=format:', 'a1b2c3d']);
+  expect(result?.stagedDiff).toBe('diff for commit');
+  expect(result?.stagedFiles).toEqual(['file1.ts', 'file2.ts']);
+  expect(spawnGitStreamMock).toHaveBeenCalledWith(['show', '-w', 'a1b2c3d']);
+  expect(spawnGitStreamMock).toHaveBeenCalledWith([
+    'show',
+    '-w',
+    '--name-only',
+    '--pretty=format:',
+    'a1b2c3d',
+  ]);
 });
 
 test('runner: loadChanges - should return null for no staged changes', async () => {
-    ensureGitRepoMock.mockReturnValue(true);
-    spawnGitStreamMock.mockResolvedValue({ text: '  ', truncated: false, exitCode: 0 });
-    const result = await loadChanges(null, { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
-    expect(result).toBeNull();
-    expect(mockLogger.log).toHaveBeenCalledWith('info', 'No staged changes found. Use `git add` to stage files for commit.');
+  ensureGitRepoMock.mockReturnValue(true);
+  spawnGitStreamMock.mockResolvedValue({ text: '  ', truncated: false, exitCode: 0 });
+  const result = await loadChanges(null, { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
+  expect(result).toBeNull();
+  expect(mockLogger.log).toHaveBeenCalledWith(
+    'info',
+    'No staged changes found. Use `git add` to stage files for commit.',
+  );
 });
 
 test('runner: loadChanges - should return null for no changes in commit', async () => {
-    ensureGitRepoMock.mockReturnValue(true);
-    spawnGitStreamMock.mockResolvedValue({ text: '', truncated: false, exitCode: 0 });
-    const result = await loadChanges('a1b2c3d', { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
-    expect(result).toBeNull();
-    expect(mockLogger.log).toHaveBeenCalledWith('info', 'No changes found in commit a1b2c3d.');
+  ensureGitRepoMock.mockReturnValue(true);
+  spawnGitStreamMock.mockResolvedValue({ text: '', truncated: false, exitCode: 0 });
+  const result = await loadChanges('a1b2c3d', { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
+  expect(result).toBeNull();
+  expect(mockLogger.log).toHaveBeenCalledWith('info', 'No changes found in commit a1b2c3d.');
 });
 
 test('runner: loadChanges - should handle truncated flag', async () => {
-    ensureGitRepoMock.mockReturnValue(true);
-    spawnGitStreamMock.mockResolvedValue({ text: 'diff', truncated: true, exitCode: 0 });
-    const result = await loadChanges(null, { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
-    expect(result?.truncated).toBe(true);
+  ensureGitRepoMock.mockReturnValue(true);
+  spawnGitStreamMock.mockResolvedValue({ text: 'diff', truncated: true, exitCode: 0 });
+  const result = await loadChanges(null, { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
+  expect(result?.truncated).toBe(true);
 });
 
 test('runner: loadChanges - should throw if not in a git repo', async () => {
-    ensureGitRepoMock.mockReturnValue(false);
-    await expect(loadChanges(null, { spawnStreamImpl: spawnGitStreamMock }, mockLogger)).rejects.toThrow('Not a git repository');
+  ensureGitRepoMock.mockReturnValue(false);
+  await expect(
+    loadChanges(null, { spawnStreamImpl: spawnGitStreamMock }, mockLogger),
+  ).rejects.toThrow('Not a git repository');
 });
 
 test('runner: loadChanges - should correctly parse file list', async () => {
-    ensureGitRepoMock.mockReturnValue(true);
-    spawnGitStreamMock.mockImplementation(async (args: string[]) => {
-        if (args.includes('--name-only')) {
-            return { text: 'file1.ts\nfile2.ts\n\n', truncated: false, exitCode: 0 };
-        }
-        return { text: 'diff', truncated: false, exitCode: 0 };
-    });
-    const result = await loadChanges(null, { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
-    expect(result?.stagedFiles).toEqual(['file1.ts', 'file2.ts']);
+  ensureGitRepoMock.mockReturnValue(true);
+  spawnGitStreamMock.mockImplementation(async (args: string[]) => {
+    if (args.includes('--name-only')) {
+      return { text: 'file1.ts\nfile2.ts\n\n', truncated: false, exitCode: 0 };
+    }
+    return { text: 'diff', truncated: false, exitCode: 0 };
+  });
+  const result = await loadChanges(null, { spawnStreamImpl: spawnGitStreamMock }, mockLogger);
+  expect(result?.stagedFiles).toEqual(['file1.ts', 'file2.ts']);
 });
 
 // --- Tests for displayResultStructured ---
 test('runner: displayResultStructured - should format with all fields', () => {
-    const labels: Labels = {
-        BRANCH: 'feat/new-thing',
-        COMMIT_MESSAGE: 'feat(core): add new thing',
-        PR_TITLE: 'feat(core): add new thing',
-        PR_DESCRIPTION: 'This is a new thing.'
-    };
-    displayResultStructured(mockLogger, labels);
-    const logCall = (mockLogger.log as any).mock.calls[0][1];
-    const cleanLog = logCall.replace(/\u001b\[[0-9;]*m/g, '');
-    expect(cleanLog).toContain('BRANCH:');
-    expect(cleanLog).toContain('feat/new-thing');
-    expect(cleanLog).toContain('COMMIT_MESSAGE:');
-    expect(cleanLog).toContain('feat(core): add new thing');
-    expect(cleanLog).toContain('PR_TITLE:');
-    expect(cleanLog).toContain('PR_DESCRIPTION:');
-    expect(cleanLog).toContain('This is a new thing.');
+  const labels: Labels = {
+    BRANCH: 'feat/new-thing',
+    COMMIT_MESSAGE: 'feat(core): add new thing',
+    PR_TITLE: 'feat(core): add new thing',
+    PR_DESCRIPTION: 'This is a new thing.',
+  };
+  displayResultStructured(mockLogger, labels);
+  const logCall = (mockLogger.log as any).mock.calls[0][1];
+  const cleanLog = logCall.replace(/\u001b\[[0-9;]*m/g, '');
+  expect(cleanLog).toContain('BRANCH:');
+  expect(cleanLog).toContain('feat/new-thing');
+  expect(cleanLog).toContain('COMMIT_MESSAGE:');
+  expect(cleanLog).toContain('feat(core): add new thing');
+  expect(cleanLog).toContain('PR_TITLE:');
+  expect(cleanLog).toContain('PR_DESCRIPTION:');
+  expect(cleanLog).toContain('This is a new thing.');
 });
 
 test('runner: displayResultStructured - should handle missing optional fields', () => {
-    const labels: Labels = {
-        BRANCH: 'fix/bug',
-        COMMIT_MESSAGE: 'fix(ci): fix bug',
-        PR_TITLE: 'fix(ci): fix bug',
-        PR_DESCRIPTION: '', // Missing
-    };
-    displayResultStructured(mockLogger, labels);
-    const logCall = (mockLogger.log as any).mock.calls[0][1];
-    const cleanLog = logCall.replace(/\u001b\[[0-9;]*m/g, '');
-    expect(cleanLog).toContain('PR_DESCRIPTION:\n\n');
-    expect(cleanLog).not.toContain('undefined');
+  const labels: Labels = {
+    BRANCH: 'fix/bug',
+    COMMIT_MESSAGE: 'fix(ci): fix bug',
+    PR_TITLE: 'fix(ci): fix bug',
+    PR_DESCRIPTION: '', // Missing
+  };
+  displayResultStructured(mockLogger, labels);
+  const logCall = (mockLogger.log as any).mock.calls[0][1];
+  const cleanLog = logCall.replace(/\u001b\[[0-9;]*m/g, '');
+  expect(cleanLog).toContain('PR_DESCRIPTION:\n\n');
+  expect(cleanLog).not.toContain('undefined');
 });
 
 // --- Tests for reportStats ---
 test('runner: reportStats - should format basic stats', () => {
-    reportStats(mockLogger, 'model-1', { promptTokens: 100, outputTokens: 50, thinkingTokens: 0 }, 200);
-    const logCall = (mockLogger.log as any).mock.calls[0][1];
-    expect(logCall).toContain('model-1');
-    expect(logCall).toContain('input: 100 tokens');
-    expect(logCall).toContain('output: 50 tokens');
-    expect(logCall).toContain('200 chars');
-    expect(logCall).not.toContain('thinking');
+  reportStats(
+    mockLogger,
+    'model-1',
+    { promptTokens: 100, outputTokens: 50, thinkingTokens: 0 },
+    200,
+  );
+  const logCall = (mockLogger.log as any).mock.calls[0][1];
+  expect(logCall).toContain('model-1');
+  expect(logCall).toContain('input: 100 tokens');
+  expect(logCall).toContain('output: 50 tokens');
+  expect(logCall).toContain('200 chars');
+  expect(logCall).not.toContain('thinking');
 });
 
 test('runner: reportStats - should include thinking tokens when present', () => {
-    reportStats(mockLogger, 'model-2', { promptTokens: 100, outputTokens: 50, thinkingTokens: 1000 }, 200);
-    const logCall = (mockLogger.log as any).mock.calls[0][1];
-    expect(logCall).toContain('thinking: 1000');
+  reportStats(
+    mockLogger,
+    'model-2',
+    { promptTokens: 100, outputTokens: 50, thinkingTokens: 1000 },
+    200,
+  );
+  const logCall = (mockLogger.log as any).mock.calls[0][1];
+  expect(logCall).toContain('thinking: 1000');
 });
 
 // --- Tests for showHelp ---
 test('runner: showHelp - should print help text', () => {
-    const consoleLogMock = mock(() => {});
-    const originalConsoleLog = console.log;
-    console.log = consoleLogMock;
+  const consoleLogMock = mock(() => {});
+  const originalConsoleLog = console.log;
+  console.log = consoleLogMock;
 
-    showHelp();
+  showHelp();
 
-    expect(consoleLogMock).toHaveBeenCalled();
-    const helpText = consoleLogMock.mock.calls[0][0];
-    expect(helpText).toContain('Usage:');
-    expect(helpText).toContain('Options:');
-    expect(helpText).toContain('gcm [options]');
+  expect(consoleLogMock).toHaveBeenCalled();
+  const helpText = consoleLogMock.mock.calls[0][0];
+  expect(helpText).toContain('Usage:');
+  expect(helpText).toContain('Options:');
+  expect(helpText).toContain('gcm [options]');
 
-    console.log = originalConsoleLog;
+  console.log = originalConsoleLog;
 });

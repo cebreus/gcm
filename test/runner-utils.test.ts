@@ -45,13 +45,16 @@ test('runner-utils: buildUserContent - should add truncation note when truncated
 });
 
 test('runner-utils: buildUserContent - should handle different prompt suffixes', () => {
-    const result1 = buildUserContent({ input: 'd1', promptSuffix: 'diff', truncated: false });
-    expect(result1).toContain('based on the following diff');
+  const result1 = buildUserContent({ input: 'd1', promptSuffix: 'diff', truncated: false });
+  expect(result1).toContain('based on the following diff');
 
-    const result2 = buildUserContent({ input: 'd2', promptSuffix: 'summary and truncated diff', truncated: false });
-    expect(result2).toContain('based on the following summary and truncated diff');
+  const result2 = buildUserContent({
+    input: 'd2',
+    promptSuffix: 'summary and truncated diff',
+    truncated: false,
+  });
+  expect(result2).toContain('based on the following summary and truncated diff');
 });
-
 
 // --- Tests for buildFallbackStructured ---
 test('runner-utils: buildFallbackStructured - should handle a single file', () => {
@@ -83,29 +86,34 @@ const mockDisplayRaw = mock((text: string) => {});
 const mockLogger = { log: mock(() => {}) };
 
 test('runner-utils: parseAndDisplay - should call displayStructured on success', () => {
-    // This raw text is a simplified version of what the parser expects
-    const rawText = 'BRANCH: feat/test\nCOMMIT_MESSAGE: feat(test): my commit\nPR_TITLE: My PR\nPR_DESCRIPTION: desc';
-    const result = parseAndDisplay(rawText, mockDisplayStructured, mockDisplayRaw, mockLogger as any);
+  // This raw text is a simplified version of what the parser expects
+  const rawText =
+    'BRANCH: feat/test\nCOMMIT_MESSAGE: feat(test): my commit\nPR_TITLE: My PR\nPR_DESCRIPTION: desc';
+  const result = parseAndDisplay(rawText, mockDisplayStructured, mockDisplayRaw, mockLogger as any);
 
-    expect(result.parsed).toBe(true);
-    expect(mockDisplayStructured).toHaveBeenCalled();
-    expect(mockDisplayStructured.mock.calls[0][0]).toEqual({
-        BRANCH: 'feat/test',
-        COMMIT_MESSAGE: 'feat(test): my commit',
-        PR_TITLE: 'My PR',
-        PR_DESCRIPTION: 'desc',
-    });
-    expect(mockDisplayRaw).not.toHaveBeenCalled();
-    expect(mockLogger.log).not.toHaveBeenCalled();
+  expect(result.parsed).toBe(true);
+  expect(mockDisplayStructured).toHaveBeenCalled();
+  expect(mockDisplayStructured.mock.calls[0][0]).toEqual({
+    BRANCH: 'feat/test',
+    COMMIT_MESSAGE: 'feat(test): my commit',
+    PR_TITLE: 'My PR',
+    PR_DESCRIPTION: 'desc',
+  });
+  expect(mockDisplayRaw).not.toHaveBeenCalled();
+  expect(mockLogger.log).not.toHaveBeenCalled();
 });
 
 test('runner-utils: parseAndDisplay - should call displayRaw on failure', () => {
-    mockDisplayStructured.mockClear();
-    const rawText = 'just some raw text without labels';
-    const result = parseAndDisplay(rawText, mockDisplayStructured, mockDisplayRaw, mockLogger as any);
+  mockDisplayStructured.mockClear();
+  const rawText = 'just some raw text without labels';
+  const result = parseAndDisplay(rawText, mockDisplayStructured, mockDisplayRaw, mockLogger as any);
 
-    expect(result.parsed).toBe(false);
-    expect(mockDisplayRaw).toHaveBeenCalledWith(rawText);
-    expect(mockLogger.log).toHaveBeenCalledWith('warn', 'Failed to parse gemini output; printing raw output', expect.any(Object));
-    expect(mockDisplayStructured).not.toHaveBeenCalled();
+  expect(result.parsed).toBe(false);
+  expect(mockDisplayRaw).toHaveBeenCalledWith(rawText);
+  expect(mockLogger.log).toHaveBeenCalledWith(
+    'warn',
+    'Failed to parse gemini output; printing raw output',
+    expect.any(Object),
+  );
+  expect(mockDisplayStructured).not.toHaveBeenCalled();
 });

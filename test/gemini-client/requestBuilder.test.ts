@@ -32,34 +32,39 @@ test('requestBuilder: should allow overriding maxOutputTokens', () => {
 
 test('requestBuilder: should include system instructions when provided', () => {
   const instructions = 'You are a helpful assistant.';
-  const body = buildRequestBody('test content', testConfig, { systemInstructions: instructions }, false);
+  const body = buildRequestBody(
+    'test content',
+    testConfig,
+    { systemInstructions: instructions },
+    false,
+  );
   expect(body.systemInstruction.parts[0].text).toBe(instructions);
 });
 
 test('requestBuilder: should use temperature from config', () => {
-    testConfig.TEMPERATURE = 0.5;
-    const body = buildRequestBody('test content', testConfig, {}, false);
-    expect(body.generationConfig.temperature).toBe(0.5);
-    // Reset for other tests
-    testConfig.TEMPERATURE = CONFIG.TEMPERATURE;
+  testConfig.TEMPERATURE = 0.5;
+  const body = buildRequestBody('test content', testConfig, {}, false);
+  expect(body.generationConfig.temperature).toBe(0.5);
+  // Reset for other tests
+  testConfig.TEMPERATURE = CONFIG.TEMPERATURE;
 });
 
 test('requestBuilder: should build a valid request body with all options', () => {
-    const instructions = 'System instructions here.';
-    const body = buildRequestBody(
-        'User content here.',
-        testConfig,
-        { systemInstructions: instructions, maxOutputTokens: 500 },
-        true
-    );
+  const instructions = 'System instructions here.';
+  const body = buildRequestBody(
+    'User content here.',
+    testConfig,
+    { systemInstructions: instructions, maxOutputTokens: 500 },
+    true,
+  );
 
-    expect(body).toEqual({
-        contents: [{ role: 'user', parts: [{ text: 'User content here.' }] }],
-        systemInstruction: { parts: [{ text: instructions }] },
-        generationConfig: {
-            temperature: testConfig.TEMPERATURE,
-            maxOutputTokens: 500,
-            thinkingConfig: { thinkingMode: 'THINKING_MODE_EXTENDED' },
-        },
-    });
+  expect(body).toEqual({
+    contents: [{ role: 'user', parts: [{ text: 'User content here.' }] }],
+    systemInstruction: { parts: [{ text: instructions }] },
+    generationConfig: {
+      temperature: testConfig.TEMPERATURE,
+      maxOutputTokens: 500,
+      thinkingConfig: { thinkingMode: 'THINKING_MODE_EXTENDED' },
+    },
+  });
 });

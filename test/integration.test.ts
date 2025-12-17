@@ -48,7 +48,10 @@ async function mockSpawnStreamImpl(args: string[]): Promise<{ text: string; trun
     return { text: 'file1.ts\nfile2.js', truncated: false };
   }
   if (cmd.includes('diff --staged -w')) {
-    return { text: 'diff --git a/file1.ts b/file1.ts\n--- a/file1.ts\n+++ b/file1.ts\n@@ -1 +1 @@\n-old\n+new', truncated: false };
+    return {
+      text: 'diff --git a/file1.ts b/file1.ts\n--- a/file1.ts\n+++ b/file1.ts\n@@ -1 +1 @@\n-old\n+new',
+      truncated: false,
+    };
   }
   if (cmd.includes('show -w a1b2c3d --name-only')) {
     return { text: 'src/index.js', truncated: false };
@@ -61,7 +64,14 @@ async function mockSpawnStreamImpl(args: string[]): Promise<{ text: string; trun
 
 // --- Integration Tests ---
 test('integration: end-to-end - stage files -> generate commit message', async () => {
-  mockParseArgs.mockReturnValueOnce({ commit: null, dryRun: false, help: false, model: null, verbose: false, debug: false });
+  mockParseArgs.mockReturnValueOnce({
+    commit: null,
+    dryRun: false,
+    help: false,
+    model: null,
+    verbose: false,
+    debug: false,
+  });
 
   await runnerRun([], {
     spawnStreamImpl: mockSpawnStreamImpl,
@@ -75,99 +85,137 @@ test('integration: end-to-end - stage files -> generate commit message', async (
 });
 
 test('integration: end-to-end - analyze specific commit', async () => {
-    mockParseArgs.mockReturnValueOnce({ commit: 'a1b2c3d', dryRun: false, help: false, model: null, verbose: false, debug: false });
+  mockParseArgs.mockReturnValueOnce({
+    commit: 'a1b2c3d',
+    dryRun: false,
+    help: false,
+    model: null,
+    verbose: false,
+    debug: false,
+  });
 
-    await runnerRun(['-c', 'a1b2c3d'], {
-      spawnStreamImpl: mockSpawnStreamImpl,
-      createGeminiClient: mockCreateGeminiClient,
-    });
+  await runnerRun(['-c', 'a1b2c3d'], {
+    spawnStreamImpl: mockSpawnStreamImpl,
+    createGeminiClient: mockCreateGeminiClient,
+  });
 
-    expect(mockParseArgs).toHaveBeenCalledWith(['-c', 'a1b2c3d']);
-    expect(mockGeminiClient.callGemini).toHaveBeenCalled();
-    expect(mockGetScopeSuggestions).toHaveBeenCalledWith(['src/index.js']);
+  expect(mockParseArgs).toHaveBeenCalledWith(['-c', 'a1b2c3d']);
+  expect(mockGeminiClient.callGemini).toHaveBeenCalled();
+  expect(mockGetScopeSuggestions).toHaveBeenCalledWith(['src/index.js']);
 });
 
 test('integration: token limit scenario - should trigger fallback', async () => {
-    mockParseArgs.mockReturnValueOnce({ commit: null, dryRun: false, help: false, model: null, verbose: false, debug: false });
-    mockCallGemini.mockRejectedValueOnce(new Error('MAX_TOKENS')); // First call fails
-    mockCallGemini.mockResolvedValueOnce({
-      text: 'BRANCH: feat/success\nCOMMIT_MESSAGE: feat(success): it worked\nPR_TITLE: Success\nPR_DESCRIPTION: It worked.',
-      usage: { promptTokens: 10, outputTokens: 5, thinkingTokens: 0 },
-    }); // Second call succeeds
+  mockParseArgs.mockReturnValueOnce({
+    commit: null,
+    dryRun: false,
+    help: false,
+    model: null,
+    verbose: false,
+    debug: false,
+  });
+  mockCallGemini.mockRejectedValueOnce(new Error('MAX_TOKENS')); // First call fails
+  mockCallGemini.mockResolvedValueOnce({
+    text: 'BRANCH: feat/success\nCOMMIT_MESSAGE: feat(success): it worked\nPR_TITLE: Success\nPR_DESCRIPTION: It worked.',
+    usage: { promptTokens: 10, outputTokens: 5, thinkingTokens: 0 },
+  }); // Second call succeeds
 
-    await runnerRun([], {
-      spawnStreamImpl: mockSpawnStreamImpl,
-      createGeminiClient: mockCreateGeminiClient,
-    });
+  await runnerRun([], {
+    spawnStreamImpl: mockSpawnStreamImpl,
+    createGeminiClient: mockCreateGeminiClient,
+  });
 
-    expect(mockCallGemini).toHaveBeenCalledTimes(2);
+  expect(mockCallGemini).toHaveBeenCalledTimes(2);
 });
 
 test('integration: should handle various file types', async () => {
-    mockParseArgs.mockReturnValueOnce({ commit: null, dryRun: false, help: false, model: null, verbose: false, debug: false });
+  mockParseArgs.mockReturnValueOnce({
+    commit: null,
+    dryRun: false,
+    help: false,
+    model: null,
+    verbose: false,
+    debug: false,
+  });
 
-    async function customSpawnStreamImpl(args: string[]): Promise<{ text: string; truncated: boolean }> {
-      const cmd = args.join(' ');
-      if (cmd.includes('rev-parse --is-inside-work-tree')) {
-        return { text: '', truncated: false };
-      }
-      if (cmd.includes('diff --staged --name-only')) {
-        return { text: 'src/component.tsx\nstyles/main.css\nREADME.md', truncated: false };
-      }
-      if (cmd.includes('diff --staged -w')) {
-        return { text: 'diff for multiple files', truncated: false };
-      }
+  async function customSpawnStreamImpl(
+    args: string[],
+  ): Promise<{ text: string; truncated: boolean }> {
+    const cmd = args.join(' ');
+    if (cmd.includes('rev-parse --is-inside-work-tree')) {
       return { text: '', truncated: false };
     }
+    if (cmd.includes('diff --staged --name-only')) {
+      return { text: 'src/component.tsx\nstyles/main.css\nREADME.md', truncated: false };
+    }
+    if (cmd.includes('diff --staged -w')) {
+      return { text: 'diff for multiple files', truncated: false };
+    }
+    return { text: '', truncated: false };
+  }
 
-    await runnerRun([], {
-      spawnStreamImpl: customSpawnStreamImpl,
-      createGeminiClient: mockCreateGeminiClient,
-    });
+  await runnerRun([], {
+    spawnStreamImpl: customSpawnStreamImpl,
+    createGeminiClient: mockCreateGeminiClient,
+  });
 
-    expect(mockGetScopeSuggestions).toHaveBeenCalledWith(['src/component.tsx', 'styles/main.css', 'README.md']);
-    expect(mockGeminiClient.callGemini).toHaveBeenCalled();
+  expect(mockGetScopeSuggestions).toHaveBeenCalledWith([
+    'src/component.tsx',
+    'styles/main.css',
+    'README.md',
+  ]);
+  expect(mockGeminiClient.callGemini).toHaveBeenCalled();
 });
 
 test('integration: should handle concurrent execution safety', async () => {
-    const results = await Promise.all([
-      runnerRun([], {
-        spawnStreamImpl: mockSpawnStreamImpl,
-        createGeminiClient: mockCreateGeminiClient,
-      }),
-      runnerRun([], {
-        spawnStreamImpl: mockSpawnStreamImpl,
-        createGeminiClient: mockCreateGeminiClient,
-      })
-    ]);
+  const results = await Promise.all([
+    runnerRun([], {
+      spawnStreamImpl: mockSpawnStreamImpl,
+      createGeminiClient: mockCreateGeminiClient,
+    }),
+    runnerRun([], {
+      spawnStreamImpl: mockSpawnStreamImpl,
+      createGeminiClient: mockCreateGeminiClient,
+    }),
+  ]);
 
-    expect(results).toHaveLength(2);
-    expect(mockCallGemini).toHaveBeenCalledTimes(2);
+  expect(results).toHaveLength(2);
+  expect(mockCallGemini).toHaveBeenCalledTimes(2);
 });
 
 test('integration: should handle real git repository state', async () => {
-    // This test would require a real git repo, but we can mock it
-    mockParseArgs.mockReturnValueOnce({ commit: null, dryRun: false, help: false, model: null, verbose: false, debug: false });
+  // This test would require a real git repo, but we can mock it
+  mockParseArgs.mockReturnValueOnce({
+    commit: null,
+    dryRun: false,
+    help: false,
+    model: null,
+    verbose: false,
+    debug: false,
+  });
 
-    async function realGitSpawnStreamImpl(args: string[]): Promise<{ text: string; truncated: boolean }> {
-      const cmd = args.join(' ');
-      if (cmd.includes('rev-parse --is-inside-work-tree')) {
-        return { text: '', truncated: false }; // Success
-      }
-      if (cmd.includes('diff --staged --name-only')) {
-        return { text: 'package.json\nsrc/main.ts', truncated: false };
-      }
-      if (cmd.includes('diff --staged -w')) {
-        return { text: 'diff --git a/package.json b/package.json\n@@ -1,3 +1,3 @@\n "version": "1.0.0"\n+"version": "1.1.0"', truncated: false };
-      }
-      return { text: '', truncated: false };
+  async function realGitSpawnStreamImpl(
+    args: string[],
+  ): Promise<{ text: string; truncated: boolean }> {
+    const cmd = args.join(' ');
+    if (cmd.includes('rev-parse --is-inside-work-tree')) {
+      return { text: '', truncated: false }; // Success
     }
+    if (cmd.includes('diff --staged --name-only')) {
+      return { text: 'package.json\nsrc/main.ts', truncated: false };
+    }
+    if (cmd.includes('diff --staged -w')) {
+      return {
+        text: 'diff --git a/package.json b/package.json\n@@ -1,3 +1,3 @@\n "version": "1.0.0"\n+"version": "1.1.0"',
+        truncated: false,
+      };
+    }
+    return { text: '', truncated: false };
+  }
 
-    await runnerRun([], {
-      spawnStreamImpl: realGitSpawnStreamImpl,
-      createGeminiClient: mockCreateGeminiClient,
-    });
+  await runnerRun([], {
+    spawnStreamImpl: realGitSpawnStreamImpl,
+    createGeminiClient: mockCreateGeminiClient,
+  });
 
-    expect(mockGeminiClient.callGemini).toHaveBeenCalled();
+  expect(mockGeminiClient.callGemini).toHaveBeenCalled();
 });
-

@@ -13,12 +13,17 @@ test('parser: parseGeminiOutput - should parse basic output correctly', () => {
 });
 
 test('parser: parseGeminiOutput - should throw on missing required fields', () => {
-  expect(() => parseGeminiOutput('PR_TITLE: no branch')).toThrow('LLM output missing required BRANCH or COMMIT_MESSAGE fields');
-  expect(() => parseGeminiOutput('BRANCH: feat/test')).toThrow('LLM output missing required BRANCH or COMMIT_MESSAGE fields');
+  expect(() => parseGeminiOutput('PR_TITLE: no branch')).toThrow(
+    'LLM output missing required BRANCH or COMMIT_MESSAGE fields',
+  );
+  expect(() => parseGeminiOutput('BRANCH: feat/test')).toThrow(
+    'LLM output missing required BRANCH or COMMIT_MESSAGE fields',
+  );
 });
 
 test('parser: parseGeminiOutput - should handle unicode characters in messages', () => {
-  const sample = 'BRANCH: feat/unicode\nCOMMIT_MESSAGE: feat: přidat podporu pro ěščřžýáíé\nPR_TITLE: feat: unicode\nPR_DESCRIPTION: Unicode characters test.';
+  const sample =
+    'BRANCH: feat/unicode\nCOMMIT_MESSAGE: feat: přidat podporu pro ěščřžýáíé\nPR_TITLE: feat: unicode\nPR_DESCRIPTION: Unicode characters test.';
   const parsed = parseGeminiOutput(sample);
   expect(parsed.COMMIT_MESSAGE).toBe('feat: přidat podporu pro ěščřžýáíé');
 });
@@ -32,21 +37,27 @@ test('parser: parseGeminiOutput - should handle very long commit messages', () =
 
 test('parser: parseGeminiOutput - should throw on empty required label values', () => {
   const sample = 'BRANCH: feat/empty\nCOMMIT_MESSAGE: \nPR_TITLE: empty\nPR_DESCRIPTION: ';
-  expect(() => parseGeminiOutput(sample)).toThrow('LLM output missing required BRANCH or COMMIT_MESSAGE fields');
+  expect(() => parseGeminiOutput(sample)).toThrow(
+    'LLM output missing required BRANCH or COMMIT_MESSAGE fields',
+  );
 
   const sample2 = 'BRANCH: \nCOMMIT_MESSAGE: feat: valid\nPR_TITLE: empty\nPR_DESCRIPTION: ';
-  expect(() => parseGeminiOutput(sample2)).toThrow('LLM output missing required BRANCH or COMMIT_MESSAGE fields');
+  expect(() => parseGeminiOutput(sample2)).toThrow(
+    'LLM output missing required BRANCH or COMMIT_MESSAGE fields',
+  );
 });
 
 test('parser: parseGeminiOutput - should handle multiple colons in label lines', () => {
-  const sample = 'BRANCH: feat/colon:test\nCOMMIT_MESSAGE: feat: foo:bar:baz\nPR_TITLE: Foo bar\nPR_DESCRIPTION: desc';
+  const sample =
+    'BRANCH: feat/colon:test\nCOMMIT_MESSAGE: feat: foo:bar:baz\nPR_TITLE: Foo bar\nPR_DESCRIPTION: desc';
   const parsed = parseGeminiOutput(sample);
   expect(parsed.BRANCH).toBe('feat/colon:test');
   expect(parsed.COMMIT_MESSAGE).toBe('feat: foo:bar:baz');
 });
 
 test('parser: parseGeminiOutput - should handle Windows line endings (\\r\\n)', () => {
-  const sample = 'BRANCH: feat/crlf\r\nCOMMIT_MESSAGE: feat: crlf\r\nPR_TITLE: CRLF\r\nPR_DESCRIPTION: CRLF test.';
+  const sample =
+    'BRANCH: feat/crlf\r\nCOMMIT_MESSAGE: feat: crlf\r\nPR_TITLE: CRLF\r\nPR_DESCRIPTION: CRLF test.';
   const parsed = parseGeminiOutput(sample);
   expect(parsed.BRANCH).toBe('feat/crlf');
   expect(parsed.COMMIT_MESSAGE).toBe('feat: crlf');

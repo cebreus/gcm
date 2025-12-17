@@ -41,7 +41,7 @@ const C = {
 };
 const SYSTEM_INSTRUCTIONS = `You are an expert at writing concise, professional conventional commit messages.\n\nOutput format (follow exactly):\n\nBRANCH: [Generated branch name]\nCOMMIT_MESSAGE: [Generated conventional commit message]\nPR_TITLE: [Generated pull request title]\nPR_DESCRIPTION: [Generated pull request description]\n\n--- RULES ---\n1. **Branch Name**: Format: \`type/short-description\`, Types: feat, fix, refactor, chore, docs\n2. **Commit Message** (MOST IMPORTANT): First line: \`type(scope): short summary\` (max 60 chars), Blank line, Body: Bullet points with dash (-), each line max 80 chars, Focus on WHAT changed, not WHY or HOW, Group related changes together, Be specific but concise, If breaking change, add \`BREAKING CHANGE:\` footer\n3. **PR Title**: Same as commit first line, Max 60 characters\n4. **PR Description**: 2-3 paragraphs maximum, Bulleted list of key changes, Use GitHub-flavored Markdown`;
 
-function showHelp() {
+export function showHelp() {
   const helpText = `
   ${C.bright}Gemini Commit Message Helper${C.reset}
 
@@ -56,6 +56,7 @@ function showHelp() {
     ${C.cyan}-v, --verbose${C.reset}         Show detailed logs (debug level) in the console.
     ${C.cyan}-d, --debug${C.reset}           Save complete logs to a '.debug.log' file for debugging.
     ${C.cyan}--model <name>${C.reset}        Specify an alternative Gemini model to use.
+    ${C.cyan}--list-models${C.reset}         List available Gemini models and exit.
 
   ${C.bright}Description:${C.reset}
     This script takes all changes added to the Git staging area (using \`git add\`),
@@ -81,7 +82,7 @@ function estimateTokens(text: string): number {
   return Math.ceil(encoder.encode(text).length / CONFIG.TOKEN_BYTES_RATIO);
 }
 
-function displayResultStructured(logger: Logger, res: Labels): void {
+export function displayResultStructured(logger: Logger, res: Labels): void {
   const branchText = `\n${C.cyan}${C.bright}BRANCH:${C.reset}\n${res.BRANCH || ''}\n`;
   const commitText = `\n${C.cyan}${C.bright}COMMIT_MESSAGE:${C.reset}\n${res.COMMIT_MESSAGE || ''}\n`;
   const titleText = `\n${C.magenta}${C.bright}PR_TITLE:${C.reset}\n${res.PR_TITLE || ''}\n`;
@@ -89,7 +90,7 @@ function displayResultStructured(logger: Logger, res: Labels): void {
   logger.log('info', `${branchText}${commitText}${titleText}${descText}`);
 }
 
-function reportStats(
+export function reportStats(
   logger: Logger,
   modelName: string,
   usage: GeminiUsage,
@@ -110,7 +111,7 @@ function detectRuntime(): string {
   return 'bun';
 }
 
-async function loadChanges(
+export async function loadChanges(
   commit: string | null,
   options: LoadChangesOptions = {},
   logger?: Logger,
@@ -148,7 +149,7 @@ async function loadChanges(
   return { stagedDiff: diff, stagedFiles: files, truncated };
 }
 
-async function handleTokenLimitFallback(
+export async function handleTokenLimitFallback(
   logger: Logger,
   stagedFiles: string[],
   input: string,
@@ -192,7 +193,7 @@ async function handleTokenLimitFallback(
   return { input: newInput, maxOutputTokens: newMaxOutput, summaryUsed };
 }
 
-async function callGeminiWithRetries(
+export async function callGeminiWithRetries(
   logger: Logger,
   client: GeminiClient,
   apiKey: string,
@@ -241,12 +242,35 @@ async function callGeminiWithRetries(
   }
 }
 
+import { listGeminiModels } from './gemini-client/listModels.js';
+
 export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promise<void> {
   const opts = runnerOptions || {};
   const parsedArgs: ParsedOptions = parseArgs(argv || process.argv.slice(2));
 
   if (parsedArgs.help) {
     showHelp();
+    return;
+  }
+
+  if (parsedArgs.listModels) {
+    const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error('Error: set GOOGLE_GEMINI_API_KEY before running.');
+      process.exit(1);
+    }
+    try {
+      const models = await listGeminiModels(apiKey);
+      if (!models.length) {
+        console.log('No models found.');
+      } else {
+        console.log('Available Gemini models:');
+        for (const m of models) console.log('  -', m);
+      }
+    } catch (e) {
+      console.error('Failed to fetch models:', e);
+      process.exit(2);
+    }
     return;
   }
 

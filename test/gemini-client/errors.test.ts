@@ -33,8 +33,8 @@ test('errors: GeminiApiError - should have correct name and inheritance', () => 
 });
 
 test('errors: should serialize with message and metadata', () => {
-    const err = new GeminiApiError('API call failed', { status: 429 });
-    const errString = err.toString();
-    expect(errString).toContain('GeminiApiError: API call failed');
-    // Note: metadata is not part of the default .toString()
+  const err = new GeminiApiError('API call failed', { status: 429 });
+  const errString = err.toString();
+  expect(errString).toContain('GeminiApiError: API call failed');
+  // Note: metadata is not part of the default .toString()
 });

@@ -46,14 +46,13 @@ afterEach(async () => {
   } catch {}
 });
 
-
 test('logger: flush and redaction', async () => {
   const logger: Logger = createLogger({ LOG_LEVEL: 'info', TELEMETRY_FILE: TEST_LOG_FILE });
   logger.log('info', 'test info', { foo: 'bar' });
   logger.log('info', 'sensitive info', { token: 'sk-abcdef1234567890' });
-  
+
   await logger.flush();
-  
+
   expect(mockWriter.write).toHaveBeenCalled();
   const writtenContent = (mockWriter.write as any).mock.calls[0][0];
   expect(writtenContent).toContain('test info');
@@ -69,7 +68,9 @@ test('logger: log level filtering', () => {
   logger.log('error', 'this is an error');
 
   expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('this should be ignored'));
-  expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('this should also be ignored'));
+  expect(console.log).not.toHaveBeenCalledWith(
+    expect.stringContaining('this should also be ignored'),
+  );
   expect(console.log).toHaveBeenCalledWith(expect.stringContaining('this is a warning'));
   expect(console.error).toHaveBeenCalledWith(expect.stringContaining('this is an error'));
 });
@@ -82,11 +83,11 @@ test('logger: should flush when queue reaches maxQueueBytes', async () => {
   });
 
   // This will exceed the 100 byte limit
-  logger.log('info', 'message 1 that is long enough to trigger flush'); 
+  logger.log('info', 'message 1 that is long enough to trigger flush');
   logger.log('info', 'message 2 that is also long enough');
 
   // Flush is triggered automatically, but it's async. We need to wait for it.
-  await new Promise(resolve => setTimeout(resolve, 10)); 
+  await new Promise(resolve => setTimeout(resolve, 10));
 
   expect(mockWriter.write).toHaveBeenCalled();
 });
@@ -100,32 +101,38 @@ test('logger: should handle disk full scenario gracefully', async () => {
   logger.log('info', 'some data');
   await logger.flush();
 
-  expect(console.error).toHaveBeenCalledWith('Failed to write telemetry:', 'Error: No space left on device');
+  expect(console.error).toHaveBeenCalledWith(
+    'Failed to write telemetry:',
+    'Error: No space left on device',
+  );
 });
 
 test('logger: should handle permission errors gracefully', async () => {
-    mockWriter.write.mockImplementation(() => {
-        throw new Error('Permission denied');
-    });
+  mockWriter.write.mockImplementation(() => {
+    throw new Error('Permission denied');
+  });
 
-    const logger: Logger = createLogger({ LOG_LEVEL: 'info', TELEMETRY_FILE: TEST_LOG_FILE });
-    logger.log('info', 'some data');
-    await logger.flush();
+  const logger: Logger = createLogger({ LOG_LEVEL: 'info', TELEMETRY_FILE: TEST_LOG_FILE });
+  logger.log('info', 'some data');
+  await logger.flush();
 
-    expect(console.error).toHaveBeenCalledWith('Failed to write telemetry:', 'Error: Permission denied');
+  expect(console.error).toHaveBeenCalledWith(
+    'Failed to write telemetry:',
+    'Error: Permission denied',
+  );
 });
 
 test('logger: timer-based flush', async () => {
-    const logger: Logger = createLogger({
-        LOG_LEVEL: 'info',
-        TELEMETRY_FILE: TEST_LOG_FILE,
-        LOG_FLUSH_INTERVAL_MS: 50,
-    });
+  const logger: Logger = createLogger({
+    LOG_LEVEL: 'info',
+    TELEMETRY_FILE: TEST_LOG_FILE,
+    LOG_FLUSH_INTERVAL_MS: 50,
+  });
 
-    logger.log('info', 'a message');
-    
-    // Wait for the flush interval to pass
-    await new Promise(resolve => setTimeout(resolve, 60));
+  logger.log('info', 'a message');
 
-    expect(mockWriter.write).toHaveBeenCalled();
+  // Wait for the flush interval to pass
+  await new Promise(resolve => setTimeout(resolve, 60));
+
+  expect(mockWriter.write).toHaveBeenCalled();
 });
