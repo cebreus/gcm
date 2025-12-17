@@ -6,9 +6,12 @@ const mockIntro = mock();
 const mockOutro = mock();
 const mockSpinner = mock(() => ({ start: mock(), stop: mock() }));
 const mockNote = mock();
-const mockSelect = mock(() => Promise.resolve('commit')); // Default to commit
+const mockSelect = mock(arg => {
+  console.log('Unexpected Select:', arg.message);
+  return Promise.resolve('cancel');
+});
 const mockText = mock(() => Promise.resolve('edited message'));
-const mockIsCancel = mock(() => false);
+const mockIsCancel = mock(val => val === 'cancel');
 const mockCancel = mock();
 
 mock.module('@clack/prompts', () => ({
@@ -61,6 +64,9 @@ describe('Refactored Runner', () => {
       usage: {},
     });
 
+    // Pre-flight: generate, Review: commit
+    mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+
     // Execute
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
     await executeCommitMessageGeneration([], {
@@ -81,7 +87,9 @@ describe('Refactored Runner', () => {
 
     expect(mockNote).toHaveBeenCalled();
     const noteContent = mockNote.mock.calls[0][0];
-    expect(noteContent).toContain('BRANCH: feat/test');
+    // Default is now Commit Only, so only message is shown
+    expect(noteContent).toContain('test');
+    expect(noteContent).not.toContain('BRANCH:');
   });
 
   test('Should handle Edit flow', async () => {
@@ -101,7 +109,12 @@ describe('Refactored Runner', () => {
     });
 
     // Sequence: 'edit' -> 'commit'
-    mockSelect.mockResolvedValueOnce('edit').mockResolvedValueOnce('commit');
+    // BUT first we have Pre-flight: 'generate'
+    // Then Review Menu: 'edit' -> 'commit'
+    mockSelect
+      .mockResolvedValueOnce('generate') // Pre-flight
+      .mockResolvedValueOnce('edit') // Review
+      .mockResolvedValueOnce('commit'); // Review loop
     mockText.mockResolvedValue('edited message');
 
     await executeCommitMessageGeneration([], {
@@ -119,6 +132,8 @@ describe('Refactored Runner', () => {
 
   test('Should handle no staged changes', async () => {
     mockGitService.retrieveStagedChanges.mockResolvedValue(null);
+    mockSelect.mockResolvedValueOnce('generate'); // Pre-flight
+
     await executeCommitMessageGeneration([], {
       logger: mockLogger,
       gitService: mockGitService,
@@ -126,5 +141,48 @@ describe('Refactored Runner', () => {
       geminiService: mockGeminiService,
     });
     expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
+  });
+
+  test('Should handle Regeneration flow', async () => {
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
+    });
+    // Context service called twice (initial + regen)
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.callGeminiAPI.mockResolvedValue({
+      text: 'COMMIT_MESSAGE: msg',
+      usage: {},
+    });
+
+    // Flow:
+    // 1. Pre-flight: 'generate'
+    // 2. Review: 'regenerate'
+    // 3. Select Model: 'gemini-2.5-pro'
+    // -- Loop restarts --
+    // 4. Review (2nd run): 'commit'
+
+    mockSelect
+      .mockResolvedValueOnce('generate') // 1
+      .mockResolvedValueOnce('regenerate') // 2
+      .mockResolvedValueOnce('gemini-2.5-pro') // 3
+      .mockResolvedValueOnce('commit'); // 4
+
+    await executeCommitMessageGeneration([], {
+      logger: mockLogger as any,
+      gitService: mockGitService,
+      contextService: mockContextService,
+      geminiService: mockGeminiService,
+    });
+
+    // Gemini should be called twice
+    expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledTimes(2);
+    // Git commit called once
+    expect(mockGitService.commitChanges).toHaveBeenCalled();
   });
 });
