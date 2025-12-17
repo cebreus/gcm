@@ -129,6 +129,7 @@ This refactors the logging mechanism for the Gemini API client.
 | `--verbose`       | `-v`  | Show detailed logs (debug level) in the console.     |
 | `--debug`         | `-d`  | Save raw API request/response logs to `.debug.log`.  |
 | `--model <name>`  |       | Specify an alternative Gemini model to use.          |
+| `--list-models`   |       | List available Gemini models from the API and exit.  |
 
 ### Analyze a Past Commit
 

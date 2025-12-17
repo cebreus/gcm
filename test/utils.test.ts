@@ -40,12 +40,19 @@ test('utils: fileImportanceWeight - Other files should have default weight', () 
 });
 
 test('utils: fileImportanceWeight - should handle no file name', () => {
-    expect(fileImportanceWeight('')).toBe(0);
+  expect(fileImportanceWeight('')).toBe(0);
 });
 
-
 // --- Tests for pushHunkToTop ---
-const createHunk = (file: string, score: number): Hunk => ({ file, score, header: '', content: '', added: 0, removed: 0, bytes: 0 });
+const createHunk = (file: string, score: number): Hunk => ({
+  file,
+  score,
+  header: '',
+  content: '',
+  added: 0,
+  removed: 0,
+  bytes: 0,
+});
 
 test('utils: pushHunkToTop - should add hunk if array is not full', () => {
   const array: Hunk[] = [];
@@ -70,11 +77,10 @@ test('utils: pushHunkToTop - should replace lowest score hunk if array is full',
 });
 
 test('utils: pushHunkToTop - should handle empty array', () => {
-    const array: Hunk[] = [];
-    pushHunkToTop(array, createHunk('f1', 10), 1);
-    expect(array.length).toBe(1);
+  const array: Hunk[] = [];
+  pushHunkToTop(array, createHunk('f1', 10), 1);
+  expect(array.length).toBe(1);
 });
-
 
 // --- Tests for unescapeNewlinesInText ---
 test('utils: unescapeNewlinesInText - should unescape newlines in text fields', () => {
@@ -92,36 +98,36 @@ test('utils: unescapeNewlinesInText - should handle nested objects and arrays', 
 
 // --- Tests for detectRepoType ---
 const existsMock = mock(async () => false);
-const fileMock = mock((path: string) => ({ 
-    exists: () => existsMock(path) 
+const fileMock = mock((path: string) => ({
+  exists: () => existsMock(path),
 }));
 const originalBunFile = Bun.file;
 Bun.file = fileMock as any;
 
 afterAll(() => {
-    Bun.file = originalBunFile;
+  Bun.file = originalBunFile;
 });
 
 test('utils: detectRepoType - should detect monorepo with lerna.json', async () => {
-    existsMock.mockImplementation(async (path) => path === 'lerna.json');
-    const result = await detectRepoType();
-    expect(result).toBe('monorepo');
+  existsMock.mockImplementation(async path => path === 'lerna.json');
+  const result = await detectRepoType();
+  expect(result).toBe('monorepo');
 });
 
 test('utils: detectRepoType - should detect monorepo with pnpm-workspace.yaml', async () => {
-    existsMock.mockImplementation(async (path) => path === 'pnpm-workspace.yaml');
-    const result = await detectRepoType();
-    expect(result).toBe('monorepo');
+  existsMock.mockImplementation(async path => path === 'pnpm-workspace.yaml');
+  const result = await detectRepoType();
+  expect(result).toBe('monorepo');
 });
 
 test('utils: detectRepoType - should detect monorepo with packages/ and apps/ dirs', async () => {
-    existsMock.mockImplementation(async (path) => path === 'packages' || path === 'apps');
-    const result = await detectRepoType();
-    expect(result).toBe('monorepo');
+  existsMock.mockImplementation(async path => path === 'packages' || path === 'apps');
+  const result = await detectRepoType();
+  expect(result).toBe('monorepo');
 });
 
 test('utils: detectRepoType - should return single for regular repo', async () => {
-    existsMock.mockImplementation(async () => false);
-    const result = await detectRepoType();
-    expect(result).toBe('single');
+  existsMock.mockImplementation(async () => false);
+  const result = await detectRepoType();
+  expect(result).toBe('single');
 });

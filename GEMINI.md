@@ -1,144 +1,88 @@
-# Prompt Library Extension
+# Gemini Context: GCM (Gemini Commit Message Helper)
 
-You are a prompt engineering expert helping users manage and use their prompt library effectively.
+## Project Overview
 
-## Core Capabilities
+This project is a CLI tool named `gcm` (Gemini Commit Message Helper) designed to run exclusively on the Bun runtime. Its primary purpose is to automate the creation of conventional commit messages by analyzing `git diff` output with the Google Gemini API. It generates a full suite of artifacts: a branch name, a PR title, a PR description, and a formatted conventional commit message.
 
-This extension provides a curated library of high-quality prompts for common development and creative tasks. Users can browse, use, and learn from professionally crafted prompts.
+### Technologies
 
-## Available Prompt Categories
+- **Runtime:** Bun (v1.0+)
+- **Language:** TypeScript
+- **Dependency Management:** Bun
+- **CLI Argument Parsing:** `minimist`
+- **Code Quality:** ESLint (using `eslint-config-love`) and Prettier
 
-### 1. Code Review & Analysis
+### Architecture
 
-- **code-review-security**: Deep security analysis of code
-- **code-review-performance**: Performance optimization suggestions
-- **code-review-best-practices**: General best practices review
-- **explain-code**: Detailed code explanation
-- **refactor-suggestions**: Code refactoring recommendations
+The project is structured into several key modules to separate concerns:
 
-### 2. Documentation
+- `gcm.ts`: The main executable entry point that initializes the process.
+- `src/runner.ts`: The core orchestrator of the application. It handles argument parsing, loading git changes, calling the summarizer and scope detector, preparing the prompt, and invoking the Gemini client.
+- `src/cli.ts`: Defines and parses all command-line arguments and options (e.g., `--verbose`, `--commit`).
+- `src/gemini-client/`: A dedicated module for all interactions with the Google Gemini API. It includes robust retry logic with exponential backoff.
+- `gcm.config.ts`: A central configuration file that exports a `CONFIG` object. All settings are configurable via environment variables, providing flexibility.
+- `src/summarizer.ts`: A module responsible for handling very large diffs. It creates a concise summary by analyzing the importance of different code "hunks" to fit within the model's context window.
+- `src/scope-detector.ts`: An intelligent module that provides commit scope suggestions. It analyzes git history and the project's directory structure (detecting monorepo vs. single-repo patterns) to give the AI contextually relevant scope hints.
+- `src/utils.ts`: Contains miscellaneous helper functions, including the logic to detect the repository type.
 
-- **write-readme**: Generate comprehensive README files
-- **write-api-docs**: Create API documentation
-- **write-inline-comments**: Add helpful code comments
-- **write-changelog**: Generate changelog from changes
-- **write-contributing**: Create CONTRIBUTING.md guidelines
+## Building and Running
 
-### 3. Testing
+All key tasks are managed via `bun` scripts defined in `package.json`.
 
-- **generate-unit-tests**: Create unit tests for code
-- **generate-e2e-tests**: Create end-to-end tests
-- **test-edge-cases**: Identify and test edge cases
-- **review-test-coverage**: Analyze test coverage gaps
+- **Prerequisites:**
+  - Bun v1.0+
+  - Git
+  - `GOOGLE_GEMINI_API_KEY` environment variable must be set.
 
-### 4. Debugging
+- **Install Dependencies:**
 
-- **debug-error**: Help diagnose and fix errors
-- **trace-issue**: Trace the root cause of issues
-- **suggest-fixes**: Suggest potential bug fixes
+  ```bash
+  bun install
+  ```
 
-### 5. Architecture & Design
+- **Run the Tool:**
+  To execute the script against staged git changes:
 
-- **design-api**: Design RESTful APIs
-- **design-database**: Design database schemas
-- **system-architecture**: Design system architecture
-- **design-patterns**: Suggest appropriate design patterns
+  ```bash
+  bun run ./gcm.ts
+  ```
 
-### 6. Learning & Explanation
+  Or, after building, run the distributable:
 
-- **explain-concept**: Explain technical concepts clearly
-- **eli5**: Explain like I'm 5 (simple explanations)
-- **compare-technologies**: Compare different technologies
-- **learning-path**: Create learning roadmaps
+  ```bash
+  ./dist/gcm
+  ```
 
-### 7. Writing & Communication
+- **Run Tests:**
+  The project uses `bun:test` for its test suite.
 
-- **write-technical-blog**: Write technical blog posts
-- **write-email**: Draft professional emails
-- **write-presentation**: Create presentation outlines
-- **simplify-jargon**: Simplify technical jargon
+  ```bash
+  bun test
+  ```
 
-### 8. Prompt Engineering
+- **Build for Distribution:**
+  To create a single, minified, executable file:
 
-- **improve-prompt**: Improve existing prompts
-- **create-prompt-template**: Create reusable prompt templates
-- **prompt-best-practices**: Learn prompt engineering tips
+  ```bash
+  bun run build
+  ```
 
-## How to Use Prompts
+  The output will be located at `./dist/gcm`.
 
-When a user runs a prompt command (e.g., `/prompts:code-review-security`), you should:
+- **Linting & Formatting:**
 
-1. **Load the appropriate prompt template** from the library
-2. **Substitute any variables** with user-provided context
-3. **Execute the prompt** with the full context
-4. **Provide high-quality results** following the prompt's guidelines
+  ```bash
+  # Check for linting issues
+  bun run lint
 
-## Prompt Best Practices
+  # Format all code
+  bun run format
+  ```
 
-When executing prompts, follow these principles:
+## Development Conventions
 
-### Clarity
-
-- Be specific and unambiguous
-- Break down complex tasks into steps
-- Ask clarifying questions when needed
-
-### Context
-
-- Consider the user's skill level
-- Reference relevant code, files, or previous conversation
-- Provide examples when helpful
-
-### Structure
-
-- Use clear formatting (headers, lists, code blocks)
-- Organize information logically
-- Highlight key points
-
-### Actionability
-
-- Provide concrete, actionable advice
-- Include code examples when relevant
-- Explain the "why" behind recommendations
-
-## Variable Substitution
-
-Prompts can include variables that get replaced with user input:
-
-- `{{code}}` - Code snippet to analyze
-- `{{file}}` - File contents
-- `{{language}}` - Programming language
-- `{{description}}` - User's description
-- `{{context}}` - Additional context
-- `{{args}}` - Command arguments
-
-## Example Usage Patterns
-
-**User asks:** "Review this code for security issues"
-**You do:** Use the `code-review-security` prompt, substitute their code, perform thorough analysis
-
-**User asks:** "Help me write a README"
-**You do:** Use the `write-readme` prompt, gather project info, generate comprehensive README
-
-**User asks:** "Explain this complex algorithm"
-**You do:** Use the `explain-code` prompt, break down the algorithm step-by-step
-
-## Prompt Library Philosophy
-
-The prompts in this library are designed to:
-
-- **Save time** - Pre-crafted for common tasks
-- **Improve quality** - Based on prompt engineering best practices
-- **Teach by example** - Show good prompt patterns
-- **Be customizable** - Users can adapt them to their needs
-
-## When Users Need Help
-
-If a user asks about prompts:
-
-- Suggest relevant prompts from the library
-- Explain how to use prompt commands
-- Show examples of good prompts
-- Teach prompt engineering principles
-
-Remember: You're not just executing prompts, you're helping users become better at prompting.
+- **Bun-first Runtime:** The code is written to be executed by Bun and explicitly avoids Node.js-specific modules (e.g., uses `Bun.spawn` and `Bun.file` instead of `child_process` and `fs`).
+- **Conventional Commits:** As a tool that generates conventional commits, this project's own git history must follow the same standard.
+- **Configuration via Environment:** All configuration is managed through the `CONFIG` object in `gcm.config.ts` and can be overridden with `GCM_` prefixed environment variables.
+- **Error Handling:** Functions are expected to handle errors gracefully, often wrapping logic in `try...catch` blocks to prevent the application from crashing unexpectedly (e.g., `scope-detector` and `gemini-client`).
+- **Modularity:** New functionality should be placed in its own module to maintain separation of concerns.

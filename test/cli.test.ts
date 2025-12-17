@@ -39,11 +39,11 @@ test('cli: should handle -v/--verbose flag', () => {
 });
 
 test('cli: should handle -d/--debug flag', () => {
-    let result = parseArgs(['-d']);
-    expect(result.debug).toBe(true);
+  let result = parseArgs(['-d']);
+  expect(result.debug).toBe(true);
 
-    result = parseArgs(['--debug']);
-    expect(result.debug).toBe(true);
+  result = parseArgs(['--debug']);
+  expect(result.debug).toBe(true);
 });
 
 test('cli: should handle --model flag with a model name', () => {

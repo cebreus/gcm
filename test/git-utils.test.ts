@@ -63,11 +63,18 @@ test('git-utils: ensureGitRepo - should return true if in a git repository', () 
   mockSpawnSync.mockReturnValue({ stdout: 'true\n', stderr: '', success: true, exitCode: 0 });
   const result = ensureGitRepo();
   expect(result).toBe(true);
-  expect(mockSpawnSync).toHaveBeenCalledWith(expect.objectContaining({ cmd: ['git', 'rev-parse', '--is-inside-work-tree'] }));
+  expect(mockSpawnSync).toHaveBeenCalledWith(
+    expect.objectContaining({ cmd: ['git', 'rev-parse', '--is-inside-work-tree'] }),
+  );
 });
 
 test('git-utils: ensureGitRepo - should return false if not in a git repository', () => {
-  mockSpawnSync.mockReturnValue({ stdout: '', stderr: 'not a git repo', success: false, exitCode: 1 });
+  mockSpawnSync.mockReturnValue({
+    stdout: '',
+    stderr: 'not a git repo',
+    success: false,
+    exitCode: 1,
+  });
   const result = ensureGitRepo();
   expect(result).toBe(false);
 });

@@ -8,6 +8,8 @@ interface Args extends ParsedArgs {
   model?: string | null;
   verbose?: boolean;
   debug?: boolean;
+  'list-models'?: boolean;
+  listModels?: boolean;
 }
 
 export interface ParsedOptions {
@@ -17,12 +19,13 @@ export interface ParsedOptions {
   model: string | null;
   verbose: boolean;
   debug: boolean;
+  listModels: boolean;
 }
 
 export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions {
   const parsed: Args = minimist(argv, {
     alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug' },
-    boolean: ['help', 'dry-run', 'verbose', 'debug'],
+    boolean: ['help', 'dry-run', 'verbose', 'debug', 'list-models'],
     string: ['commit', 'model'],
   });
   return {
@@ -32,5 +35,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     model: parsed.model || null,
     verbose: Boolean(parsed.verbose),
     debug: Boolean(parsed.debug),
+    listModels: Boolean(parsed['list-models']) || Boolean(parsed.listModels) || false,
   };
 }
