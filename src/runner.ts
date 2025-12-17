@@ -203,11 +203,22 @@ export async function callGeminiWithRetries(
   options: GeminiCallOpts,
   stagedFiles: string[],
   maxAttempts: number,
+  // Optional injectable fallback handler for testing/mocking
+  fallbackHandler?: (
+    logger: Logger,
+    stagedFiles: string[],
+    input: string,
+    maxOutputTokens: number,
+    attempt: number,
+    summaryUsed: boolean,
+  ) => Promise<{ input: string; maxOutputTokens: number; summaryUsed: boolean }>,
 ): Promise<GeminiResponse | null> {
   let input = userContentInitial;
   let attempt = 0;
   let maxOutputOverride = options.maxOutputTokens || CONFIG.MAX_OUTPUT_TOKENS;
   let summaryUsed = false;
+
+  const fallbackFn = fallbackHandler || handleTokenLimitFallback;
 
   for (;;) {
     attempt += 1;
@@ -222,7 +233,7 @@ export async function callGeminiWithRetries(
       const isMaxTokens = /MAX_TOKENS/i.test(errStr) || /returned no text/i.test(errStr);
 
       if (isMaxTokens && attempt < maxAttempts) {
-        const result = await handleTokenLimitFallback(
+        const result = await fallbackFn(
           logger,
           stagedFiles,
           input,

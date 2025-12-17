@@ -10,6 +10,7 @@ test('cli: should parse default arguments with empty argv', () => {
     model: null,
     verbose: false,
     debug: false,
+    listModels: false,
   });
 });
 
@@ -79,6 +80,7 @@ test('cli: should ignore unknown flags', () => {
     model: null,
     verbose: false,
     debug: false,
+    listModels: false,
   });
 });
 
