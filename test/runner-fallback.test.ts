@@ -20,12 +20,11 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
     return await Promise.resolve({ text: '', truncated: false });
   }
 
-  // Provide a client that returns null to trigger fallback
-  function createGeminiClientFake(): GeminiClient {
-    async function callGemini(): Promise<null> {
-      return null;
-    }
-    return { callGemini };
+  // Provide a service that returns null to trigger fallback
+  function createGeminiServiceFake() {
+    return {
+      callGeminiAPI: async () => null,
+    };
   }
 
   const logs: string[] = [];
@@ -44,9 +43,9 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
   const origApiKey = process.env.GOOGLE_GEMINI_API_KEY;
   process.env.GOOGLE_GEMINI_API_KEY = 'fake-key';
   try {
-    await runner.run([], {
+    await runner.executeCommitMessageGeneration(['--model', 'gemini-2.5-flash'], {
       spawnStreamImpl,
-      createGeminiClient: createGeminiClientFake,
+      geminiService: createGeminiServiceFake(),
       logger: createLogger({ LOG_LEVEL: 'info' }),
     });
   } finally {

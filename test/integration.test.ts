@@ -1,5 +1,5 @@
 import { test, expect, mock, afterEach } from 'bun:test';
-import { executeCommitMessageGeneration as runnerRun } from '../src/runner-refactored.js';
+import { executeCommitMessageGeneration as runnerRun } from '../src/runner.js';
 import { createGitService } from '../src/services/git-service.js';
 import { createGeminiService } from '../src/services/gemini-service.js';
 import { createContextService } from '../src/services/context-service.js';

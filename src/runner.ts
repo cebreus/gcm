@@ -1,59 +1,26 @@
-#!/usr/bin/env bun
 import { parseArgs } from './cli.js';
 import type { ParsedOptions } from './cli.js';
 import { CONFIG } from '../gcm.config.js';
 import { createLogger } from './logger.js';
 import type { Logger, LoggerConfig, LogMetadata } from './logger.js';
-import { ensureGitRepo, spawnGitStream } from './git-utils.js';
-import type { SpawnGitStreamResult } from './git-utils.js';
-import { summarizeLargeDiff } from './summarizer.js';
 import { createGeminiClient } from './gemini-client.js';
-import type { GeminiClient, GeminiUsage, GeminiResponse, GeminiCallOpts } from './gemini-client.js';
 import { parseGeminiOutput } from './parser.js';
 import type { Labels } from './parser.js';
-import { estimateTokens as estimatePromptTokens, buildFallbackStructured } from './runner-utils.js';
 import { getScopeSuggestions } from './scope-detector.js';
-import { logOrWrite } from './utils.js';
-
 import { listGeminiModels } from './gemini-client/listModels.js';
 
-interface LoadChangesOptions {
-  spawnStreamImpl?: (args: string[]) => Promise<SpawnGitStreamResult>;
-}
+// Actually, displayResultStructured was exported in runner.ts. I should probably copy it or import it.
+// Ideally I should extract it to 'ui-utils.ts' but for now let's duplicate or import.
+// Since I'm creating runner, I can't import from runner.ts comfortably if I plan to replace it.
+// I'll duplicate the display logic here for independence.
 
-interface LoadChangesResult {
-  stagedDiff: string;
-  stagedFiles: string[];
-  truncated: boolean;
-}
+import { createGitService } from './services/git-service.js';
+import { createContextService } from './services/context-service.js';
+import { createGeminiService } from './services/gemini-service.js';
+import { generateFallbackCommitDetails } from './runner-utils.js'; // Keep this for now
+import { intro, outro, spinner, note, select, text, isCancel, cancel } from '@clack/prompts';
+import { KNOWN_MODELS, getModelSpec } from './model-registry.js';
 
-interface RunnerOptions {
-  logger?: Logger;
-  spawnStreamImpl?: (args: string[]) => Promise<SpawnGitStreamResult>;
-  createGeminiClient?: (opts: { config: unknown; logger: Logger }) => GeminiClient;
-}
-
-interface GeminiRetryConfig {
-  logger: Logger;
-  client: GeminiClient;
-  apiKey: string;
-  userContent: string;
-  enableThinking: boolean;
-  telemetryMeta: LogMetadata;
-  callOptions: GeminiCallOpts;
-  stagedFiles: string[];
-  maxAttempts: number;
-  fallbackHandler?: (
-    logger: Logger,
-    stagedFiles: string[],
-    input: string,
-    maxOutputTokens: number,
-    attempt: number,
-    summaryUsed: boolean,
-  ) => Promise<GeminiResponse | null>;
-}
-
-const encoder = new TextEncoder();
 const C = {
   reset: '\x1b[0m',
   bright: '\x1b[1m',
@@ -62,47 +29,26 @@ const C = {
   yellow: '\x1b[33m',
   magenta: '\x1b[35m',
 };
-const SYSTEM_INSTRUCTIONS = `You are an expert at writing concise, professional conventional commit messages.\n\nOutput format (follow exactly):\n\nBRANCH: [Generated branch name]\nCOMMIT_MESSAGE: [Generated conventional commit message]\nPR_TITLE: [Generated pull request title]\nPR_DESCRIPTION: [Generated pull request description]\n\n--- RULES ---\n1. **Branch Name**: Format: \`type/short-description\`, Types: feat, fix, refactor, chore, docs\n2. **Commit Message** (MOST IMPORTANT): First line: \`type(scope): short summary\` (max 60 chars), Blank line, Body: Bullet points with dash (-), each line max 80 chars, Focus on WHAT changed, not WHY or HOW, Group related changes together, Be specific but concise, If breaking change, add \`BREAKING CHANGE:\` footer\n3. **PR Title**: Same as commit first line, Max 60 characters\n4. **PR Description**: 2-3 paragraphs maximum, Bulleted list of key changes, Use GitHub-flavored Markdown`;
 
+// Re-implementing showHelp/displayResult/reportStats to avoid dependency on old runner
 export function showHelp() {
   const helpText = `
-  ${C.bright}Gemini Commit Message Helper${C.reset}
-
-  Automatically generates professional commit messages, branch names, and PR descriptions using Gemini AI.
-
-  ${C.bright}Usage:${C.reset}
-    gcm [options]
-
-  ${C.bright}Options:${C.reset}
-    ${C.cyan}-c, --commit <hash>${C.reset}   Analyse a specific commit instead of staged changes.
-    ${C.cyan}-h, --help${C.reset}            Show this help message.
-    ${C.cyan}-v, --verbose${C.reset}         Show detailed logs (debug level) in the console.
-    ${C.cyan}-d, --debug${C.reset}           Save complete logs to a '.debug.log' file for debugging.
-    ${C.cyan}--model <name>${C.reset}        Specify an alternative Gemini model to use.
-    ${C.cyan}--list-models${C.reset}         List available Gemini models and exit.
-
-  ${C.bright}Description:${C.reset}
-    This script takes all changes added to the Git staging area (using \`git add\`),
-    sends them to Gemini AI, and generates a suggested branch name, commit message,
-    pull request title, and description.
-
-    The script will fail if the GOOGLE_GEMINI_API_KEY is not set.
-
-  ${C.bright}Examples:${C.reset}
-    ${C.dim}# Generate a message for the current staged changes${C.reset}
-    $ gcm
-
-    ${C.dim}# Generate a message for a specific commit${C.reset}
-    $ gcm -c a1b2c3d
-
-    ${C.dim}# Run the script with detailed output for debugging${C.reset}
-    $ gcm -v -d
-  `;
+    ${C.bright}Gemini Commit Message Helper${C.reset}
+  
+    Automatically generates professional commit messages, branch names, and PR descriptions using Gemini AI.
+  
+    ${C.bright}Usage:${C.reset}
+      gcm [options]
+  
+    ${C.bright}Options:${C.reset}
+      ${C.cyan}-c, --commit <hash>${C.reset}   Analyse a specific commit instead of staged changes.
+      ${C.cyan}-h, --help${C.reset}            Show this help message.
+      ${C.cyan}-v, --verbose${C.reset}         Show detailed logs (debug level) in the console.
+      ${C.cyan}-d, --debug${C.reset}           Save complete logs to a '.debug.log' file for debugging.
+      ${C.cyan}--model <name>${C.reset}        Specify an alternative Gemini model to use.
+      ${C.cyan}--list-models${C.reset}         List available Gemini models and exit.
+    `;
   console.log(helpText.trim());
-}
-
-function estimateTokens(text: string): number {
-  return Math.ceil(encoder.encode(text).length / CONFIG.TOKEN_BYTES_RATIO);
 }
 
 export function displayResultStructured(logger: Logger, res: Labels): void {
@@ -116,175 +62,27 @@ export function displayResultStructured(logger: Logger, res: Labels): void {
 export function reportStats(
   logger: Logger,
   modelName: string,
-  usage: GeminiUsage,
+  usage: { promptTokens?: number; outputTokens?: number; thinkingTokens?: number } = {},
   outputLength: number,
 ): void {
   let thinking = '';
   if (usage.thinkingTokens) thinking = ` | thinking: ${usage.thinkingTokens}`;
   logger.log(
     'info',
-    `${C.dim}${modelName} | actual usage → input: ${usage.promptTokens} tokens | output: ${
-      usage.outputTokens
+    `${C.dim}${modelName} | actual usage → input: ${usage.promptTokens || 0} tokens | output: ${
+      usage.outputTokens || 0
     } tokens (${outputLength.toLocaleString()} chars)${thinking}${C.reset}\n`,
   );
 }
 
 function detectRuntime(): string {
-  // Project is Bun-only—always return 'bun'
   return 'bun';
 }
 
-export async function loadChanges(
-  commit: string | null,
-  options: LoadChangesOptions = {},
-  logger?: Logger,
-): Promise<LoadChangesResult | null> {
-  if (!ensureGitRepo()) throw new Error('Not a git repository');
-  const spawnStreamImpl = options.spawnStreamImpl || spawnGitStream;
-  if (commit) {
-    const r = await spawnStreamImpl(['show', '-w', commit]);
-    const diff = r.text;
-    const { truncated } = r;
-    if (!diff.trim()) {
-      logOrWrite(logger, 'info', `No changes found in commit ${commit}.`);
-      return null;
-    }
-    const names = (
-      await spawnStreamImpl(['show', '-w', '--name-only', '--pretty=format:', commit])
-    ).text.trim();
-    const files = names ? names.split('\n').filter(Boolean) : [];
-    return { stagedDiff: diff, stagedFiles: files, truncated };
-  }
-  const r = await spawnStreamImpl(['diff', '--staged', '-w']);
-  const diff = r.text;
-  const { truncated } = r;
-  if (!diff.trim()) {
-    logOrWrite(logger, 'info', 'No staged changes found. Use `git add` to stage files for commit.');
-    return null;
-  }
-  const names = (await spawnStreamImpl(['diff', '--staged', '-w', '--name-only'])).text.trim();
-  const files = names ? names.split('\n').filter(Boolean) : [];
-  return { stagedDiff: diff, stagedFiles: files, truncated };
-}
+// SYSTEM_INSTRUCTIONS
+const SYSTEM_INSTRUCTIONS_FULL = `You are an expert at writing concise, professional conventional commit messages.\n\nOutput format (follow exactly):\n\nBRANCH: [Generated branch name]\nCOMMIT_MESSAGE: [Generated conventional commit message]\nPR_TITLE: [Generated pull request title]\nPR_DESCRIPTION: [Generated pull request description]\n\n--- RULES ---\n1. **Branch Name**: Format: \`type/short-description\`, Types: feat, fix, refactor, chore, docs\n2. **Commit Message** (MOST IMPORTANT): First line: \`type(scope): short summary\` (max 60 chars), Blank line, Body: Bullet points with dash (-), each line max 80 chars, Focus on WHAT changed, not WHY or HOW, Group related changes together, Be specific but concise, If breaking change, add \`BREAKING CHANGE:\` footer\n3. **PR Title**: Same as commit first line, Max 60 characters\n4. **PR Description**: 2-3 paragraphs maximum, Bulleted list of key changes, Use GitHub-flavored Markdown`;
 
-export async function handleTokenLimitFallback(
-  logger: Logger,
-  stagedFiles: string[],
-  input: string,
-  maxOutputTokens: number,
-  attempt: number,
-  summaryUsed: boolean,
-): Promise<{ input: string; maxOutputTokens: number; summaryUsed: boolean }> {
-  if (!summaryUsed && Array.isArray(stagedFiles) && stagedFiles.length) {
-    logger.log(
-      'warn',
-      'Gemini returned MAX_TOKENS or no text; switching to top-hunks summary and retrying',
-      { attempt },
-    );
-    const summary = await summarizeLargeDiff(stagedFiles);
-    let newInput = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following summary and truncated diff.\n\n${summary.text}`;
-    if (summary.totalTruncated) {
-      newInput +=
-        '\n\nNote: The diff was truncated while being read due to per-file buffer limits.';
-    }
-    const newMaxOutput = Math.max(256, Math.floor(maxOutputTokens / 2));
-    await Bun.sleep(200 * attempt);
-    return { input: newInput, maxOutputTokens: newMaxOutput, summaryUsed: true };
-  }
-
-  const shrinkFactor = 0.5;
-  const allowedBytesNow = Math.max(0, Math.floor(input.length * shrinkFactor));
-  let newInput = input.substring(0, allowedBytesNow);
-  newInput = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following (input truncated to fit model context).\n\n${newInput}`;
-  const newMaxOutput = Math.max(256, Math.floor(maxOutputTokens / 2));
-
-  logger.log(
-    'warn',
-    'Gemini returned MAX_TOKENS or no text; retrying with smaller input and lower maxOutputTokens',
-    {
-      attempt,
-      newInputLength: newInput.length,
-      maxOutputOverride: newMaxOutput,
-    },
-  );
-  await Bun.sleep(500 * attempt);
-  return { input: newInput, maxOutputTokens: newMaxOutput, summaryUsed };
-}
-
-export async function callGeminiWithRetries(
-  config: GeminiRetryConfig,
-): Promise<GeminiResponse | null> {
-  let input = config.userContent;
-  let attempt = 0;
-  let maxOutputOverride = config.callOptions.maxOutputTokens || CONFIG.MAX_OUTPUT_TOKENS;
-  let summaryUsed = false;
-
-  const fallbackFn = config.fallbackHandler || handleTokenLimitFallback;
-
-  for (;;) {
-    attempt += 1;
-    try {
-      return await config.client.callGemini(
-        config.apiKey,
-        input,
-        config.enableThinking,
-        config.telemetryMeta,
-        {
-          maxOutputTokens: maxOutputOverride,
-          systemInstructions: config.callOptions.systemInstructions,
-          timeoutMs: config.callOptions.timeoutMs,
-        },
-      );
-    } catch (err: unknown) {
-      const errStr = String(err);
-      const isMaxTokens = /MAX_TOKENS/i.test(errStr) || /returned no text/i.test(errStr);
-
-      if (isMaxTokens && attempt < config.maxAttempts) {
-        const result = await fallbackFn(
-          config.logger,
-          config.stagedFiles,
-          input,
-          maxOutputOverride,
-          attempt,
-          summaryUsed,
-        );
-        input = result.input;
-        maxOutputOverride = result.maxOutputTokens;
-        summaryUsed = result.summaryUsed;
-        continue;
-      }
-
-      if (attempt >= config.maxAttempts) throw err;
-      throw err;
-    }
-  }
-}
-
-function prepareUserContent(
-  promptSuffix: string,
-  input: string,
-  staged: LoadChangesResult,
-  scopeSuggestions: string[],
-  logger: Logger,
-): string {
-  let userContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix}.\n\n`;
-
-  if (scopeSuggestions.length > 0) {
-    const hint = `To help you determine the best scope, here are some scopes that have been used previously for these files or are derived from the project structure: [${scopeSuggestions.join(
-      ', ',
-    )}]. Please consider using one of these if it is relevant to the current changes.\n\n`;
-    userContent += hint;
-    logger.log('info', `Found scope suggestions: ${scopeSuggestions.join(', ')}`);
-  }
-
-  userContent += `--- GIT DIFF ---\n${input}`;
-
-  if (staged.truncated) {
-    userContent += '\n\nNote: The diff was truncated while being read due to buffer limits.';
-  }
-
-  return userContent;
-}
+const SYSTEM_INSTRUCTIONS_COMMIT_ONLY = `You are an expert at writing concise, professional conventional commit messages.\n\nOutput format (follow exactly):\n\nCOMMIT_MESSAGE: [Generated conventional commit message]\n\n--- RULES ---\n1. **Commit Message** (MOST IMPORTANT): First line: \`type(scope): short summary\` (max 60 chars), Blank line, Body: Bullet points with dash (-), each line max 80 chars, Focus on WHAT changed, not WHY or HOW, Group related changes together, Be specific but concise, If breaking change, add \`BREAKING CHANGE:\` footer`;
 
 function logTokenInfo(
   modelName: string,
@@ -306,166 +104,163 @@ function logTokenInfo(
   }
 }
 
-function handleTokenTruncation(
-  userContent: string,
-  input: string,
-  tokens: number,
-  usableTokens: number,
-  staged: LoadChangesResult,
-  promptSuffix: string,
-  logger: Logger,
-): { userContent: string; input: string; tokens: number } {
-  if (tokens > usableTokens) {
-    const allowedBytes = Math.max(
-      0,
-      Math.floor(usableTokens * CONFIG.TOKEN_BYTES_RATIO * CONFIG.MAX_INPUT_TOKENS_SAFETY_FACTOR),
-    );
-    const truncatedInput = input.substring(0, allowedBytes);
-    const updatedUserContent = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix} (input truncated to fit model context).\n\n${truncatedInput}`;
-
-    let finalUserContent = updatedUserContent;
-    if (staged.truncated) {
-      finalUserContent +=
-        '\n\nNote: Original diff was truncated by buffer limit, and prompt truncated to fit model context.';
-    }
-
-    logger.log(
-      'info',
-      `${C.yellow}Input truncated to fit model context and avoid API quota limits.${C.reset}`,
-    );
-    const truncatedTokens = estimateTokens(finalUserContent + '\n\n' + SYSTEM_INSTRUCTIONS);
-    logger.log(
-      'info',
-      `${C.dim}After truncation → estimated input: ~${truncatedTokens} tokens${C.reset}`,
-    );
-
-    return { userContent: finalUserContent, input: truncatedInput, tokens: truncatedTokens };
-  }
-
-  return { userContent, input, tokens };
+export interface RunnerOptions {
+  logger?: Logger;
+  gitService?: any; // Using any to avoid importing types if not strictly needed or could import
+  contextService?: any;
+  geminiService?: any;
 }
 
-async function summarizeDiffIfNeeded(
-  input: string,
-  staged: LoadChangesResult,
-  logger: Logger,
-): Promise<{ input: string; promptSuffix: string; meta: Partial<LogMetadata> }> {
-  const meta: Partial<LogMetadata> = {};
+export async function executeCommitMessageGeneration(
+  argv?: string[],
+  dependencies?: RunnerOptions,
+): Promise<void> {
+  const opts = dependencies || {};
+  const parsedArgs: ParsedOptions = parseArgs(argv || process.argv.slice(2));
 
-  if (input.length <= CONFIG.CHILD_PROCESS_MAX_BUFFER) {
-    return { input, promptSuffix: 'diff', meta };
-  }
+  // Initialize Clack Intro
+  intro(`${C.bright}Gemini Commit Message Helper${C.reset}`);
 
-  logger.log(
-    'info',
-    `${C.yellow}Diff larger than buffer limit, creating concise summary...${C.reset}`,
-  );
-
-  const summary = await summarizeLargeDiff(staged.stagedFiles);
-  const summaryInput = summary.text;
-  meta.numHunks = summary.numHunks;
-  meta.totalTruncated = summary.totalTruncated;
-  logger.log('info', 'Built summary using top-hunks', {
-    numHunks: summary.numHunks,
-    totalTruncated: summary.totalTruncated,
-  });
-
-  return { input: summaryInput, promptSuffix: 'summary and truncated diff', meta };
-}
-
-async function handleSpecialModes(
-  parsedArgs: ParsedOptions,
-  opts: RunnerOptions,
-): Promise<boolean> {
   if (parsedArgs.help) {
     showHelp();
-    return true;
+    return;
   }
 
   if (parsedArgs.listModels) {
     const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
     if (!apiKey) {
-      console.error('Error: set GOOGLE_GEMINI_API_KEY before running.');
+      cancel('Error: GOOGLE_GEMINI_API_KEY is not set.');
       process.exit(1);
     }
     try {
       const models = await listGeminiModels(apiKey);
-      if (!models.length) {
-        console.log('No models found.');
-      } else {
-        console.log('Available Gemini models:');
-        for (const m of models) console.log('  -', m);
-      }
+      let modelList = 'Available Gemini models:\n';
+      for (const m of models) modelList += `  - ${m}\n`;
+      note(modelList);
+      outro('Done.');
     } catch (e) {
-      console.error('Failed to fetch models:', e);
+      cancel(`Failed to fetch models: ${e}`);
       process.exit(2);
     }
-    return true;
-  }
-
-  return false;
-}
-
-export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promise<void> {
-  const opts = runnerOptions || {};
-  const parsedArgs: ParsedOptions = parseArgs(argv || process.argv.slice(2));
-
-  if (await handleSpecialModes(parsedArgs, opts)) {
     return;
   }
 
+  // 1. Setup Logger
   const loggerConfig: LoggerConfig = {
     LOG_LEVEL: CONFIG.LOG_LEVEL,
     TELEMETRY_FILE: CONFIG.TELEMETRY_FILE,
   };
-  if (parsedArgs.verbose) {
-    loggerConfig.LOG_LEVEL = 'debug';
-  }
-  if (parsedArgs.debug) {
-    CONFIG.DEBUG_API = true;
-  }
-  const modelName = parsedArgs.model || CONFIG.MODEL_NAME;
+  if (parsedArgs.verbose) loggerConfig.LOG_LEVEL = 'debug';
+  if (parsedArgs.debug) CONFIG.DEBUG_API = true;
 
-  const TARGET_COMMIT = parsedArgs.commit || null;
   const logger = opts.logger || createLogger(loggerConfig);
+  const s = spinner();
+
+  // 2. Validate Env
   const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
   if (!apiKey) {
-    logger.log('error', 'Error: set GOOGLE_GEMINI_API_KEY before running.');
-    throw new Error('Environment variable GOOGLE_GEMINI_API_KEY not set');
+    cancel('Error: Environment variable GOOGLE_GEMINI_API_KEY not set.');
+    // We throw here to exit the flow, but the catch block will handle it gracefully if we structured it right.
+    // Or simply return.
+    return;
   }
-  let meta: LogMetadata = {};
+
+  const TARGET_COMMIT = parsedArgs.commit || null;
+  let modelName = parsedArgs.model || CONFIG.MODEL_NAME;
+  let outputMode: 'full' | 'commit-only' = 'commit-only'; // Default as requested
+
   try {
+    // 3. Initialize Services
+    const gitService = opts.gitService || createGitService();
+    const contextService = opts.contextService || createContextService();
+    const geminiClient = createGeminiClient({ config: CONFIG, logger });
+    const geminiService =
+      opts.geminiService || createGeminiService({ client: geminiClient, logger, apiKey });
+
     if (TARGET_COMMIT) {
       logger.log('info', `${C.dim}Using commit ${TARGET_COMMIT} for analysis${C.reset}`);
     }
-    logger.log(
-      'debug',
-      `${C.dim}Using top ${CONFIG.MAX_HUNKS} hunks (K=${CONFIG.MAX_HUNKS}); per-file weights enabled: ${CONFIG.ENABLE_HUNK_WEIGHTS}${C.reset}`,
-    );
-    const staged = await loadChanges(
-      TARGET_COMMIT,
-      {
-        spawnStreamImpl: opts.spawnStreamImpl || spawnGitStream,
-      },
-      logger,
-    );
-    if (!staged) return;
 
-    let input = staged.stagedDiff;
-    const origLen = input.length;
-    meta = {
+    // PRE-FLIGHT LOOP
+    // Skip if model is explicitly provided via CLI args
+    const skipPreFlight = !!parsedArgs.model;
+
+    if (!skipPreFlight) {
+      while (true) {
+        const modeLabel = outputMode === 'full' ? 'Full Report' : 'Commit Msg Only';
+        const action = await select({
+          message: `Settings: [Model: ${modelName}] [Mode: ${modeLabel}]`,
+          options: [
+            { value: 'generate', label: 'Generate' },
+            { value: 'configure', label: 'Configure...' },
+            { value: 'exit', label: 'Exit' },
+          ],
+        });
+
+        if (isCancel(action) || action === 'exit') {
+          outro('Bye!');
+          return;
+        }
+
+        if (action === 'configure') {
+          const configAction = await select({
+            message: 'Configure Settings',
+            options: [
+              { value: 'model', label: 'Change Model' },
+              { value: 'mode', label: 'Change Output Mode' },
+              { value: 'back', label: 'Back' },
+            ],
+          });
+
+          if (configAction === 'model') {
+            const selectedModel = await select({
+              message: 'Select AI Model',
+              options: KNOWN_MODELS.map(m => ({
+                value: m.name,
+                label: m.label,
+                hint: m.description,
+              })),
+            });
+            if (!isCancel(selectedModel)) modelName = String(selectedModel);
+          } else if (configAction === 'mode') {
+            const selectedMode = await select({
+              message: 'Select Output Mode',
+              options: [
+                {
+                  value: 'commit-only',
+                  label: 'Commit Message Only (Default)',
+                  hint: 'Faster, concise',
+                },
+                { value: 'full', label: 'Full Report (Branch, PR)', hint: 'Detailed' },
+              ],
+            });
+            if (!isCancel(selectedMode)) outputMode = selectedMode as 'full' | 'commit-only';
+          }
+          continue; // Loop back to Pre-flight
+        }
+        // If 'generate', break loop
+        break;
+      }
+    } // End if (!skipPreFlight)
+
+    // 4. Load Changes
+    s.start('Analyzing repository changes...');
+    const staged = await gitService.retrieveStagedChanges(TARGET_COMMIT, logger);
+    if (!staged) {
+      s.stop('No changes found');
+      cancel('No staged changes found. Use "git add" to stage files.');
+      return;
+    }
+    s.stop(`Found ${staged.stagedFiles.length} file(s) changed`);
+
+    const meta: LogMetadata = {
       targetCommit: TARGET_COMMIT || null,
       numFiles: staged.stagedFiles.length,
-      origLen,
+      origLen: staged.stagedDiff.length,
       truncated: staged.truncated,
     };
 
-    // Summarize diff if needed
-    const summaryResult = await summarizeDiffIfNeeded(input, staged, logger);
-    input = summaryResult.input;
-    meta = { ...meta, ...summaryResult.meta };
-
-    // Get scope suggestions
+    // 5. Get suggested scopes
     let scopeSuggestions: string[] = [];
     try {
       scopeSuggestions = await getScopeSuggestions(staged.stagedFiles);
@@ -473,107 +268,185 @@ export async function run(argv?: string[], runnerOptions?: RunnerOptions): Promi
       logger.log('debug', 'Failed to get scope suggestions', { error: String(e) });
     }
 
-    // Prepare user content
-    let userContent = prepareUserContent(
-      summaryResult.promptSuffix,
-      input,
-      staged,
-      scopeSuggestions,
-      logger,
-    );
+    // GENERATION LOOP
+    while (true) {
+      const modelSpec = getModelSpec(modelName);
+      const safeMaxTokens = modelSpec.maxInputTokens - CONFIG.MAX_OUTPUT_TOKENS - 1000;
 
-    // Estimate tokens and handle truncation
-    const tokens = estimatePromptTokens(
-      userContent + '\n\n' + SYSTEM_INSTRUCTIONS,
-      CONFIG.TOKEN_BYTES_RATIO,
-    );
-    const usableTokens = Math.min(
-      CONFIG.MAX_CONTEXT_TOKENS - CONFIG.MAX_OUTPUT_TOKENS - 32,
-      CONFIG.MAX_INPUT_TOKENS,
-    );
-    const truncationResult = handleTokenTruncation(
-      userContent,
-      input,
-      tokens,
-      usableTokens,
-      staged,
-      summaryResult.promptSuffix,
-      logger,
-    );
-    userContent = truncationResult.userContent;
-    input = truncationResult.input;
+      // 6. Build Context (Prompt)
+      const { promptContext, processedDiffContent, tokens } =
+        await contextService.constructLLMPromptContext(
+          staged.stagedDiff,
+          staged.truncated ? 'truncated diff' : 'diff',
+          safeMaxTokens,
+          CONFIG.TOKEN_BYTES_RATIO,
+          staged.stagedFiles,
+          scopeSuggestions,
+          logger,
+        );
 
-    // Log token info
-    logTokenInfo(modelName, truncationResult.tokens, input.length, CONFIG.ENABLE_THINKING, logger);
-    const runtime = detectRuntime();
-    logger.log('debug', 'Run started', { targetCommit: TARGET_COMMIT ?? null, runtime });
-    logger.log('debug', `${C.dim}Runtime: ${runtime}${C.reset}`);
-    const geminiClientFactory = opts.createGeminiClient || createGeminiClient;
-    const geminiClient = geminiClientFactory({ config: CONFIG, logger });
-    const geminiMaxAttemptsLocal = Math.max(1, CONFIG.GEMINI_MAX_RETRIES || 3);
-    const geminiOptions: GeminiCallOpts = {
-      maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS,
-      systemInstructions: SYSTEM_INSTRUCTIONS,
-      timeoutMs: 60000,
-    };
-    const response = await callGeminiWithRetries({
-      logger,
-      client: geminiClient,
-      apiKey,
-      userContent,
-      enableThinking: CONFIG.ENABLE_THINKING,
-      telemetryMeta: meta,
-      callOptions: geminiOptions,
-      stagedFiles: staged.stagedFiles,
-      maxAttempts: geminiMaxAttemptsLocal,
-    });
-    if (!response) {
-      logger.log('warn', 'Gemini did not return text after retries; using deterministic fallback', {
-        numFiles: staged.stagedFiles.length,
-        origLen,
-        inputLength: input.length,
-      });
-      // Build structured fallback object and display it using structured display
-      const structured = buildFallbackStructured(staged.stagedFiles);
-      const fallbackText = `BRANCH: ${structured.BRANCH}\nCOMMIT_MESSAGE: ${structured.COMMIT_MESSAGE}\n\nPR_TITLE: ${structured.PR_TITLE}\nPR_DESCRIPTION: ${structured.PR_DESCRIPTION}`;
-      displayResultStructured(logger, structured);
-      reportStats(
-        logger,
-        modelName,
-        { promptTokens: 0, outputTokens: 0, thinkingTokens: 0 },
-        fallbackText.length,
+      // 7. Call Gemini
+      const runtime = detectRuntime();
+      logTokenInfo(modelName, tokens, processedDiffContent.length, CONFIG.ENABLE_THINKING, logger);
+      logger.log('debug', 'Run started', { targetCommit: TARGET_COMMIT ?? null, runtime });
+
+      s.start(`Generating commit message with ${modelName}...`);
+
+      const systemPrompt =
+        outputMode === 'full' ? SYSTEM_INSTRUCTIONS_FULL : SYSTEM_INSTRUCTIONS_COMMIT_ONLY;
+
+      const response = await geminiService.callGeminiAPI(
+        promptContext,
+        systemPrompt,
+        staged.stagedFiles,
+        meta,
       );
-      return;
-    }
-    logger.log('debug', 'LLM response received', {
-      promptTokens: response.usage.promptTokens,
-      outputTokens: response.usage.outputTokens,
-      ...meta,
-    });
-    let parsedOut: Labels | null = null;
-    try {
-      parsedOut = parseGeminiOutput(response.text);
-    } catch {
-      parsedOut = null;
-    }
-    if (parsedOut) displayResultStructured(logger, parsedOut);
-    else logger.log('info', response.text);
-    reportStats(logger, modelName, response.usage, response.text.length);
+      s.stop('Gemini response received');
+
+      // 8. Handle Response / Fallback
+      if (!response) {
+        logger.log(
+          'warn',
+          'Gemini did not return text after retries; using deterministic fallback',
+        );
+        const structured = generateFallbackCommitDetails(staged.stagedFiles);
+        // Fallback display logic remains simple for now
+        displayResultStructured(logger, structured);
+        return;
+      }
+
+      logger.log('debug', 'LLM response received', {
+        promptTokens: response.usage.promptTokens,
+        outputTokens: response.usage.outputTokens,
+        ...meta,
+      });
+
+      // 9. Parse and Display
+      let parsedOut: Labels | null = null;
+      try {
+        parsedOut = parseGeminiOutput(response.text);
+      } catch {
+        if (outputMode === 'commit-only') {
+          // In commit-only, the whole text IS the commit message essentially,
+          // or we try to parse if structure is kept.
+          // Since update to system instructions likely removes keys, we might need robust parsing.
+          // For commit-only, let's assume the response IS the message if parse fails.
+          parsedOut = { COMMIT_MESSAGE: response.text.trim() } as Labels;
+        } else {
+          parsedOut = null;
+        }
+      }
+
+      // If still null check
+      if (!parsedOut && outputMode === 'commit-only') {
+        parsedOut = { COMMIT_MESSAGE: response.text.trim() } as Labels;
+      }
+
+      if (parsedOut) {
+        let noteContent = '';
+        if (outputMode === 'full') {
+          noteContent = `BRANCH: ${parsedOut.BRANCH || 'N/A'}\n\n${parsedOut.COMMIT_MESSAGE}`;
+        } else {
+          noteContent = parsedOut.COMMIT_MESSAGE;
+        }
+
+        note(noteContent, outputMode === 'full' ? 'Generated Report' : 'Generated Commit Message');
+
+        let finalMessage = parsedOut.COMMIT_MESSAGE;
+        let action = null;
+
+        const integrityLoop = true;
+        while (integrityLoop) {
+          // Inner loop for Action Menu
+          action = await select({
+            message: 'What would you like to do?',
+            options: [
+              { value: 'commit', label: 'Commit' },
+              { value: 'edit', label: 'Edit message' },
+              { value: 'regenerate', label: 'Switch Model & Regenerate' },
+              { value: 'cancel', label: 'Cancel' },
+            ],
+          });
+
+          if (isCancel(action) || action === 'cancel') {
+            outro('Commit cancelled.');
+            return;
+          }
+
+          if (action === 'edit') {
+            const edited = await text({
+              message: 'Edit commit message',
+              initialValue: finalMessage,
+              placeholder: 'Enter commit message',
+            });
+
+            if (isCancel(edited)) {
+              // Don't exit, just back to menu
+              continue;
+            }
+            finalMessage = String(edited);
+            note(finalMessage, 'Updated Commit Message');
+            continue;
+          }
+
+          if (action === 'regenerate') {
+            const selectedModel = await select({
+              message: 'Select AI Model for Regeneration',
+              options: KNOWN_MODELS.map(m => ({
+                value: m.name,
+                label: m.label,
+                hint: m.description,
+              })),
+            });
+            if (!isCancel(selectedModel)) {
+              modelName = String(selectedModel);
+              break; // BREAK inner loop to OUTER generation loop
+            }
+            continue; // If cancelled, stay in menu
+          }
+
+          if (action === 'commit') {
+            s.start('Committing changes...');
+            try {
+              await gitService.commitChanges(finalMessage, logger);
+              s.stop('Changes committed successfully');
+              outro(`${C.cyan}Commit successfully created!${C.reset}`);
+            } catch (e) {
+              s.stop('Commit failed');
+              cancel(`Failed to commit changes: ${e}`);
+              logger.log('error', `Commit failed: ${e}`);
+            }
+            return;
+          }
+        } // End Action Loop
+
+        // If we broke out here with action === 'regenerate', we loop back to GENERATION loop
+        if (action === 'regenerate') continue;
+      } else {
+        logger.log('info', response.text);
+        outro('Failed to parse structured output.');
+        return;
+      }
+
+      reportStats(logger, modelName, response.usage, response.text.length);
+      break; // Exit Generation Loop if done or error
+    } // End Generation Loop
   } catch (error: unknown) {
+    s.stop('An error occurred'); // Stop spinner if running
     const errStr = String(error);
     if (/Not a git repository/i.test(errStr)) {
-      logger.log('error', 'Error: Not inside a git repository.');
+      cancel('Error: Not inside a git repository.');
     } else if (/unknown revision/i.test(errStr)) {
-      logger.log('error', `Error: Invalid commit SHA: ${TARGET_COMMIT}`);
+      cancel(`Error: Invalid commit SHA: ${TARGET_COMMIT}`);
     } else {
-      logger.log('error', `Gemini commit helper failed: ${error}`);
-      opts.logger?.log('error', `Gemini commit helper failed: ${error}`, {
-        error: errStr,
-        meta: meta || {},
-      });
+      // Log full details for debugging
+      logger.log('error', `Gemini commit helper failed: ${error}`, { error: errStr });
+      // Show user friendly message
+      cancel(`An unexpected error occurred: ${errStr}`);
     }
-    throw error;
+    // process.exit(1); // Optional: ensure non-zero exit code if wrapper doesn't handle it
+    throw error; // Re-throw if the caller needs to know, but CLI likely ends here.
   }
 }
 
-export default { run };
+export default { executeCommitMessageGeneration };

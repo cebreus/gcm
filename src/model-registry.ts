@@ -35,11 +35,11 @@ export const KNOWN_MODELS: ModelSpec[] = [
     description: 'Bleeding edge capabilities.',
   },
   {
-    name: 'gemini-2.0-flash',
-    label: 'Gemini 2.0 Flash (Fallback)',
+    name: 'gemini-2.5-flash-lite',
+    label: 'Gemini 2.5 Flash Lite (Fallback)',
     maxInputTokens: 1_000_000,
-    maxOutputTokens: 8192,
-    description: 'Reliable previous generation.',
+    maxOutputTokens: 4096,
+    description: 'Lightweight version of Flash, optimized for speed.',
   },
 ];
 

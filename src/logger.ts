@@ -145,7 +145,7 @@ export function createLogger(config?: LoggerConfig): Logger {
     if (timer) return;
     timer = setTimeout(function () {
       timer = null;
-      // eslint-disable-next-line @typescript-eslint/no-empty-function
+
       flush().catch(function () {});
     }, flushIntervalMs);
   }
