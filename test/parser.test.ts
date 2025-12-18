@@ -29,10 +29,36 @@ test('parser: parseGeminiOutput - should handle unicode characters in messages',
 });
 
 test('parser: parseGeminiOutput - should handle very long commit messages', () => {
-  const longMessage = 'a'.repeat(1024 * 10); // 10KB message
+  // Create a long message with words so it can be wrapped properly
+  const words = Array(200).fill('word').join(' '); // Create text with 200 words
+  const longMessage = `feat: ${words}`;
   const sample = `BRANCH: feat/long-msg\nCOMMIT_MESSAGE: ${longMessage}\nPR_TITLE: Long message\nPR_DESCRIPTION: test`;
   const parsed = parseGeminiOutput(sample);
-  expect(parsed.COMMIT_MESSAGE).toBe(longMessage);
+  // Formatting should wrap the message
+  const lines = parsed.COMMIT_MESSAGE.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (i === 0) {
+      expect(lines[i].length).toBeLessThanOrEqual(60);
+    } else if (lines[i].trim().length > 0) {
+      expect(lines[i].length).toBeLessThanOrEqual(80);
+    }
+  }
+});
+
+test('parser: parseGeminiOutput - should format commit message with body text', () => {
+  const longBody = `feat: add very long feature description that exceeds the sixty character limit for the first line of a commit message\n\nThis is the body of the commit message that contains a very long line that definitely exceeds the eighty character limit and should be wrapped appropriately`;
+  const sample = `BRANCH: feat/long-body\nCOMMIT_MESSAGE: ${longBody}\nPR_TITLE: Long body\nPR_DESCRIPTION: test`;
+  const parsed = parseGeminiOutput(sample);
+  const lines = parsed.COMMIT_MESSAGE.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (i === 0) {
+      // First line max 60
+      expect(lines[i].length).toBeLessThanOrEqual(60);
+    } else if (lines[i].trim().length > 0) {
+      // Body lines max 80
+      expect(lines[i].length).toBeLessThanOrEqual(80);
+    }
+  }
 });
 
 test('parser: parseGeminiOutput - should throw on empty required label values', () => {
