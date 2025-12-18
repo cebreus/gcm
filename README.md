@@ -153,7 +153,7 @@ The tool can be configured using environment variables. These are defined in `gc
 
 | Variable                      | Description                                        | Default            |
 | ----------------------------- | -------------------------------------------------- | ------------------ |
-| `GCM_MODEL` or `GEMINI_MODEL` | The Gemini model to use for generation.            | `gemini-1.5-flash` |
+| `GCM_MODEL` or `GEMINI_MODEL` | The Gemini model to use for generation.            | `gemini-2.5-flash` |
 | `GCM_TEMPERATURE`             | The creativity of the model (0.0 to 1.0).          | `0.5`              |
 | `GCM_MAX_HUNKS`               | The maximum number of git diff "hunks" to analyze. | `16`               |
 | `GCM_LOG_LEVEL`               | The default logging level for the console.         | `info`             |

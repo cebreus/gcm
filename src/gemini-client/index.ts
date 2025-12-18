@@ -102,7 +102,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
     let attempt = 0;
     const urlBase =
       'https://generativelanguage.googleapis.com/v1beta/models/' +
-      (config.MODEL_NAME || 'gemini-1.5-flash') +
+      (config.MODEL_NAME || 'gemini-2.5-flash') +
       ':generateContent';
     for (;;) {
       attempt += 1;
