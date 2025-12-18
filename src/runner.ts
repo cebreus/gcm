@@ -20,6 +20,7 @@ import { createGeminiService } from './services/gemini-service.js';
 import { generateFallbackCommitDetails } from './runner-utils.js'; // Keep this for now
 import { intro, outro, spinner, note, select, text, isCancel, cancel } from '@clack/prompts';
 import { KNOWN_MODELS, getModelSpec } from './model-registry.js';
+import clipboardy from 'clipboardy';
 
 const C = {
   reset: '\x1b[0m',
@@ -362,6 +363,7 @@ export async function executeCommitMessageGeneration(
             message: 'What would you like to do?',
             options: [
               { value: 'commit', label: 'Commit' },
+              { value: 'copy', label: 'Copy to clipboard' },
               { value: 'edit', label: 'Edit message' },
               { value: 'regenerate', label: 'Switch Model & Regenerate' },
               { value: 'cancel', label: 'Cancel' },
@@ -371,6 +373,18 @@ export async function executeCommitMessageGeneration(
           if (isCancel(action) || action === 'cancel') {
             outro('Commit cancelled.');
             return;
+          }
+
+          if (action === 'copy') {
+            try {
+              await clipboardy.write(finalMessage);
+              note('Commit message copied to clipboard!', 'Success');
+              outro(`${C.cyan}Message copied successfully!${C.reset}`);
+              return;
+            } catch (e) {
+              note(`Failed to copy to clipboard: ${e}`, 'Error');
+              continue;
+            }
           }
 
           if (action === 'edit') {
