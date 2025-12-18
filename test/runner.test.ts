@@ -25,6 +25,14 @@ mock.module('@clack/prompts', () => ({
   cancel: mockCancel,
 }));
 
+// Mock clipboardy
+const mockClipboardyWrite = mock(() => Promise.resolve());
+mock.module('clipboardy', () => ({
+  default: {
+    write: mockClipboardyWrite,
+  },
+}));
+
 // Mocks
 const mockLogger = { log: mock(), flush: mock(), flushSync: mock() };
 const mockGitService = { retrieveStagedChanges: mock(), commitChanges: mock() };
@@ -45,6 +53,9 @@ describe('Refactored Runner', () => {
     mockNote.mockClear();
     mockSelect.mockClear();
     mockText.mockClear();
+
+    // Clear clipboardy mock
+    mockClipboardyWrite.mockClear();
   });
 
   test('Should orchestrate services correctly', async () => {
@@ -141,6 +152,43 @@ describe('Refactored Runner', () => {
       geminiService: mockGeminiService,
     });
     expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
+  });
+
+  test('Should handle Copy to clipboard flow', async () => {
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['file.ts'],
+      truncated: false,
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.callGeminiAPI.mockResolvedValue({
+      text: 'COMMIT_MESSAGE: test message',
+      usage: {},
+    });
+
+    // Flow: 'generate' -> 'copy' -> 'commit'
+    mockSelect
+      .mockResolvedValueOnce('generate') // Pre-flight
+      .mockResolvedValueOnce('copy') // Review - copy to clipboard
+      .mockResolvedValueOnce('commit'); // Review - commit
+
+    await executeCommitMessageGeneration([], {
+      logger: mockLogger as any,
+      gitService: mockGitService,
+      contextService: mockContextService,
+      geminiService: mockGeminiService,
+    });
+
+    // Verify clipboardy.write was called with correct message (full output including prefix)
+    expect(mockClipboardyWrite).toHaveBeenCalledWith('COMMIT_MESSAGE: test message');
+    // Verify note was shown about successful copy
+    expect(mockNote).toHaveBeenCalledWith('Commit message copied to clipboard!', 'Success');
+    // Verify commit was eventually called
+    expect(mockGitService.commitChanges).toHaveBeenCalled();
   });
 
   test('Should handle Regeneration flow', async () => {

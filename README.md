@@ -131,6 +131,16 @@ This refactors the logging mechanism for the Gemini API client.
 | `--model <name>`  |       | Specify an alternative Gemini model to use.          |
 | `--list-models`   |       | List available Gemini models from the API and exit.  |
 
+### Interactive Menu
+
+After generating a commit message, you'll be presented with an interactive menu with the following options:
+
+- **Commit**: Directly commit the generated message to your repository
+- **Copy to clipboard**: Copy the commit message to your system clipboard for later use
+- **Edit message**: Manually edit the commit message before committing
+- **Switch Model & Regenerate**: Choose a different AI model and regenerate the message
+- **Cancel**: Exit without committing
+
 ### Analyze a Past Commit
 
 To generate a message for a commit that has already been made:
