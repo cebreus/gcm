@@ -19,6 +19,7 @@ This project was created to streamline the commit process, enforce a consistent 
 - **AI-Powered Generation:** Uses Google's Gemini models to generate high-quality commit artifacts.
 - **Full Artifact Suite:** Creates not just a commit message, but also a conventional branch name, PR title, and PR description.
 - **Conventional Commits:** Enforces the Conventional Commits specification for a clean and readable git history.
+- **Automatic Formatting:** Automatically wraps commit messages to standard limits (60 chars for subject, 80 chars for body) while preserving Markdown structure.
 - **Context-Aware Analysis:** Analyzes staged `git diff` output or a specific commit hash.
 - **Handles Large Diffs:** Intelligently summarizes large changes to fit within the model's context window.
 

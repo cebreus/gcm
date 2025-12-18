@@ -4,6 +4,7 @@ import {
   pushHunkToTop,
   unescapeNewlinesInText,
   detectRepoType,
+  formatCommitMessage,
 } from '../src/utils';
 import type { Hunk } from '../src/utils';
 
@@ -130,4 +131,85 @@ test('utils: detectRepoType - should return single for regular repo', async () =
   existsMock.mockImplementation(async () => false);
   const result = await detectRepoType();
   expect(result).toBe('single');
+});
+// --- Tests for formatCommitMessage ---
+test('utils: formatCommitMessage - should preserve short messages', () => {
+  const msg = 'feat: add new feature';
+  expect(formatCommitMessage(msg)).toBe(msg);
+});
+
+test('utils: formatCommitMessage - should wrap first line to 60 chars', () => {
+  const msg =
+    'feat: this is a very long commit message that exceeds the maximum allowed first line length';
+  const result = formatCommitMessage(msg);
+  const firstLine = result.split('\n')[0];
+  expect(firstLine.length).toBeLessThanOrEqual(60);
+  expect(result).toContain('feat:');
+});
+
+test('utils: formatCommitMessage - should wrap body lines to 80 chars', () => {
+  const msg = `feat: add feature\n\nThis is a very long body line that definitely exceeds the maximum allowed length of eighty characters for body lines`;
+  const result = formatCommitMessage(msg);
+  const lines = result.split('\n');
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim().length > 0) {
+      expect(lines[i].length).toBeLessThanOrEqual(80);
+    }
+  }
+});
+
+test('utils: formatCommitMessage - should preserve bullet points', () => {
+  const msg = `feat: add feature\n\n- This is a long bullet point item that might exceed the eighty character limit and should be wrapped`;
+  const result = formatCommitMessage(msg);
+  expect(result).toContain('- ');
+  const lines = result.split('\n');
+  for (const line of lines) {
+    if (line.startsWith('-') || line.includes('- ')) {
+      expect(line.length).toBeLessThanOrEqual(80);
+    }
+  }
+});
+
+test('utils: formatCommitMessage - should preserve backticks', () => {
+  const msg = `feat: add \`formatCommitMessage\` function\n\nImplemented a new formatter that wraps long lines while preserving \`backtick-enclosed\` code spans`;
+  const result = formatCommitMessage(msg);
+  expect(result).toContain('`formatCommitMessage`');
+  expect(result).toContain('`backtick-enclosed`');
+});
+
+test('utils: formatCommitMessage - should preserve empty lines', () => {
+  const msg = `feat: add feature\n\nBody paragraph one\n\nBody paragraph two`;
+  const result = formatCommitMessage(msg);
+  const lines = result.split('\n');
+  expect(lines.length).toBe(5); // subject, blank, para1, blank, para2
+  expect(lines[1]).toBe('');
+  expect(lines[3]).toBe('');
+});
+
+test('utils: formatCommitMessage - should handle multiple short bullet points', () => {
+  const msg = `feat: add feature\n\n- Item 1\n- Item 2\n- Item 3`;
+  const result = formatCommitMessage(msg);
+  expect(result).toContain('- Item 1');
+  expect(result).toContain('- Item 2');
+  expect(result).toContain('- Item 3');
+});
+
+test('utils: formatCommitMessage - should wrap long bullet continuation', () => {
+  const msg = `fix: resolve issues\n\n- This is an extremely long bullet point that definitely exceeds eighty characters and must be wrapped to multiple lines`;
+  const result = formatCommitMessage(msg);
+  const lines = result.split('\n');
+  for (const line of lines) {
+    if (line.trim().length > 0) {
+      expect(line.length).toBeLessThanOrEqual(80);
+    }
+  }
+});
+
+test('utils: formatCommitMessage - should handle empty string', () => {
+  expect(formatCommitMessage('')).toBe('');
+});
+
+test('utils: formatCommitMessage - should handle null/undefined gracefully', () => {
+  expect(formatCommitMessage(null as any)).toBe(null);
+  expect(formatCommitMessage(undefined as any)).toBe(undefined);
 });
