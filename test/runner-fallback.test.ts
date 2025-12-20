@@ -20,6 +20,24 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
     return await Promise.resolve({ text: '', truncated: false });
   }
 
+  // Provide a git service that returns staged changes
+  function createGitServiceFake() {
+    return {
+      retrieveStagedChanges: async (
+        commitHash: string | null,
+        logger: any,
+        excludePatterns: string[] = [],
+      ) => {
+        return {
+          stagedDiff: 'diff --staged content',
+          stagedFiles: ['src/index.js', 'README.md'],
+          truncated: false,
+        };
+      },
+      commitChanges: async (message: string, logger: any) => {},
+    };
+  }
+
   // Provide a service that returns null to trigger fallback
   function createGeminiServiceFake() {
     return {
@@ -44,7 +62,7 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
   process.env.GOOGLE_GEMINI_API_KEY = 'fake-key';
   try {
     await runner.executeCommitMessageGeneration(['--model', 'gemini-2.5-flash'], {
-      spawnStreamImpl,
+      gitService: createGitServiceFake(),
       geminiService: createGeminiServiceFake(),
       logger: createLogger({ LOG_LEVEL: 'info' }),
     });

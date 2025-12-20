@@ -11,6 +11,7 @@ test('cli: should parse default arguments with empty argv', () => {
     verbose: false,
     debug: false,
     listModels: false,
+    exclude: [],
   });
 });
 
@@ -81,6 +82,7 @@ test('cli: should ignore unknown flags', () => {
     verbose: false,
     debug: false,
     listModels: false,
+    exclude: [],
   });
 });
 
@@ -91,4 +93,32 @@ test('cli: should handle boolean flag variations for dry-run', () => {
   //This is how minimist handles camelCase args
   result = parseArgs(['--dryRun']);
   expect(result.dryRun).toBe(true);
+});
+
+test('cli: should handle -e/--exclude flag with a single pattern', () => {
+  let result = parseArgs(['-e', '*manifest*']);
+  expect(result.exclude).toEqual(['*manifest*']);
+
+  result = parseArgs(['--exclude', '*manifest*']);
+  expect(result.exclude).toEqual(['*manifest*']);
+});
+
+test('cli: should handle --exclude flag with comma-separated patterns', () => {
+  const result = parseArgs(['--exclude', '*manifest*,*.lock,dist/*']);
+  expect(result.exclude).toEqual(['*manifest*', '*.lock', 'dist/*']);
+});
+
+test('cli: should handle multiple --exclude flags', () => {
+  const result = parseArgs(['--exclude', '*manifest*', '--exclude', '*.lock']);
+  expect(result.exclude).toEqual(['*manifest*', '*.lock']);
+});
+
+test('cli: should handle --exclude with mixed comma-separated and multiple flags', () => {
+  const result = parseArgs(['--exclude', '*manifest*,*.lock', '--exclude', 'dist/*']);
+  expect(result.exclude).toEqual(['*manifest*', '*.lock', 'dist/*']);
+});
+
+test('cli: should handle --exclude with spaces around patterns', () => {
+  const result = parseArgs(['--exclude', ' *manifest* , *.lock ']);
+  expect(result.exclude).toEqual(['*manifest*', '*.lock']);
 });

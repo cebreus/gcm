@@ -1,4 +1,5 @@
 import { spawnGitStream } from '../git-utils.js';
+import { filterExcludedFiles } from '../utils.js';
 import type { Logger } from '../logger.js';
 
 export interface StagedChangesResult {
@@ -12,6 +13,7 @@ export interface GitService {
   retrieveStagedChanges(
     commitHash: string | null,
     logger: Logger | null,
+    excludePatterns?: string[],
   ): Promise<StagedChangesResult | null>;
   commitChanges(message: string, logger: Logger | null): Promise<void>;
 }
@@ -31,6 +33,7 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
   async function retrieveStagedChanges(
     commitHash: string | null,
     logger: Logger | null = null,
+    excludePatterns: string[] = [],
   ): Promise<StagedChangesResult | null> {
     if (logger) logger.log('debug', 'Checking git status');
 
@@ -44,10 +47,23 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
 
     const fileListRes = await gitCommandRunner(fileListArgs);
 
-    const files = fileListRes.text
+    let files = fileListRes.text
       .split('\n')
       .map(s => s.trim())
       .filter(Boolean);
+
+    // Filter out excluded files
+    const originalFileCount = files.length;
+    files = filterExcludedFiles(files, excludePatterns);
+
+    if (excludePatterns.length > 0 && files.length < originalFileCount) {
+      const excludedCount = originalFileCount - files.length;
+      if (logger)
+        logger.log(
+          'info',
+          `Excluded ${excludedCount} file(s) matching patterns: ${excludePatterns.join(', ')}`,
+        );
+    }
 
     if (files.length === 0) {
       if (commitHash) {

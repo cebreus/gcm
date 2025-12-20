@@ -5,6 +5,8 @@ import {
   unescapeNewlinesInText,
   detectRepoType,
   formatCommitMessage,
+  shouldExcludeFile,
+  filterExcludedFiles,
 } from '../src/utils';
 import type { Hunk } from '../src/utils';
 
@@ -212,4 +214,68 @@ test('utils: formatCommitMessage - should handle empty string', () => {
 test('utils: formatCommitMessage - should handle null/undefined gracefully', () => {
   expect(formatCommitMessage(null as any)).toBe(null);
   expect(formatCommitMessage(undefined as any)).toBe(undefined);
+});
+
+// --- Tests for shouldExcludeFile ---
+test('utils: shouldExcludeFile - should match exact patterns', () => {
+  expect(shouldExcludeFile('manifest.json', ['manifest.json'])).toBe(true);
+  expect(shouldExcludeFile('package.json', ['manifest.json'])).toBe(false);
+});
+
+test('utils: shouldExcludeFile - should match wildcard patterns', () => {
+  expect(shouldExcludeFile('manifest.json', ['*manifest*'])).toBe(true);
+  expect(shouldExcludeFile('src/manifest.json', ['*manifest*'])).toBe(true);
+  expect(shouldExcludeFile('manifest-prod.json', ['*manifest*'])).toBe(true);
+  expect(shouldExcludeFile('package.json', ['*manifest*'])).toBe(false);
+});
+
+test('utils: shouldExcludeFile - should match multiple patterns', () => {
+  expect(shouldExcludeFile('manifest.json', ['*manifest*', '*lock*'])).toBe(true);
+  expect(shouldExcludeFile('package-lock.json', ['*manifest*', '*lock*'])).toBe(true);
+  expect(shouldExcludeFile('src/app.ts', ['*manifest*', '*lock*'])).toBe(false);
+});
+
+test('utils: shouldExcludeFile - should match extension patterns', () => {
+  expect(shouldExcludeFile('file.lock', ['*.lock'])).toBe(true);
+  expect(shouldExcludeFile('package-lock.json', ['*.lock'])).toBe(false);
+});
+
+test('utils: shouldExcludeFile - should handle empty patterns', () => {
+  expect(shouldExcludeFile('manifest.json', [])).toBe(false);
+  expect(shouldExcludeFile('manifest.json', [''])).toBe(false);
+});
+
+test('utils: shouldExcludeFile - should handle path-based patterns', () => {
+  expect(shouldExcludeFile('dist/manifest.json', ['dist/*'])).toBe(true);
+  expect(shouldExcludeFile('src/manifest.json', ['dist/*'])).toBe(false);
+});
+
+test('utils: shouldExcludeFile - should be case-sensitive', () => {
+  expect(shouldExcludeFile('Manifest.json', ['*manifest*'])).toBe(false);
+  expect(shouldExcludeFile('manifest.json', ['*manifest*'])).toBe(true);
+});
+
+// --- Tests for filterExcludedFiles ---
+test('utils: filterExcludedFiles - should filter multiple files', () => {
+  const files = ['src/app.ts', 'manifest.json', 'src/manifest.ts', 'package.json'];
+  const result = filterExcludedFiles(files, ['*manifest*']);
+  expect(result).toEqual(['src/app.ts', 'package.json']);
+});
+
+test('utils: filterExcludedFiles - should handle multiple patterns', () => {
+  const files = ['src/app.ts', 'manifest.json', 'package-lock.json', 'package.json'];
+  const result = filterExcludedFiles(files, ['*manifest*', '*lock*']);
+  expect(result).toEqual(['src/app.ts', 'package.json']);
+});
+
+test('utils: filterExcludedFiles - should return all files when no patterns', () => {
+  const files = ['src/app.ts', 'manifest.json', 'package.json'];
+  const result = filterExcludedFiles(files, []);
+  expect(result).toEqual(files);
+});
+
+test('utils: filterExcludedFiles - should return empty array when all excluded', () => {
+  const files = ['manifest.json', 'manifest.ts'];
+  const result = filterExcludedFiles(files, ['*manifest*']);
+  expect(result).toEqual([]);
 });
