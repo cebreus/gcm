@@ -42,12 +42,15 @@ export function showHelp() {
       gcm [options]
   
     ${C.bright}Options:${C.reset}
-      ${C.cyan}-c, --commit <hash>${C.reset}   Analyse a specific commit instead of staged changes.
-      ${C.cyan}-h, --help${C.reset}            Show this help message.
-      ${C.cyan}-v, --verbose${C.reset}         Show detailed logs (debug level) in the console.
-      ${C.cyan}-d, --debug${C.reset}           Save complete logs to a '.debug.log' file for debugging.
-      ${C.cyan}--model <name>${C.reset}        Specify an alternative Gemini model to use.
-      ${C.cyan}--list-models${C.reset}         List available Gemini models and exit.
+      ${C.cyan}-c, --commit <hash>${C.reset}       Analyse a specific commit instead of staged changes.
+      ${C.cyan}-h, --help${C.reset}                Show this help message.
+      ${C.cyan}-v, --verbose${C.reset}             Show detailed logs (debug level) in the console.
+      ${C.cyan}-d, --debug${C.reset}               Save complete logs to a '.debug.log' file for debugging.
+      ${C.cyan}-e, --exclude <pattern>${C.reset}   Exclude files matching pattern (e.g., *manifest*).
+                                Can be comma-separated or used multiple times.
+      ${C.cyan}--model <name>${C.reset}            Specify an alternative Gemini model to use.
+      ${C.cyan}--list-models${C.reset}             List available Gemini models and exit.
+
     `;
   console.log(helpText.trim());
 }
@@ -246,7 +249,11 @@ export async function executeCommitMessageGeneration(
 
     // 4. Load Changes
     s.start('Analyzing repository changes...');
-    const staged = await gitService.retrieveStagedChanges(TARGET_COMMIT, logger);
+    const staged = await gitService.retrieveStagedChanges(
+      TARGET_COMMIT,
+      logger,
+      parsedArgs.exclude,
+    );
     if (!staged) {
       s.stop('No changes found');
       cancel('No staged changes found. Use "git add" to stage files.');

@@ -10,6 +10,7 @@ interface Args extends ParsedArgs {
   debug?: boolean;
   'list-models'?: boolean;
   listModels?: boolean;
+  exclude?: string | string[];
 }
 
 export interface ParsedOptions {
@@ -20,14 +21,31 @@ export interface ParsedOptions {
   verbose: boolean;
   debug: boolean;
   listModels: boolean;
+  exclude: string[];
 }
 
 export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions {
   const parsed: Args = minimist(argv, {
-    alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug' },
+    alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug', e: 'exclude' },
     boolean: ['help', 'dry-run', 'verbose', 'debug', 'list-models'],
-    string: ['commit', 'model'],
+    string: ['commit', 'model', 'exclude'],
   });
+
+  // Parse exclude patterns - can be comma-separated or multiple --exclude flags
+  let excludePatterns: string[] = [];
+  if (parsed.exclude) {
+    if (Array.isArray(parsed.exclude)) {
+      excludePatterns = parsed.exclude
+        .flatMap(e => e.split(',').map(s => s.trim()))
+        .filter(Boolean);
+    } else if (typeof parsed.exclude === 'string') {
+      excludePatterns = parsed.exclude
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+  }
+
   return {
     commit: parsed.commit || null,
     dryRun: Boolean(parsed['dry-run']) || Boolean(parsed.dryRun) || false,
@@ -36,5 +54,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     verbose: Boolean(parsed.verbose),
     debug: Boolean(parsed.debug),
     listModels: Boolean(parsed['list-models']) || Boolean(parsed.listModels) || false,
+    exclude: excludePatterns,
   };
 }

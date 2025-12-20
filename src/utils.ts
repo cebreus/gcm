@@ -18,6 +18,43 @@ export interface Hunk {
 }
 
 /**
+ * Converts a glob pattern to a regex
+ * Supports simple wildcards: * matches anything, ? matches single char
+ */
+function globToRegex(pattern: string): RegExp {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape regex special chars
+    .replace(/\*/g, '.*') // * -> .*
+    .replace(/\?/g, '.'); // ? -> .
+  return new RegExp(`^${escaped}$`);
+}
+
+/**
+ * Checks if a file path matches any of the exclude patterns
+ */
+export function shouldExcludeFile(filePath: string, excludePatterns: string[]): boolean {
+  if (!excludePatterns || excludePatterns.length === 0) {
+    return false;
+  }
+
+  return excludePatterns.some(pattern => {
+    const regex = globToRegex(pattern);
+    return regex.test(filePath);
+  });
+}
+
+/**
+ * Filters files based on exclude patterns
+ */
+export function filterExcludedFiles(files: string[], excludePatterns: string[]): string[] {
+  if (!excludePatterns || excludePatterns.length === 0) {
+    return files;
+  }
+
+  return files.filter(file => !shouldExcludeFile(file, excludePatterns));
+}
+
+/**
  * Determines file importance weight for prioritizing hunks
  */
 export function fileImportanceWeight(file: string): number {
@@ -133,7 +170,7 @@ export function unescapeNewlinesInText(obj: unknown): unknown {
  * Formats a commit message to enforce line length constraints:
  * - First line (subject): max 60 characters
  * - Body lines: max 80 characters
- * 
+ *
  * Preserves:
  * - Bullet points with dashes ("- ")
  * - Backticks and code formatting
@@ -152,7 +189,7 @@ export function formatCommitMessage(message: string): string {
 
   // Format first line: max 60 chars
   const firstLine = wrapLine(lines[0], 60);
-  
+
   // Format remaining lines: max 80 chars, preserve structure
   const bodyLines = lines.slice(1).map(line => {
     if (line.trim().length === 0) {
@@ -243,7 +280,6 @@ function smartSplit(text: string): string[] {
 
 // Remove the old custom implementation functions
 // wrapLine, splitPreservingMarkdown...
-
 
 /**
  * Detects the repository type based on common monorepo indicators.

@@ -40,9 +40,9 @@ export function parseGeminiOutput(text: string): Labels {
     }
     Object.assign(labels, trimmed);
   }
-  
+
   labels.COMMIT_MESSAGE = formatCommitMessage(labels.COMMIT_MESSAGE);
-  
+
   if (!labels.BRANCH || !labels.COMMIT_MESSAGE) {
     throw new Error('LLM output missing required BRANCH or COMMIT_MESSAGE fields');
   }
