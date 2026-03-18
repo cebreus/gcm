@@ -1,5 +1,5 @@
-import { spawnGitStream } from './git-utils';
-import { detectRepoType } from './utils';
+import { spawnGitStream } from './git-utils.js';
+import { detectRepoType } from './utils.js';
 
 async function getScopesFromHistory(files: string[], depth = 50): Promise<string[]> {
   if (!files.length) return [];

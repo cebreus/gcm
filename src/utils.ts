@@ -178,9 +178,15 @@ export function sanitizeForDisplay(text: string): string {
 
   // Remove internal control markers (with or without backtick prefix)
   let cleaned = text
-    .replace(/`?\.?<<START>>/g, '')
-    .replace(/`?\.?<<END>>/g, '')
-    .replace(/`?\.?<<END_TRUNCATED>>/g, '');
+    .replace(/`<<START>>/g, '')
+    .replace(/`<<END>>/g, '')
+    .replace(/`<<END_TRUNCATED>>/g, '')
+    .replace(/\.<<START>>/g, '')
+    .replace(/\.<<END>>/g, '')
+    .replace(/\.<<END_TRUNCATED>>/g, '')
+    .replace(/<<START>>/g, '')
+    .replace(/<<END>>/g, '')
+    .replace(/<<END_TRUNCATED>>/g, '');
 
   // Allow printable ASCII, tabs, newlines, carriage returns. Remove others.
   return cleaned.replace(/[^\x20-\x7E\t\n\r]/g, '');
