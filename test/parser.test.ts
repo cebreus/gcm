@@ -77,7 +77,7 @@ test('parser: parseGeminiOutput - should handle multiple colons in label lines',
   const sample =
     'BRANCH: feat/colon:test\nCOMMIT_MESSAGE: feat: foo:bar:baz\nPR_TITLE: Foo bar\nPR_DESCRIPTION: desc';
   const parsed = parseGeminiOutput(sample);
-  expect(parsed.BRANCH).toBe('feat/colon:test');
+  expect(parsed.BRANCH).toBe('feat/colon-test');
   expect(parsed.COMMIT_MESSAGE).toBe('feat: foo:bar:baz');
 });
 
@@ -89,10 +89,9 @@ test('parser: parseGeminiOutput - should handle Windows line endings (\\r\\n)', 
   expect(parsed.COMMIT_MESSAGE).toBe('feat: crlf');
 });
 
-test('parser: parseGeminiOutput - should not strictly enforce branch name format (only validate)', () => {
-  const invalidBranch = 'feat/invalid branch name';
+test('parser: parseGeminiOutput - should sanitize invalid branch names', () => {
+  const invalidBranch = 'feat/invalid branch:name';
   const sample = `BRANCH: ${invalidBranch}\nCOMMIT_MESSAGE: feat: invalid branch\nPR_TITLE: Invalid branch\nPR_DESCRIPTION: desc`;
   const parsed = parseGeminiOutput(sample);
-  expect(parsed.BRANCH).toBe(invalidBranch);
-  // The function validates but does not throw, so this test ensures it doesn't break.
+  expect(parsed.BRANCH).toBe('feat/invalid-branch-name');
 });

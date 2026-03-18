@@ -201,3 +201,122 @@ async function geminiClientTimeoutTest(): Promise<void> {
   }
 }
 test('gemini-client: timeoutTest', geminiClientTimeoutTest);
+
+async function geminiClientTruncatedFlagMissingEndTest(): Promise<void> {
+  const origFetch = globalThis.fetch;
+  async function fetchStub(_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
+    void _input;
+    void _init;
+    return {
+      ok: true,
+      status: 200,
+      text: async function (): Promise<string> {
+        return JSON.stringify({
+          candidates: [{ content: { parts: [{ text: 'prefix <<START>>partial result...' }] } }],
+        });
+      },
+    } as unknown as Response;
+  }
+  globalThis.fetch = fetchStub;
+  try {
+    const client: GeminiClient = createGeminiClient({ fetchImpl: fetchStub });
+    const res = await client.callGemini('fake-key', 'hello', false, {}, { maxOutputTokens: 256 });
+    expect(res?.truncated).toBe(true);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+}
+test('gemini-client: truncated flag when missing END', geminiClientTruncatedFlagMissingEndTest);
+
+async function geminiClientTruncatedFlagEndTruncatedTest(): Promise<void> {
+  const origFetch = globalThis.fetch;
+  async function fetchStub(_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
+    void _input;
+    void _init;
+    return {
+      ok: true,
+      status: 200,
+      text: async function (): Promise<string> {
+        return JSON.stringify({
+          candidates: [{ content: { parts: [{ text: '<<START>>partial<<END_TRUNCATED>>' }] } }],
+        });
+      },
+    } as unknown as Response;
+  }
+  globalThis.fetch = fetchStub;
+  try {
+    const client: GeminiClient = createGeminiClient({ fetchImpl: fetchStub });
+    const res = await client.callGemini('fake-key', 'hello', false, {}, { maxOutputTokens: 256 });
+    expect(res?.truncated).toBe(true);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+}
+test(
+  'gemini-client: truncated flag when END_TRUNCATED present',
+  geminiClientTruncatedFlagEndTruncatedTest,
+);
+
+async function geminiClientRetryOnTruncatedTest(): Promise<void> {
+  let callCount = 0;
+  const seenMaxOutput: number[] = [];
+  const origFetch = globalThis.fetch;
+  async function fetchStub(_input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    void _input;
+    callCount += 1;
+    try {
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      const maxOut = (body?.generationConfig as any)?.maxOutputTokens;
+      if (typeof maxOut === 'number') seenMaxOutput.push(maxOut);
+    } catch {
+      // ignore
+    }
+
+    if (callCount === 1) {
+      return {
+        ok: true,
+        status: 200,
+        text: async function (): Promise<string> {
+          return JSON.stringify({
+            candidates: [{ content: { parts: [{ text: 'prefix <<START>>partial result...' }] } }],
+          });
+        },
+      } as unknown as Response;
+    }
+    return {
+      ok: true,
+      status: 200,
+      text: async function (): Promise<string> {
+        return JSON.stringify({
+          candidates: [{ content: { parts: [{ text: 'prefix <<START>>full result<<END>>' }] } }],
+        });
+      },
+    } as unknown as Response;
+  }
+  globalThis.fetch = fetchStub;
+  try {
+    const client: GeminiClient = createGeminiClient({
+      fetchImpl: fetchStub,
+      config: { MAX_OUTPUT_TOKENS: 256 } as any,
+    });
+    const res = await client.callGemini(
+      'fake-key',
+      'hello',
+      false,
+      {},
+      {
+        maxOutputTokens: 256,
+        retryIfTruncated: true,
+        retryIfTruncatedMaxRetries: 2,
+        retryIfTruncatedIncreaseTokens: 100,
+      },
+    );
+    expect(callCount).toBeGreaterThanOrEqual(2);
+    expect(res?.truncated).toBeFalsy();
+    expect(seenMaxOutput.length).toBeGreaterThanOrEqual(2);
+    expect(seenMaxOutput[1]).toBeGreaterThan(seenMaxOutput[0]);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+}
+test('gemini-client: retry on truncated response when enabled', geminiClientRetryOnTruncatedTest);
