@@ -22,6 +22,7 @@ import { intro, outro, spinner, note, select, text, isCancel, cancel } from '@cl
 import { KNOWN_MODELS, getModelSpec } from './model-registry.js';
 import { sanitizeForDisplay } from './utils.js';
 import clipboardy from 'clipboardy';
+import { readFileSync } from 'node:fs';
 
 const C = {
   reset: '\x1b[0m',
@@ -32,10 +33,31 @@ const C = {
   magenta: '\x1b[35m',
 };
 
+interface PackageInfo {
+  name: string;
+  version: string;
+}
+
+function getPackageInfo(): PackageInfo {
+  try {
+    const packageJsonPath = new URL('../package.json', import.meta.url);
+    const packageRaw = readFileSync(packageJsonPath, 'utf8');
+    const packageJson = JSON.parse(packageRaw) as { name?: string; version?: string };
+    return {
+      name: packageJson.name || 'gcm',
+      version: packageJson.version || 'unknown',
+    };
+  } catch {
+    return { name: 'gcm', version: 'unknown' };
+  }
+}
+
 // Re-implementing showHelp/displayResult/reportStats to avoid dependency on old runner
 export function showHelp() {
+  const packageInfo = getPackageInfo();
   const helpText = `
     ${C.bright}Gemini Commit Message Helper${C.reset}
+    Version: ${packageInfo.version}
   
     Automatically generates professional commit messages, branch names, and PR descriptions using Gemini AI.
   
@@ -45,6 +67,7 @@ export function showHelp() {
     ${C.bright}Options:${C.reset}
       ${C.cyan}-c, --commit <hash>${C.reset}       Analyse a specific commit instead of staged changes.
       ${C.cyan}-h, --help${C.reset}                Show this help message.
+      ${C.cyan}--version${C.reset}                 Show package version and exit.
       ${C.cyan}-v, --verbose${C.reset}             Show detailed logs (debug level) in the console.
       ${C.cyan}-d, --debug${C.reset}               Save complete logs to a '.debug.log' file for debugging.
       ${C.cyan}-e, --exclude <pattern>${C.reset}   Exclude files matching pattern (e.g., *manifest*).
@@ -173,6 +196,12 @@ export async function executeCommitMessageGeneration(
 ): Promise<void> {
   const opts = dependencies || {};
   const parsedArgs: ParsedOptions = parseArgs(argv || process.argv.slice(2));
+  const packageInfo = getPackageInfo();
+
+  if (parsedArgs.version) {
+    console.log(`${packageInfo.name} ${packageInfo.version}`);
+    return;
+  }
 
   // Initialize Clack Intro
   intro(`${C.bright}Gemini Commit Message Helper${C.reset}`);

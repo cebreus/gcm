@@ -108,6 +108,54 @@ describe('Refactored Runner', () => {
     expect(noteContent).not.toContain('BRANCH:');
   });
 
+  test('Should print package version and exit on --version', async () => {
+    const originalConsoleLog = console.log;
+    const consoleLogMock = mock(() => {});
+    console.log = consoleLogMock;
+
+    try {
+      await executeCommitMessageGeneration(['--version'], {
+        logger: mockLogger as any,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      });
+
+      expect(consoleLogMock).toHaveBeenCalledTimes(1);
+      const output = String(consoleLogMock.mock.calls[0][0]);
+      expect(output).toContain('gcm');
+      expect(output).toContain('0.4.0');
+      expect(mockIntro).not.toHaveBeenCalled();
+    } finally {
+      console.log = originalConsoleLog;
+    }
+  });
+
+  test('Should include version details in --help output', async () => {
+    const originalConsoleLog = console.log;
+    const consoleLogMock = mock(() => {});
+    console.log = consoleLogMock;
+
+    try {
+      await executeCommitMessageGeneration(['--help'], {
+        logger: mockLogger as any,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      });
+
+      expect(consoleLogMock).toHaveBeenCalledTimes(1);
+      const output = String(consoleLogMock.mock.calls[0][0]);
+      expect(output).toContain('Version:');
+      expect(output).toContain('0.4.0');
+      expect(output).toContain('--version');
+    } finally {
+      console.log = originalConsoleLog;
+    }
+  });
+
   test('Should handle Edit flow', async () => {
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
