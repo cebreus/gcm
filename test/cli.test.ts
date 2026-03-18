@@ -7,6 +7,7 @@ test('cli: should parse default arguments with empty argv', () => {
     commit: null,
     dryRun: false,
     help: false,
+    version: false,
     model: null,
     verbose: false,
     debug: false,
@@ -30,6 +31,11 @@ test('cli: should handle -h/--help flag', () => {
 
   result = parseArgs(['--help']);
   expect(result.help).toBe(true);
+});
+
+test('cli: should handle --version flag', () => {
+  const result = parseArgs(['--version']);
+  expect(result.version).toBe(true);
 });
 
 test('cli: should handle -v/--verbose flag', () => {
@@ -78,6 +84,7 @@ test('cli: should ignore unknown flags', () => {
     commit: null,
     dryRun: false,
     help: false,
+    version: false,
     model: null,
     verbose: false,
     debug: false,
