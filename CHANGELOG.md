@@ -1,5 +1,24 @@
 # gcm
 
+## 0.4.0
+
+> GCM adds an `--exclude` option, but this release filters only the file-name list and still sends excluded file text to Gemini. It also adds reply markers, cut-reply handling, model filtering, and broad error retries.
+
+### Minor Changes
+
+- **Exclude files:** Repeat `--exclude <pattern>` or `-e <pattern>`, or use commas. Patterns are case-sensitive and match the full path; `*` crosses folders and `?` matches one character. In this release, only the file-name list is filtered. The full staged diff, including excluded file text, is still sent to Gemini. If every file matches, GCM stops. Files stay staged.
+- **Message wrapping:** Full-mode commit text is wrapped near 60 characters for the subject and 80 for body lines. Commit-only fallback text is not wrapped. Long words and text inside backticks may stay longer. A long subject becomes extra lines, and a wrapped list item repeats its marker, so one item may become several. Release `0.7.1` later removes this wrapping.
+
+### Patch Changes
+
+- **Reply checks:** By default, GCM wraps the input diff in markers and always asks Gemini to mark its output. Turning `GCM_ADD_RESPONSE_MARKERS` off stops only the input markers. `<<START>>` without a later `<<END>>`, or any `<<END_TRUNCATED>>`, means cut; no markers means not cut. A Czech question offers a retry. If accepted, a fresh request may retry twice with more output space. Success is not guaranteed.
+- **Model list:** Live results must support `generateContent`. GCM then keeps `gemini-` names and removes known embedding, image, audio, live, robotics, computer-use, Veo, and Imagen models. If loading fails or leaves no models, it uses four built-in names. The built-in limits may not match the live service. Gemini 3 Pro Preview is removed and Gemini 3.1 Flash-Lite Preview is added.
+- **Retries:** GCM retries almost every caught Gemini error, not only temporary server errors. The default is three retries after the first call. HTTP `429`, `502`, `503`, and `504` use a server or growing wait; other errors use a growing wait plus random time. Separate context-overflow retries may use a summary or smaller input. Recovery is not guaranteed.
+- **API key location:** The Gemini API key moves from the URL to the `x-goog-api-key` request header. This reduces exposure in URL logs and history but does not make the whole request secret.
+- **Destructive output cleaning:** GCM removes all non-ASCII characters, so accents and non-Latin writing can disappear. It removes every marker string, even when it is real content. Full parsing stops at about 16 million text characters, allows missing pull request fields, and changes branch text without proving it is a valid Git branch. Commit-only fallback accepts any non-empty cleaned reply.
+- **Log redaction limit:** JWT matching now needs the first two parts to start with `ey`. This removes fewer normal strings, but other three-part secrets may remain visible. Key and PEM checks are still pattern-based.
+- **Contributor tools:** The format command runs ESLint fix and then Prettier. Clack, ESLint, TypeScript, Bun types, and other tools change versions. Both `bun.lock` and `pnpm-lock.yaml` are committed, which conflicts with using one package manager.
+
 ## 0.3.0
 
 > GCM now suggests a Conventional Commit scope from changed paths and recent commit subjects. It also lists Gemini models and adds an interactive terminal flow. This first flow has important Git safety limits.
