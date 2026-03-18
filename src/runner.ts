@@ -20,6 +20,7 @@ import { createGeminiService } from './services/gemini-service.js';
 import { generateFallbackCommitDetails } from './runner-utils.js'; // Keep this for now
 import { intro, outro, spinner, note, select, text, isCancel, cancel } from '@clack/prompts';
 import { KNOWN_MODELS, getModelSpec } from './model-registry.js';
+import { sanitizeForDisplay } from './utils.js';
 import clipboardy from 'clipboardy';
 
 const C = {
@@ -113,6 +114,57 @@ export interface RunnerOptions {
   gitService?: any; // Using any to avoid importing types if not strictly needed or could import
   contextService?: any;
   geminiService?: any;
+  listModels?: (apiKey: string) => Promise<string[]>;
+}
+
+function toModelOption(name: string): { value: string; label: string; hint?: string } {
+  const normalizedName = name.replace(/^models\//, '');
+  const knownModel = KNOWN_MODELS.find(model => model.name === normalizedName);
+
+  if (knownModel) {
+    return {
+      value: knownModel.name,
+      label: knownModel.label,
+      hint: knownModel.description,
+    };
+  }
+
+  return {
+    value: normalizedName,
+    label: normalizedName,
+    hint: 'Available from Gemini API',
+  };
+}
+
+function isSelectableTextModel(name: string): boolean {
+  return !/(embedding|image|tts|audio|live|robotics|computer-use|veo|imagen)/i.test(name);
+}
+
+async function getModelSelectionOptions(
+  apiKey: string,
+  logger: Logger,
+  listModelsFn: (apiKey: string) => Promise<string[]>,
+): Promise<Array<{ value: string; label: string; hint?: string }>> {
+  try {
+    const apiModels = await listModelsFn(apiKey);
+    const uniqueModels = [...new Set(apiModels.map(name => name.replace(/^models\//, '')))]
+      .filter(name => name.startsWith('gemini-'))
+      .filter(isSelectableTextModel);
+
+    if (uniqueModels.length > 0) {
+      return uniqueModels.map(toModelOption);
+    }
+  } catch (error) {
+    logger.log('debug', 'Failed to load live Gemini model list; falling back to known models', {
+      error: String(error),
+    });
+  }
+
+  return KNOWN_MODELS.map(model => ({
+    value: model.name,
+    label: model.label,
+    hint: model.description,
+  }));
 }
 
 export async function executeCommitMessageGeneration(
@@ -180,6 +232,7 @@ export async function executeCommitMessageGeneration(
     const geminiClient = createGeminiClient({ config: CONFIG, logger });
     const geminiService =
       opts.geminiService || createGeminiService({ client: geminiClient, logger, apiKey });
+    const listModelsFn = opts.listModels || listGeminiModels;
 
     if (TARGET_COMMIT) {
       logger.log('info', `${C.dim}Using commit ${TARGET_COMMIT} for analysis${C.reset}`);
@@ -217,13 +270,10 @@ export async function executeCommitMessageGeneration(
           });
 
           if (configAction === 'model') {
+            const modelOptions = await getModelSelectionOptions(apiKey, logger, listModelsFn);
             const selectedModel = await select({
               message: 'Select AI Model',
-              options: KNOWN_MODELS.map(m => ({
-                value: m.name,
-                label: m.label,
-                hint: m.description,
-              })),
+              options: modelOptions,
             });
             if (!isCancel(selectedModel)) modelName = String(selectedModel);
           } else if (configAction === 'mode') {
@@ -303,13 +353,41 @@ export async function executeCommitMessageGeneration(
       const systemPrompt =
         outputMode === 'full' ? SYSTEM_INSTRUCTIONS_FULL : SYSTEM_INSTRUCTIONS_COMMIT_ONLY;
 
-      const response = await geminiService.callGeminiAPI(
+      let response = await geminiService.callGeminiAPI(
         promptContext,
         systemPrompt,
         staged.stagedFiles,
         meta,
       );
       s.stop('Gemini response received');
+
+      // If the response appears truncated, offer the user an interactive retry with higher tokens
+      if (response?.truncated) {
+        const retryChoice = await select({
+          message: 'Výstup vypadá oříznutý. Chcete zkusit znovu s vyšším limitem tokenů?',
+          options: [
+            { value: 'retry', label: 'Ano, zopakovat' },
+            { value: 'continue', label: 'Ne, pokračovat s oříznutým výstupem' },
+          ],
+        });
+        if (!isCancel(retryChoice) && retryChoice === 'retry') {
+          s.start('Opakuji volání s vyšším limitem tokenů...');
+          const retryRes = await geminiService.callGeminiAPI(
+            promptContext,
+            systemPrompt,
+            staged.stagedFiles,
+            meta,
+            {
+              retryIfTruncated: true,
+              retryIfTruncatedMaxRetries: 2,
+              retryIfTruncatedIncreaseTokens: CONFIG.MAX_OUTPUT_TOKENS,
+              timeoutMs: 60000,
+            },
+          );
+          s.stop('Retry dokončen');
+          if (retryRes) response = retryRes;
+        }
+      }
 
       // 8. Handle Response / Fallback
       if (!response) {
@@ -332,22 +410,28 @@ export async function executeCommitMessageGeneration(
       // 9. Parse and Display
       let parsedOut: Labels | null = null;
       try {
-        parsedOut = parseGeminiOutput(response.text);
+        const rawParsed = parseGeminiOutput(response.text);
+        // Sanitize all parts to prevent clipboard poisoning or display issues
+        parsedOut = {
+          BRANCH: sanitizeForDisplay(rawParsed.BRANCH),
+          COMMIT_MESSAGE: sanitizeForDisplay(rawParsed.COMMIT_MESSAGE),
+          PR_TITLE: sanitizeForDisplay(rawParsed.PR_TITLE),
+          PR_DESCRIPTION: sanitizeForDisplay(rawParsed.PR_DESCRIPTION),
+        };
       } catch {
         if (outputMode === 'commit-only') {
-          // In commit-only, the whole text IS the commit message essentially,
-          // or we try to parse if structure is kept.
-          // Since update to system instructions likely removes keys, we might need robust parsing.
           // For commit-only, let's assume the response IS the message if parse fails.
-          parsedOut = { COMMIT_MESSAGE: response.text.trim() } as Labels;
+          const sanitizedText = sanitizeForDisplay(response.text.trim());
+          parsedOut = { COMMIT_MESSAGE: sanitizedText } as Labels;
         } else {
           parsedOut = null;
         }
       }
 
-      // If still null check
+      // If still null check, e.g. from a failed parse in 'full' mode that fell through
       if (!parsedOut && outputMode === 'commit-only') {
-        parsedOut = { COMMIT_MESSAGE: response.text.trim() } as Labels;
+        const sanitizedText = sanitizeForDisplay(response.text.trim());
+        parsedOut = { COMMIT_MESSAGE: sanitizedText } as Labels;
       }
 
       if (parsedOut) {
@@ -411,13 +495,10 @@ export async function executeCommitMessageGeneration(
           }
 
           if (action === 'regenerate') {
+            const modelOptions = await getModelSelectionOptions(apiKey, logger, listModelsFn);
             const selectedModel = await select({
               message: 'Select AI Model for Regeneration',
-              options: KNOWN_MODELS.map(m => ({
-                value: m.name,
-                label: m.label,
-                hint: m.description,
-              })),
+              options: modelOptions,
             });
             if (!isCancel(selectedModel)) {
               modelName = String(selectedModel);
