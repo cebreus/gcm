@@ -17,12 +17,20 @@ export interface GeminiUsage {
 export interface GeminiResponse {
   text: string;
   usage: GeminiUsage;
+  // If true, the response appears truncated (missing <<END>> or had <<END_TRUNCATED>> marker).
+  truncated?: boolean;
 }
 
 export interface GeminiCallOpts {
   timeoutMs?: number;
   systemInstructions?: string;
   maxOutputTokens?: number;
+  // If true, the client will automatically retry when a truncated response is detected.
+  retryIfTruncated?: boolean;
+  // How many times to retry after a truncated response. Default: 1
+  retryIfTruncatedMaxRetries?: number;
+  // How many extra maxOutputTokens to add on each retry. Default: add CONFIG.MAX_OUTPUT_TOKENS
+  retryIfTruncatedIncreaseTokens?: number;
 }
 
 export interface GeminiClient {
@@ -97,15 +105,33 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
   ): Promise<GeminiResponse | null> {
     const opts = callOptions || {};
     if (!apiKey) throw new Error('API key required');
-    const body = buildRequestBody(userContent, config, opts, enableThinking);
     const start = Date.now();
     let attempt = 0;
     const urlBase =
       'https://generativelanguage.googleapis.com/v1beta/models/' +
       (config.MODEL_NAME || 'gemini-2.5-flash') +
       ':generateContent';
+
+    // Truncation retry state
+    let truncRetries = 0;
+    const truncMaxRetries =
+      opts.retryIfTruncatedMaxRetries === undefined ? 1 : opts.retryIfTruncatedMaxRetries;
+    const truncIncrease =
+      opts.retryIfTruncatedIncreaseTokens === undefined
+        ? config.MAX_OUTPUT_TOKENS
+        : opts.retryIfTruncatedIncreaseTokens;
+    let currentMaxOutputTokens = opts.maxOutputTokens || config.MAX_OUTPUT_TOKENS;
+
     for (;;) {
       attempt += 1;
+      // Rebuild body each attempt to reflect possible changes to maxOutputTokens
+      const body = buildRequestBody(
+        userContent,
+        config,
+        { ...opts, maxOutputTokens: currentMaxOutputTokens },
+        enableThinking,
+      );
+
       let controller: AbortController;
       let timer: NodeJS.Timeout | null = null;
       try {
@@ -115,7 +141,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
           controller.abort();
         }, timeoutMs);
         const bodyStr = JSON.stringify(body);
-        const reqUrl = urlBase + '?key=' + encodeURIComponent(apiKey);
+        const reqUrl = urlBase;
 
         if (config.DEBUG_API) {
           const maxLog = Number(config.DEBUG_MAX_BODY_LOG_BYTES || DEFAULT_MAX_DEBUG_LOG_BYTES);
@@ -194,8 +220,29 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
               json,
             });
           }
-          const parsed = parseCandidates(json);
-          if (parsed) return parsed;
+          const parsed = parseCandidates(json, logger) as
+            | (GeminiResponse & { truncated?: boolean })
+            | null;
+          if (parsed) {
+            if (parsed.truncated && opts.retryIfTruncated && truncRetries < truncMaxRetries) {
+              truncRetries += 1;
+              // Increase token budget and retry
+              currentMaxOutputTokens = currentMaxOutputTokens + truncIncrease;
+              logger.log(
+                'warn',
+                'Gemini response appeared truncated; retrying with higher maxOutputTokens (attempt ' +
+                  String(truncRetries) +
+                  '/' +
+                  String(truncMaxRetries) +
+                  ')',
+                { previousTextSnippet: parsed.text.slice(0, 256) },
+              );
+              // Small backoff to avoid immediate repeat
+              await Bun.sleep(50);
+              continue;
+            }
+            return parsed;
+          }
           throw new GeminiApiError('Gemini returned no text', { json });
         }
         // handle HTTP errors
