@@ -23,17 +23,6 @@ This project was created to streamline the commit process, enforce a consistent 
 - **Context-Aware Analysis:** Analyzes staged `git diff` output or a specific commit hash.
 - **Handles Large Diffs:** Intelligently summarizes large changes to fit within the model's context window.
 
-## Table of Contents
-
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Usage](#usage)
-- [Configuration](#configuration)
-- [Development](#development)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
-- [License](#license)
-
 ## Installation
 
 ### Prerequisites
@@ -123,14 +112,16 @@ This refactors the logging mechanism for the Gemini API client.
 
 `gcm` offers several command-line flags to customize its behavior.
 
-| Flag              | Alias | Description                                          |
-| ----------------- | ----- | ---------------------------------------------------- |
-| `--help`          | `-h`  | Show the help message.                               |
-| `--commit <hash>` | `-c`  | Analyze a specific commit instead of staged changes. |
-| `--verbose`       | `-v`  | Show detailed logs (debug level) in the console.     |
-| `--debug`         | `-d`  | Save raw API request/response logs to `.debug.log`.  |
-| `--model <name>`  |       | Specify an alternative Gemini model to use.          |
-| `--list-models`   |       | List available Gemini models from the API and exit.  |
+| Flag              | Alias | Description                                                         |
+| ----------------- | ----- | ------------------------------------------------------------------- |
+| `--help`          | `-h`  | Show the help message.                                              |
+| `--commit <hash>` | `-c`  | Analyze a specific commit instead of staged changes.                |
+| `--verbose`       | `-v`  | Show detailed logs (debug level) in the console.                    |
+| `--debug`         | `-d`  | Save raw API request/response logs to `.debug.log`.                 |
+| `--model <name>`  |       | Specify an alternative Gemini model to use.                         |
+| `--list-models`   |       | List available Gemini text-generation models from the API and exit. |
+
+`--list-models` queries the live Gemini API, so the output reflects the models currently available to your API key instead of a hard-coded list.
 
 ### Interactive Menu
 
@@ -139,7 +130,7 @@ After generating a commit message, you'll be presented with an interactive menu 
 - **Commit**: Directly commit the generated message to your repository
 - **Copy to clipboard**: Copy the commit message to your system clipboard for later use
 - **Edit message**: Manually edit the commit message before committing
-- **Switch Model & Regenerate**: Choose a different AI model and regenerate the message
+- **Switch Model & Regenerate**: Choose a different AI model and regenerate the message. The menu prefers the live Gemini API model list and falls back to a built-in shortlist if the API list is unavailable.
 - **Cancel**: Exit without committing
 
 ### Analyze a Past Commit
