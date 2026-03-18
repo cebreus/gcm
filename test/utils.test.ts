@@ -7,6 +7,7 @@ import {
   formatCommitMessage,
   shouldExcludeFile,
   filterExcludedFiles,
+  sanitizeForDisplay,
 } from '../src/utils';
 import type { Hunk } from '../src/utils';
 
@@ -278,4 +279,76 @@ test('utils: filterExcludedFiles - should return empty array when all excluded',
   const files = ['manifest.json', 'manifest.ts'];
   const result = filterExcludedFiles(files, ['*manifest*']);
   expect(result).toEqual([]);
+});
+
+// --- Tests for sanitizeForDisplay ---
+test('utils: sanitizeForDisplay - should remove <<START>> marker', () => {
+  const input = 'prefix <<START>> content';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe('prefix  content');
+});
+
+test('utils: sanitizeForDisplay - should remove <<END>> marker', () => {
+  const input = 'content <<END>> suffix';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe('content  suffix');
+});
+
+test('utils: sanitizeForDisplay - should remove backticked .<<END>> marker', () => {
+  const input = 'feat: add feature\n\nDescription text`.<<END>>`';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe('feat: add feature\n\nDescription text``');
+});
+
+test('utils: sanitizeForDisplay - should remove .<<END>> marker without backticks', () => {
+  const input = 'feat: add feature\n\nDescription text.<<END>>';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe('feat: add feature\n\nDescription text');
+});
+
+test('utils: sanitizeForDisplay - should remove <<END_TRUNCATED>> marker', () => {
+  const input = 'content <<END_TRUNCATED>>';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe('content ');
+});
+
+test('utils: sanitizeForDisplay - should remove all markers in single text', () => {
+  const input = '<<START>>content with markers<<END>> and more.<<END_TRUNCATED>>';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe('content with markers and more');
+});
+
+test('utils: sanitizeForDisplay - should preserve regular content', () => {
+  const input = 'feat(api): add new endpoint\n\n- Add authentication\n- Update tests';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe(input);
+});
+
+test('utils: sanitizeForDisplay - should remove non-printable characters', () => {
+  const input = 'content\x00with\x01special\x02chars';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe('contentwithspecialchars');
+});
+
+test('utils: sanitizeForDisplay - should preserve tabs, newlines, and carriage returns', () => {
+  const input = 'line1\nline2\tindented\rcarriage';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe(input);
+});
+
+test('utils: sanitizeForDisplay - should handle empty string', () => {
+  const result = sanitizeForDisplay('');
+  expect(result).toBe('');
+});
+
+test('utils: sanitizeForDisplay - should handle variant with backtick prefix', () => {
+  const input = 'commit message`<<END>>';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe('commit message');
+});
+
+test('utils: sanitizeForDisplay - should handle multiple occurrences', () => {
+  const input = '<<START>>text1<<END>> middle <<START>>text2<<END>>';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe('text1 middle text2');
 });

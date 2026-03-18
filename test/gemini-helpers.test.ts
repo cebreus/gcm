@@ -53,3 +53,56 @@ async function geminiHelpersGetRetryMsFromResponseTest(): Promise<void> {
   expect(ms2).toBeLessThanOrEqual(61000);
 }
 test('gemini-helpers: getRetryMsFromResponse', geminiHelpersGetRetryMsFromResponseTest);
+
+async function geminiHelpersParseCandidatesFencingTest(): Promise<void> {
+  const json = {
+    candidates: [
+      {
+        content: {
+          parts: [{ text: '```json\n{"foo":"bar"}\n```' }],
+        },
+      },
+    ],
+  };
+  const parsed = parseCandidates(json);
+  expect(parsed?.text).toBe('{"foo":"bar"}');
+}
+test('gemini-helpers: parseCandidates strips code fences', geminiHelpersParseCandidatesFencingTest);
+
+async function geminiHelpersParseCandidatesMarkersTest(): Promise<void> {
+  let warned = false;
+  const logger = {
+    log: (_: any, message: string) => {
+      if (message.includes('missing <<END>>')) warned = true;
+    },
+    flush: () => Promise.resolve(),
+    flushSync: () => {
+      /* ignore */
+    },
+  } as unknown as Logger;
+
+  const jsonComplete = {
+    candidates: [
+      {
+        content: { parts: [{ text: 'prefix <<START>>the important part<<END>> suffix' }] },
+      },
+    ],
+  };
+  const parsedComplete = parseCandidates(jsonComplete, logger);
+  expect(parsedComplete?.text).toBe('the important part');
+
+  const jsonMissingEnd = {
+    candidates: [
+      {
+        content: { parts: [{ text: 'prefix <<START>>partial result...' }] },
+      },
+    ],
+  };
+  const parsedMissing = parseCandidates(jsonMissingEnd, logger);
+  expect(parsedMissing?.text).toBe('partial result...');
+  expect(warned).toBe(true);
+}
+test(
+  'gemini-helpers: parseCandidates markers and missing end warning',
+  geminiHelpersParseCandidatesMarkersTest,
+);

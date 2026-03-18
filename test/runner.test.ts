@@ -38,6 +38,9 @@ const mockLogger = { log: mock(), flush: mock(), flushSync: mock() };
 const mockGitService = { retrieveStagedChanges: mock(), commitChanges: mock() };
 const mockContextService = { constructLLMPromptContext: mock() };
 const mockGeminiService = { callGeminiAPI: mock() };
+const mockListModels = mock(() =>
+  Promise.resolve(['models/gemini-2.5-flash', 'models/gemini-2.5-pro']),
+);
 
 describe('Refactored Runner', () => {
   beforeEach(() => {
@@ -45,6 +48,7 @@ describe('Refactored Runner', () => {
     mockGitService.retrieveStagedChanges.mockClear();
     mockContextService.constructLLMPromptContext.mockClear();
     mockGeminiService.callGeminiAPI.mockClear();
+    mockListModels.mockClear();
 
     // Clear clack mocks
     mockIntro.mockClear();
@@ -85,6 +89,7 @@ describe('Refactored Runner', () => {
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
+      listModels: mockListModels,
     });
 
     // Verify
@@ -133,6 +138,7 @@ describe('Refactored Runner', () => {
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
+      listModels: mockListModels,
     });
 
     // Verify text prompt called with initial value
@@ -150,6 +156,7 @@ describe('Refactored Runner', () => {
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
+      listModels: mockListModels,
     });
     expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
   });
@@ -181,6 +188,7 @@ describe('Refactored Runner', () => {
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
+      listModels: mockListModels,
     });
 
     // Verify clipboardy.write was called with correct message (full output including prefix)
@@ -226,10 +234,12 @@ describe('Refactored Runner', () => {
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
+      listModels: mockListModels,
     });
 
     // Gemini should be called twice
     expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledTimes(2);
+    expect(mockListModels).toHaveBeenCalled();
     // Git commit called once
     expect(mockGitService.commitChanges).toHaveBeenCalled();
   });

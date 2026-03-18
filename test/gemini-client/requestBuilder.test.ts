@@ -9,10 +9,11 @@ test('requestBuilder: should build a basic request structure', () => {
   const body = buildRequestBody('test content', testConfig, {}, false);
 
   expect(body.contents[0].role).toBe('user');
-  expect(body.contents[0].parts[0].text).toBe('test content');
+  // Expect markers to be present by default
+  expect(body.contents[0].parts[0].text).toBe('<<START>>\ntest content\n<<END>>');
   expect(body.generationConfig.temperature).toBe(testConfig.TEMPERATURE);
   expect(body.generationConfig.maxOutputTokens).toBe(testConfig.MAX_OUTPUT_TOKENS);
-  expect(body.systemInstruction.parts[0].text).toBe('');
+  expect(body.systemInstruction.parts[0].text).toContain('<<START>>');
 });
 
 test('requestBuilder: should enable thinking mode when requested', () => {
@@ -38,7 +39,9 @@ test('requestBuilder: should include system instructions when provided', () => {
     { systemInstructions: instructions },
     false,
   );
-  expect(body.systemInstruction.parts[0].text).toBe(instructions);
+  // Should include the provided instructions and our marker-focused instruction
+  expect(body.systemInstruction.parts[0].text).toContain(instructions);
+  expect(body.systemInstruction.parts[0].text).toContain('<<START>>');
 });
 
 test('requestBuilder: should use temperature from config', () => {
@@ -58,13 +61,14 @@ test('requestBuilder: should build a valid request body with all options', () =>
     true,
   );
 
-  expect(body).toEqual({
-    contents: [{ role: 'user', parts: [{ text: 'User content here.' }] }],
-    systemInstruction: { parts: [{ text: instructions }] },
-    generationConfig: {
-      temperature: testConfig.TEMPERATURE,
-      maxOutputTokens: 500,
-      thinkingConfig: { thinkingMode: 'THINKING_MODE_EXTENDED' },
-    },
+  // Content should be wrapped with markers
+  expect(body.contents[0].parts[0].text).toBe('<<START>>\nUser content here.\n<<END>>');
+  // System instruction should include both the provided instructions and our marker guidance
+  expect(body.systemInstruction.parts[0].text).toContain(instructions);
+  expect(body.systemInstruction.parts[0].text).toContain('<<START>>');
+  expect(body.generationConfig).toEqual({
+    temperature: testConfig.TEMPERATURE,
+    maxOutputTokens: 500,
+    thinkingConfig: { thinkingMode: 'THINKING_MODE_EXTENDED' },
   });
 });
