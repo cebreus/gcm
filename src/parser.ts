@@ -29,6 +29,13 @@ function parseLinesToLabels(lines: string[]): Labels {
 
 export function parseGeminiOutput(text: string): Labels {
   if (!text || typeof text !== 'string') throw new Error('parseGeminiOutput expects a string');
+
+  // Add a sanity limit to prevent parsing excessively large responses
+  const MAX_RESPONSE_SIZE = 16 * 1024 * 1024; // 16MB
+  if (text.length > MAX_RESPONSE_SIZE) {
+    text = text.substring(0, MAX_RESPONSE_SIZE);
+  }
+
   const labels: Labels = { BRANCH: '', COMMIT_MESSAGE: '', PR_TITLE: '', PR_DESCRIPTION: '' };
   const lines = text.split(/\r?\n/);
   const parsedLabels = parseLinesToLabels(lines);
@@ -50,6 +57,9 @@ export function parseGeminiOutput(text: string): Labels {
     return /^\w+\/[a-z0-9_.-]+$/i.test(b);
   }
   if (typeof labels.BRANCH === 'string' && !isValidBranchName(labels.BRANCH)) {
+    // Sanitize the branch name as a fallback
+    const sanitized = labels.BRANCH.replace(/[^a-zA-Z0-9/_-]/g, '-').toLowerCase();
+    labels.BRANCH = sanitized;
   }
   return labels;
 }

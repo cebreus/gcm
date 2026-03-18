@@ -139,31 +139,51 @@ export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void 
 // Usage: const limit = pLimit(concurrency); await Promise.all(items.map(item => limit(() => doWork(item)));
 // (No concurrency helper; simplified, serial processing is used in summarizer)
 
-export function unescapeNewlinesInText(obj: unknown): unknown {
-  if (typeof obj !== 'object' || obj === null) {
-    return obj;
-  }
-
-  // Create a deep clone to avoid modifying the original object
-  const clonedObj = JSON.parse(JSON.stringify(obj));
-
-  function recurse(current: unknown) {
+export function unescapeNewlinesInText(obj: unknown, maxDepth = 20): unknown {
+  function recurse(current: unknown, depth: number): unknown {
+    if (depth >= maxDepth) {
+      return '[REDACTED-MAX-DEPTH]';
+    }
+    if (typeof current === 'string') {
+      return current;
+    }
+    if (Array.isArray(current)) {
+      return current.map(item => recurse(item, depth + 1));
+    }
     if (typeof current === 'object' && current !== null) {
+      const newObj: Record<string, unknown> = {};
       for (const key in current as Record<string, unknown>) {
         if (Object.prototype.hasOwnProperty.call(current, key)) {
           const val = (current as Record<string, unknown>)[key];
           if (key === 'text' && typeof val === 'string') {
-            (current as Record<string, unknown>)[key] = val.replace(/\\n/g, '\n');
+            newObj[key] = val.replace(/\\n/g, '\n');
           } else {
-            recurse(val);
+            newObj[key] = recurse(val, depth + 1);
           }
         }
       }
+      return newObj;
     }
+    return current;
   }
+  return recurse(obj, 0);
+}
 
-  recurse(clonedObj);
-  return clonedObj;
+/**
+ * Sanitizes text for display or clipboard operations by removing non-printable
+ * ASCII characters and internal control markers.
+ */
+export function sanitizeForDisplay(text: string): string {
+  if (!text || typeof text !== 'string') return text;
+
+  // Remove internal control markers (with or without backtick prefix)
+  let cleaned = text
+    .replace(/`?\.?<<START>>/g, '')
+    .replace(/`?\.?<<END>>/g, '')
+    .replace(/`?\.?<<END_TRUNCATED>>/g, '');
+
+  // Allow printable ASCII, tabs, newlines, carriage returns. Remove others.
+  return cleaned.replace(/[^\x20-\x7E\t\n\r]/g, '');
 }
 
 /**

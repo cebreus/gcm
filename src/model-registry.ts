@@ -6,11 +6,8 @@ export interface ModelSpec {
   description?: string;
 }
 
-// Limits based on public documentation (conservative estimates)
-// Flash 1.5/2.0 ~ 1M
-// Pro 1.5 ~ 2M
-// Flash 2.5 ~ 1M (assuming similar to 2.0/1.5 family for now until specs clear)
-// Pro 2.5 ~ 2M (assuming)
+// Limits based on public Gemini documentation as of 2026-03.
+// Keep this shortlist small and focused on practical choices for the CLI.
 
 export const KNOWN_MODELS: ModelSpec[] = [
   {
@@ -28,18 +25,18 @@ export const KNOWN_MODELS: ModelSpec[] = [
     description: 'Better reasoning for complex changes.',
   },
   {
-    name: 'gemini-3-pro-preview',
-    label: 'Gemini 3 Pro Preview (Experimental)',
-    maxInputTokens: 2_000_000, // Assuming high context
-    maxOutputTokens: 8192,
-    description: 'Bleeding edge capabilities.',
-  },
-  {
     name: 'gemini-2.5-flash-lite',
-    label: 'Gemini 2.5 Flash Lite (Fallback)',
+    label: 'Gemini 2.5 Flash-Lite (Low Cost)',
     maxInputTokens: 1_000_000,
     maxOutputTokens: 4096,
-    description: 'Lightweight version of Flash, optimized for speed.',
+    description: 'Lowest-cost Gemini option for simple commit generation.',
+  },
+  {
+    name: 'gemini-3.1-flash-lite-preview',
+    label: 'Gemini 3.1 Flash-Lite Preview (Newest Lite)',
+    maxInputTokens: 1_000_000,
+    maxOutputTokens: 8192,
+    description: 'Ultra-light 3.1 preview model for evaluating the newer family.',
   },
 ];
 

@@ -80,7 +80,10 @@ export function createLogger(config?: LoggerConfig): Logger {
   function sanitizeTextForLogs(text: string, maxLen = 256): string {
     if (!text || typeof text !== 'string') return text;
     let out = text;
-    out = out.replace(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED-JWT]');
+    out = out.replace(
+      /(ey[A-Za-z0-9-_=]+)\.(ey[A-Za-z0-9-_=]+)\.([A-Za-z0-9-_.+/=]*)/g,
+      '[REDACTED-JWT]',
+    );
     out = out.replace(/\b(AKIA|AIza|ghp_|xoxb-|sk-)[A-Za-z0-9\-_]{8,}\b/g, '[REDACTED-KEY]');
     out = out.replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED-PEM]');
     if (out.length > maxLen) return out.substring(0, maxLen) + '...[TRUNCATED]';

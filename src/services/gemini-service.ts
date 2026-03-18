@@ -9,6 +9,12 @@ export interface GeminiService {
     systemPrompt: string,
     stagedFiles: string[],
     meta: LogMetadata,
+    opts?: {
+      retryIfTruncated?: boolean;
+      retryIfTruncatedMaxRetries?: number;
+      retryIfTruncatedIncreaseTokens?: number;
+      timeoutMs?: number;
+    },
   ): Promise<GeminiResponse | null>;
 }
 
@@ -67,6 +73,12 @@ export function createGeminiService({ client, logger, apiKey }: GeminiServiceDep
     systemPrompt: string,
     stagedFiles: string[],
     meta: LogMetadata,
+    opts?: {
+      retryIfTruncated?: boolean;
+      retryIfTruncatedMaxRetries?: number;
+      retryIfTruncatedIncreaseTokens?: number;
+      timeoutMs?: number;
+    },
   ): Promise<GeminiResponse | null> {
     const maxAttempts = Math.max(1, CONFIG.GEMINI_MAX_RETRIES || 3);
     const enableThinking = CONFIG.ENABLE_THINKING;
@@ -82,7 +94,10 @@ export function createGeminiService({ client, logger, apiKey }: GeminiServiceDep
         return await client.callGemini(apiKey, input, enableThinking, meta, {
           maxOutputTokens: maxOutputOverride,
           systemInstructions: systemPrompt,
-          timeoutMs: 60000,
+          timeoutMs: typeof opts?.timeoutMs === 'number' ? opts.timeoutMs : 60000,
+          retryIfTruncated: opts?.retryIfTruncated,
+          retryIfTruncatedMaxRetries: opts?.retryIfTruncatedMaxRetries,
+          retryIfTruncatedIncreaseTokens: opts?.retryIfTruncatedIncreaseTokens,
         });
       } catch (err: unknown) {
         const errStr = String(err);
