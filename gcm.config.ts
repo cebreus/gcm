@@ -20,4 +20,7 @@ export const CONFIG = {
   GEMINI_MAX_RETRIES: Number(process.env.GCM_GEMINI_MAX_RETRIES || 3),
   GEMINI_RETRY_BASE_MS: Number(process.env.GCM_GEMINI_RETRY_BASE_MS || 1000),
   GEMINI_RETRY_MAX_MS: Number(process.env.GCM_GEMINI_RETRY_MAX_MS || 60000),
+  // When true, request bodies will include <<START>>/<<END>> markers in the user content
+  // and system instructions will ask the model to emit ONLY the content between markers.
+  ADD_RESPONSE_MARKERS: (process.env.GCM_ADD_RESPONSE_MARKERS || 'true') === 'true',
 };

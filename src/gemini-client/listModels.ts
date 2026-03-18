@@ -14,5 +14,13 @@ export async function listGeminiModels(apiKey: string): Promise<string[]> {
   if (!data.models || !Array.isArray(data.models)) {
     throw new Error('No models found in response');
   }
-  return data.models.map((m: { name?: string }) => m.name || '');
+
+  return data.models
+    .filter(
+      (m: { supportedGenerationMethods?: string[] }) =>
+        Array.isArray(m.supportedGenerationMethods) &&
+        m.supportedGenerationMethods.includes('generateContent'),
+    )
+    .map((m: { name?: string }) => m.name || '')
+    .filter(Boolean);
 }
