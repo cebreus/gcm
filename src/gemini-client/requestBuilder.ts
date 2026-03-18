@@ -17,7 +17,6 @@ export function buildRequestBody(
 ): RequestBody {
   const START = '<<START>>';
   const END = '<<END>>';
-  const TRUNC = '<<END_TRUNCATED>>';
 
   // If enabled, wrap the user content with explicit markers to make extraction
   // and truncation detection more robust on the receiver side.

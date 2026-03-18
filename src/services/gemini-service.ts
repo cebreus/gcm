@@ -1,4 +1,4 @@
-import type { GeminiClient, GeminiResponse, GeminiCallOpts } from '../gemini-client.js';
+import type { GeminiClient, GeminiResponse } from '../gemini-client.js';
 import type { Logger, LogMetadata } from '../logger.js';
 import { summarizeLargeDiff } from '../summarizer.js';
 import { CONFIG } from '../../gcm.config.js';

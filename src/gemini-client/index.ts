@@ -6,7 +6,7 @@ import { getRetryMsFromResponse } from './backoff.js';
 import { buildRequestBody } from './requestBuilder.js';
 import { GeminiApiError } from './errors.js';
 import { unescapeNewlinesInText } from '../utils.js';
-import { RETRYABLE_HTTP_CODES, DEFAULT_MAX_DEBUG_LOG_BYTES } from '../constants.js';
+import { DEFAULT_MAX_DEBUG_LOG_BYTES } from '../constants.js';
 
 export interface GeminiUsage {
   promptTokens: number;
@@ -246,7 +246,10 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
           throw new GeminiApiError('Gemini returned no text', { json });
         }
         // handle HTTP errors
-        if (RETRYABLE_HTTP_CODES.includes(res.status) && attempt <= maxRetries) {
+        if (
+          (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) &&
+          attempt <= maxRetries
+        ) {
           const retryMs = getRetryMsFromResponse(textRes, retryBaseMs, retryMaxMs, attempt);
           logger.log(
             'warn',
