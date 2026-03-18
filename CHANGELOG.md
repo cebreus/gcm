@@ -1,5 +1,21 @@
 # gcm
 
+## 0.3.0
+
+> GCM now suggests a Conventional Commit scope from changed paths and recent commit subjects. It also lists Gemini models and adds an interactive terminal flow. This first flow has important Git safety limits.
+
+### Minor Changes
+
+- **Scope suggestion:** A scope is the text inside `feat(scope):`. GCM first gets unique scopes from the last 50 commit subjects that touched the changed files. In a monorepo, it also uses the folder after `apps/` or `packages/`. If none exist, it uses the folder after `src/`. Gemini may ignore all suggestions.
+- **Live model list:** `--list-models` needs `GOOGLE_GEMINI_API_KEY`, calls Gemini, and prints every returned name without checking whether it can generate text. It exits `1` for no key and `2` for bad service data. In this release, the key is placed in the URL.
+- **Built-in model data:** Four built-in models give the interactive menu labels and limits. An unknown model instead gets a general limit of 100,000 input and 8,192 output tokens. These values are assumptions and may be wrong. The default changes from `gemini-2.5-flash-lite` to `gemini-2.5-flash`.
+- **Output choices:** There is no `--mode` option yet. Commit-only is the default. Full mode asks Gemini for branch, pull request, and commit fields, but the UI shows only branch and commit message. If `--model` is passed, settings are skipped and full mode cannot be selected.
+- **Interactive limits:** Regeneration first opens the built-in model picker. Copy copies only the commit message and exits. Edit accepts an empty message. Commit runs `git commit -m` for all files currently staged; after failure, the run ends.
+- **Unsafe old-commit action:** `--commit <hash>` reads an old commit, but the Commit action still writes the user's current staged files. It can commit unrelated work with a message made for the old commit.
+- **Injected no-response fallback:** The normal Gemini client throws after invalid or empty replies, so it does not reach this fallback. A custom or test service that returns no response makes GCM build a general `chore` branch and commit message. The commit lists up to 12 paths; the pull request text always says the list may be cut. GCM logs it and exits without review.
+- **Large changes:** Binary-like files, including SVG, map, and HEIC files, may be left out of summaries. Skipped names are grouped and capped at 15 per folder. Oversize context is summarised, then may be hard-cut. Recovery uses top diff sections, then halves input and output limits. Some changes can be omitted. Service recovery treats `GCM_GEMINI_MAX_RETRIES` as three total attempts by default. The lower Gemini client treats it as three retries after the first request and broadly retries caught errors first, so the total call count can be higher.
+- **Runtime and packages:** The build target changes from Node to Bun. Runtime packages move to `devDependencies`, so a production-only install may not run the source CLI; the compiled binary includes them.
+
 ## 0.2.0
 
 > The first tagged GCM release reads the Git diff and file names staged for the next commit. It sends the diff, or a reduced form when limits are hit, to Google's Gemini service. It prints a branch name, commit message, pull request title, and pull request description. It does not edit files or create a commit.
