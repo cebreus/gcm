@@ -1,5 +1,18 @@
 # gcm
 
+## 0.7.0
+
+> GCM can now find staged files that may belong in separate commits. It can show a split plan and uses recent related commit subjects as writing examples. It also stops Git writes when the repository is not safe.
+
+### Minor Changes
+
+- **Atomic groups:** GCM groups staged files by dependencies, documents, formatting, tests, CI, or product code. If it finds more than one scope, it warns the user and offers `Show split proposal`, `Continue anyway`, or `Cancel`. Commands appear only when the user asks for the plan. GCM does not run them.
+- **Split-plan limits:** Each group starts with plain `git reset`, then uses `git add <paths>` without `--`. A path that starts with `-` may be read as an option. Unstaged content in the same path may also enter the new commit. The user must check the commands and file content before using the plan.
+- **Repository writing examples:** GCM sends up to 10 unique subjects from the last 20 commits that touched the changed files. These are repository examples, not proof of the current user's style. GCM also tells the AI to use only diff, file, and history facts and not invent reasons, speed, security, migration, or breaking changes.
+- **Saved model:** GCM remembers the model selected at the start of a session and saves it after a successful commit. A saved `gemini-2.5-pro` value moves to `gemini-2.5-flash`.
+- **Safe Git state:** Unresolved conflicts stop generation. During a merge, rebase, cherry-pick, revert, or bisect, GCM can still generate, copy, and edit text, but it removes the Commit action. Work with `--commit` is also read-only.
+- **No staged files:** When nothing is staged, the user can check the repository again or stop. A split plan is also offered when changed worktree files exist. A re-check loads fresh Git state and staged content.
+
 ## 0.6.1
 
 > This release changes internal code and development checks. It does not intend to change normal GCM behaviour.
