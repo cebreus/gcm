@@ -1,5 +1,14 @@
 # gcm
 
+## 0.7.0
+
+### Minor Changes
+
+- Added a safety check that warns you if some changed files are not ready to be committed. This helps you avoid missing parts of your work.
+- Improved the way the tool asks about unstaged files by grouping them together. This makes the confirmation process much quicker.
+- Enhanced the commit message generation by including your recent commit history. This helps the tool match your personal writing style.
+- Updated the system to automatically select the most suitable model for generating messages. It now remembers your chosen settings for future use.
+
 ## 0.6.1
 
 ### Patch Changes
