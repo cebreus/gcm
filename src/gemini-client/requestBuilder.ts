@@ -18,20 +18,18 @@ export function buildRequestBody(
   const START = '<<START>>';
   const END = '<<END>>';
 
-  // If enabled, wrap the user content with explicit markers to make extraction
-  // and truncation detection more robust on the receiver side.
-  const wrappedUserContent = config.ADD_RESPONSE_MARKERS
-    ? `${START}\n${userContent}\n${END}`
-    : userContent;
+  const wrappedUserContent = userContent;
 
   // Ensure marker-focused system instruction is present. If caller provided system
   // instructions, append ours so we keep their intent while enforcing markers.
-  const markerInstruction =
-    'Return ONLY the raw content between the markers <<START>> and <<END>>. ' +
-    'Do NOT include code fences, backticks, or any additional explanation. ' +
-    'If the output is truncated, append the marker <<END_TRUNCATED>>.';
+  const markerInstruction = config.ADD_RESPONSE_MARKERS
+    ? 'Your response MUST be wrapped in <<START>> and <<END>> markers. ' +
+      'Return ONLY the raw content between the markers. ' +
+      'Do NOT include code fences, backticks, or any additional explanation outside the markers. ' +
+      'If the output is truncated, append the marker <<END_TRUNCATED>>.'
+    : '';
   const systemInstruction = opts.systemInstructions
-    ? `${opts.systemInstructions}\n\n${markerInstruction}`
+    ? `${opts.systemInstructions}${markerInstruction ? '\n\n' + markerInstruction : ''}`
     : markerInstruction;
 
   const body: RequestBody = {

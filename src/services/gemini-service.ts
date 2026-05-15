@@ -39,21 +39,20 @@ export function createGeminiService({ client, logger, apiKey }: GeminiServiceDep
         { attempt },
       );
       const summary = await summarizeLargeDiff(stagedFiles);
-      let newInput = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following summary and truncated diff.\n\n${summary.text}`;
+      let newInput = `Analyze the following summary and truncated diff to generate the requested commit information:\n\n${summary.text}`;
       if (summary.totalTruncated) {
         newInput +=
           '\n\nNote: The diff was truncated while being read due to per-file buffer limits.';
       }
-      const newMaxOutput = Math.max(256, Math.floor(maxOutputTokens / 2));
+      const newMaxOutput = maxOutputTokens + 1024;
       await Bun.sleep(200 * attempt);
       return { input: newInput, maxOutputTokens: newMaxOutput, summaryUsed: true };
     }
 
-    const shrinkFactor = 0.5;
     const allowedBytesNow = Math.max(0, Math.floor(input.length * shrinkFactor));
     let newInput = input.substring(0, allowedBytesNow);
-    newInput = `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following (input truncated to fit model context).\n\n${newInput}`;
-    const newMaxOutput = Math.max(256, Math.floor(maxOutputTokens / 2));
+    newInput = `Analyze the following (input truncated to fit model context) to generate the requested commit information:\n\n${newInput}`;
+    const newMaxOutput = maxOutputTokens + 1024;
 
     logger.log(
       'warn',
