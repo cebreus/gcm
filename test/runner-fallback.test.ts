@@ -46,16 +46,16 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
   }
 
   const logs: string[] = [];
-  const origLog = console.log;
-  const origWarn = console.warn;
-  function consoleLogProxy(...args: unknown[]): void {
-    logs.push(Array.prototype.join.call(args, ' '));
-  }
-  function consoleWarnProxy(...args: unknown[]): void {
-    logs.push('[WARN] ' + Array.prototype.join.call(args, ' '));
-  }
-  console.log = consoleLogProxy;
-  console.warn = consoleWarnProxy;
+  const originalStdoutWrite = process.stdout.write;
+  const originalStderrWrite = process.stderr.write;
+  process.stdout.write = ((chunk: any) => {
+    logs.push(String(chunk));
+    return true;
+  }) as any;
+  process.stderr.write = ((chunk: any) => {
+    logs.push(String(chunk));
+    return true;
+  }) as any;
 
   // Ensure API key is present
   const origApiKey = process.env.GOOGLE_GEMINI_API_KEY;
@@ -67,8 +67,8 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
       logger: createLogger({ LOG_LEVEL: 'info' }),
     });
   } finally {
-    console.log = origLog;
-    console.warn = origWarn;
+    process.stdout.write = originalStdoutWrite;
+    process.stderr.write = originalStderrWrite;
     process.env.GOOGLE_GEMINI_API_KEY = origApiKey;
   }
 

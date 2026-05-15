@@ -19,6 +19,16 @@ interface SummarizeLargeDiffResult {
   totalTruncated: number;
 }
 
+interface ProcessFileResult {
+  skipped?: boolean;
+  truncated?: boolean;
+}
+
+interface HunkAccumulator {
+  topHunks: Hunk[];
+  maxHunks: number;
+}
+
 function getBasename(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || '';
 }
@@ -47,6 +57,135 @@ function isConfigFile(filePath: string): boolean {
   return false;
 }
 
+function isBinaryFile(file: string): boolean {
+  const lower = file.toLowerCase();
+  const binaryPattern = new RegExp(`\\.(${BINARY_EXTENSIONS.join('|')})$`);
+  return binaryPattern.test(lower);
+}
+
+function finalizeHunk(acc: HunkAccumulator, hunk: Hunk | null): void {
+  if (!hunk) return;
+  const importance = CONFIG.ENABLE_HUNK_WEIGHTS ? fileImportanceWeight(hunk.file) : 0;
+  hunk.score = hunk.added + hunk.removed + importance;
+  pushHunkToTop(acc.topHunks, hunk, acc.maxHunks);
+}
+
+function parseDiffLinesToHunks(file: string, lines: string[], acc: HunkAccumulator): void {
+  let current: Hunk | null = null;
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r?\n$/, '');
+    if (line.startsWith('@@')) {
+      finalizeHunk(acc, current);
+      current = { file, header: line, content: '', added: 0, removed: 0, bytes: 0, score: 0 };
+      continue;
+    }
+    if (!current) continue;
+    current.content += line + '\n';
+    current.bytes += Buffer.byteLength(line, 'utf8');
+    if (line.startsWith('+') && !line.startsWith('+++')) current.added += 1;
+    if (line.startsWith('-') && !line.startsWith('---')) current.removed += 1;
+  }
+  finalizeHunk(acc, current);
+}
+
+async function processFileForSummary(
+  file: string,
+  spawnLinesImpl: (
+    args: string[],
+    options?: Record<string, unknown>,
+  ) => Promise<SpawnGitLinesResult>,
+  acc: HunkAccumulator,
+): Promise<ProcessFileResult> {
+  if (isBinaryFile(file)) return { skipped: true };
+  const contextLines = isConfigFile(file) ? 0 : 1;
+  const { lines, truncated } = await spawnLinesImpl(
+    ['diff', '--staged', '-w', `-U${contextLines}`, '--', file],
+    {
+      maxBytes: CONFIG.PER_FILE_BUFFER,
+    },
+  );
+  parseDiffLinesToHunks(file, lines, acc);
+  return { truncated };
+}
+
+function buildSkippedFilesSection(skippedFiles: string[]): string {
+  if (!skippedFiles.length) return '';
+  const perDirLimit = 15;
+  const grouped = new Map<string, string[]>();
+  for (const file of skippedFiles) {
+    const parts = file.split(/[\\/]/);
+    const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
+    const filesInDir = grouped.get(dir) || [];
+    filesInDir.push(file);
+    grouped.set(dir, filesInDir);
+  }
+
+  let section = 'Skipped binary files (content omitted):\n';
+  for (const [dir, files] of grouped) {
+    section += buildDirectorySkippedFilesLines(dir, files, perDirLimit);
+  }
+  return section + '\n';
+}
+
+function buildDirectorySkippedFilesLines(
+  dir: string,
+  files: string[],
+  perDirLimit: number,
+): string {
+  let section = '';
+  if (files.length <= perDirLimit) {
+    section += `  ${dir}/\n`;
+    for (const file of files) section += `    - ${file}\n`;
+    return section;
+  }
+  section += `  ${dir}/ (showing ${perDirLimit} of ${files.length})\n`;
+  for (let i = 0; i < perDirLimit; i++) section += `    - ${files[i]}\n`;
+  section += `    - ... and ${files.length - perDirLimit} more\n`;
+  return section;
+}
+
+async function collectSummaryData(
+  stagedFiles: string[],
+  spawnLinesImpl: (
+    args: string[],
+    options?: Record<string, unknown>,
+  ) => Promise<SpawnGitLinesResult>,
+  hunkAccumulator: HunkAccumulator,
+): Promise<{ totalTruncated: number; skippedFiles: string[] }> {
+  const results: ProcessFileResult[] = [];
+  const skippedFiles: string[] = [];
+  for (const file of stagedFiles) {
+    const result = await processFileForSummary(file, spawnLinesImpl, hunkAccumulator);
+    results.push(result);
+    if (result?.skipped) skippedFiles.push(file);
+  }
+  return {
+    totalTruncated: results.filter(result => result?.truncated).length,
+    skippedFiles,
+  };
+}
+
+function buildSummaryOutput(
+  stats: string,
+  topHunks: Hunk[],
+  skippedFiles: string[],
+  totalTruncated: number,
+): string {
+  const limitBytes = Math.floor(CONFIG.CHILD_PROCESS_MAX_BUFFER / 2);
+  let output = `File changes summary:\n${stats}\n\n`;
+  output += buildSkippedFilesSection(skippedFiles);
+
+  for (const hunk of topHunks) {
+    const hunkText = `File: ${hunk.file}\n${hunk.header}\n${hunk.content}\n`;
+    if (output.length + hunkText.length > limitBytes) {
+      output += `\n... (${topHunks.length} hunks, ${totalTruncated} files truncated by per-file buffer) ...`;
+      break;
+    }
+    output += hunkText;
+  }
+  return output;
+}
+
 export async function summarizeLargeDiff(
   stagedFiles: string[],
   options?: SummarizeLargeDiffOptions,
@@ -59,96 +198,13 @@ export async function summarizeLargeDiff(
   const stats = statsResp.text;
   const topHunks: Hunk[] = [];
   const maxHunks = CONFIG.MAX_HUNKS;
-
-  async function processFile(file: string): Promise<{ skipped?: boolean; truncated?: boolean }> {
-    const lower = file.toLowerCase();
-    const binaryPattern = new RegExp(`\\.(${BINARY_EXTENSIONS.join('|')})$`);
-    if (binaryPattern.test(lower)) {
-      // Record we skipped a binary-like file — contents are not useful for AI summarization.
-      return { skipped: true };
-    }
-
-    const contextLines = isConfigFile(file) ? 0 : 1;
-    const { lines, truncated } = await spawnLinesImpl(
-      ['diff', '--staged', '-w', `-U${contextLines}`, '--', file],
-      {
-        maxBytes: CONFIG.PER_FILE_BUFFER,
-      },
-    );
-    // parse hunks
-    let cur: Hunk | null = null;
-    for (const rawLine of lines) {
-      const line = rawLine.replace(/\r?\n$/, '');
-      if (line.startsWith('@@')) {
-        if (cur) {
-          const importance = CONFIG.ENABLE_HUNK_WEIGHTS ? fileImportanceWeight(cur.file) : 0;
-          cur.score = cur.added + cur.removed + importance;
-          pushHunkToTop(topHunks, cur, maxHunks);
-        }
-        cur = { file, header: line, content: '', added: 0, removed: 0, bytes: 0, score: 0 };
-        continue;
-      }
-      if (!cur) continue;
-      cur.content += line + '\n';
-      cur.bytes += Buffer.byteLength(line, 'utf8');
-      if (line.startsWith('+') && !line.startsWith('+++')) cur.added += 1;
-      if (line.startsWith('-') && !line.startsWith('---')) cur.removed += 1;
-    }
-    if (cur) {
-      const importance = CONFIG.ENABLE_HUNK_WEIGHTS ? fileImportanceWeight(cur.file) : 0;
-      cur.score = cur.added + cur.removed + importance;
-      pushHunkToTop(topHunks, cur, maxHunks);
-    }
-    return { truncated };
-  }
-  const results = [];
-  const skippedFiles: string[] = [];
-  for (const file of stagedFiles) {
-    // process sequentially (no concurrency)
-    const r = await processFile(file);
-    results.push(r);
-    if (r?.skipped) skippedFiles.push(file);
-  }
-  const totalTruncated = results.filter(r => r?.truncated).length;
-  // Scores were computed before insertion into topHunks to allow pushHunkToTop
-  // to operate on valid scores; no additional per-hunk compute needed here.
+  const hunkAccumulator: HunkAccumulator = { topHunks, maxHunks };
+  const { totalTruncated, skippedFiles } = await collectSummaryData(
+    stagedFiles,
+    spawnLinesImpl,
+    hunkAccumulator,
+  );
   topHunks.sort((a, b) => b.score - a.score);
-  const limitBytes = Math.floor(CONFIG.CHILD_PROCESS_MAX_BUFFER / 2);
-  let out = `File changes summary:\n${stats}\n\n`;
-  if (skippedFiles.length) {
-    // Group skipped binary files by parent directory and show up to a per-dir cap so
-    // we don't flood output when many files were moved/renamed in bulk.
-    const perDirLimit = 15;
-    const grouped = new Map<string, string[]>();
-    for (const f of skippedFiles) {
-      const parts = f.split(/[\\/]/);
-      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
-      const arr = grouped.get(dir) || [];
-      arr.push(f);
-      grouped.set(dir, arr);
-    }
-
-    out += `Skipped binary files (content omitted):\n`;
-    for (const [dir, files] of grouped) {
-      if (files.length <= perDirLimit) {
-        out += `  ${dir}/\n`;
-        for (const f of files) out += `    - ${f}\n`;
-      } else {
-        out += `  ${dir}/ (showing ${perDirLimit} of ${files.length})\n`;
-        for (let i = 0; i < perDirLimit; i++) out += `    - ${files[i]}\n`;
-        out += `    - ... and ${files.length - perDirLimit} more\n`;
-      }
-    }
-    out += '\n';
-  }
-
-  for (const h of topHunks) {
-    const hText = `File: ${h.file}\n${h.header}\n${h.content}\n`;
-    if (out.length + hText.length > limitBytes) {
-      out += `\n... (${topHunks.length} hunks, ${totalTruncated} files truncated by per-file buffer) ...`;
-      break;
-    }
-    out += hText;
-  }
-  return { text: out, numHunks: topHunks.length, totalTruncated };
+  const output = buildSummaryOutput(stats, topHunks, skippedFiles, totalTruncated);
+  return { text: output, numHunks: topHunks.length, totalTruncated };
 }

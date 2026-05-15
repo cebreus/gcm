@@ -17,21 +17,23 @@ const spawnSyncMock = mock(() => ({ success: true }));
 
 const originalBunFile = Bun.file;
 const originalSpawnSync = Bun.spawnSync;
-const originalConsoleLog = console.log;
-const originalConsoleError = console.error;
+const originalStdoutWrite = process.stdout.write;
+const originalStderrWrite = process.stderr.write;
+const stdoutWriteMock = mock(() => true);
+const stderrWriteMock = mock(() => true);
 
 beforeAll(() => {
   Bun.file = fileMock as any;
   Bun.spawnSync = spawnSyncMock as any;
-  console.log = mock(() => {});
-  console.error = mock(() => {});
+  process.stdout.write = stdoutWriteMock as any;
+  process.stderr.write = stderrWriteMock as any;
 });
 
 afterAll(() => {
   Bun.file = originalBunFile;
   Bun.spawnSync = originalSpawnSync;
-  console.log = originalConsoleLog;
-  console.error = originalConsoleError;
+  process.stdout.write = originalStdoutWrite;
+  process.stderr.write = originalStderrWrite;
 });
 
 afterEach(async () => {
@@ -39,8 +41,8 @@ afterEach(async () => {
   mockWriter.write.mockClear();
   mockWriter.end.mockClear();
   spawnSyncMock.mockClear();
-  (console.log as any).mockClear();
-  (console.error as any).mockClear();
+  stdoutWriteMock.mockClear();
+  stderrWriteMock.mockClear();
   try {
     await fs.unlink(TEST_LOG_FILE);
   } catch {}
@@ -68,12 +70,14 @@ test('logger: log level filtering', () => {
   logger.log('warn', 'this is a warning');
   logger.log('error', 'this is an error');
 
-  expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('this should be ignored'));
-  expect(console.log).not.toHaveBeenCalledWith(
-    expect.stringContaining('this should also be ignored'),
-  );
-  expect(console.log).toHaveBeenCalledWith(expect.stringContaining('this is a warning'));
-  expect(console.error).toHaveBeenCalledWith(expect.stringContaining('this is an error'));
+  const stdoutCalls = stdoutWriteMock.mock.calls as unknown as Array<unknown[]>;
+  const stderrCalls = stderrWriteMock.mock.calls as unknown as Array<unknown[]>;
+  const stdoutOutput = stdoutCalls.map(call => String(call[0])).join('\n');
+  const stderrOutput = stderrCalls.map(call => String(call[0])).join('\n');
+  expect(stdoutOutput).not.toContain('this should be ignored');
+  expect(stdoutOutput).not.toContain('this should also be ignored');
+  expect(stdoutOutput).toContain('this is a warning');
+  expect(stderrOutput).toContain('this is an error');
 });
 
 test('logger: should flush when queue reaches maxQueueBytes', async () => {
@@ -102,10 +106,8 @@ test('logger: should handle disk full scenario gracefully', async () => {
   logger.log('info', 'some data');
   await logger.flush();
 
-  // The error message should be logged to console.error
-  // The logger catches the error from writer.write and logs it
-  const calls = (console.error as any).mock.calls;
-  const found = calls.some((call: any[]) => String(call).includes('Failed to write telemetry'));
+  const calls = stderrWriteMock.mock.calls;
+  const found = calls.some((call: any[]) => String(call[0]).includes('Failed to write telemetry'));
   expect(found).toBe(true);
 });
 
@@ -118,9 +120,8 @@ test('logger: should handle permission errors gracefully', async () => {
   logger.log('info', 'some data');
   await logger.flush();
 
-  // The error message should be logged to console.error
-  const calls = (console.error as any).mock.calls;
-  const found = calls.some((call: any[]) => String(call).includes('Failed to write telemetry'));
+  const calls = stderrWriteMock.mock.calls;
+  const found = calls.some((call: any[]) => String(call[0]).includes('Failed to write telemetry'));
   expect(found).toBe(true);
 });
 

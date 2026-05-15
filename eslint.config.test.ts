@@ -10,7 +10,7 @@ export default tseslint.config({
   ],
   languageOptions: {
     globals: {
-      ...globals.bun, // Add Bun test globals
+      ...(globals as any).bun, // Add Bun test globals
     },
   },
   rules: {

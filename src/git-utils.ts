@@ -21,6 +21,23 @@ export interface SpawnGitStreamResult {
   truncated: boolean;
 }
 
+function killSpawnedChild(child: ReturnType<typeof Bun.spawn>, state: { killed: boolean }): void {
+  if (state.killed) return;
+  state.killed = true;
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    /* ignore */
+  }
+  setTimeout(() => {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      /* ignore */
+    }
+  }, 2000);
+}
+
 export function runGitCmdSync(args: string[], opts: BunSpawnOptions = {}): string {
   const proc = Bun.spawnSync({ cmd: ['git', ...args], stdout: 'pipe', stderr: 'pipe', ...opts });
   if (!proc.success) {
@@ -37,82 +54,51 @@ async function spawnCore(
 ): Promise<{ truncated: boolean }> {
   const maxBytes = options.maxBytes === undefined ? 1024 * 1024 : options.maxBytes;
   const execName = options.execName || 'git';
+  const child = Bun.spawn({ cmd: [execName, ...args], stdout: 'pipe', stderr: 'pipe' });
+  const dec = new TextDecoder();
+  let bytes = 0;
+  let truncated = false;
+  const killState = { killed: false };
 
-  return await new Promise((resolve, reject) => {
-    const child = Bun.spawn({ cmd: [execName, ...args], stdout: 'pipe', stderr: 'pipe' });
-    const dec = new TextDecoder();
-    let bytes = 0;
-    let truncated = false;
-    let killed = false;
-
-    function killChild() {
-      if (killed) return;
-      killed = true;
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        /* ignore */
+  const stdoutTask = (async (): Promise<void> => {
+    const reader = child.stdout?.getReader();
+    if (!reader) return;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = dec.decode(value);
+      bytes += chunk.length;
+      if (bytes > maxBytes) {
+        truncated = true;
+        killSpawnedChild(child, killState);
+        break;
       }
-      setTimeout(() => {
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          /* ignore */
-        }
-      }, 2000);
+      onChunk(chunk);
     }
+  })();
 
-    (async function () {
-      try {
-        const reader = child.stdout?.getReader();
-        if (!reader) return;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = dec.decode(value);
-          const chunkBytes = chunk.length;
-          bytes += chunkBytes;
-          if (bytes > maxBytes) {
-            truncated = true;
-            killChild();
-            break;
-          }
-          onChunk(chunk);
-        }
-      } catch (e) {
-        reject(e);
-      }
-    })();
-
+  const stderrTask = (async (): Promise<string> => {
+    const reader = child.stderr?.getReader();
+    if (!reader) return '';
     let stderr = '';
     let stderrBytes = 0;
     const maxStderrBytes = 64 * 1024;
-    (async function () {
-      try {
-        const reader = child.stderr?.getReader();
-        if (!reader) return;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = dec.decode(value);
-          const chunkBytes = chunk.length;
-          stderrBytes += chunkBytes;
-          if (stderrBytes <= maxStderrBytes) stderr += chunk;
-        }
-      } catch {
-        /* ignore */
-      }
-    })();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = dec.decode(value);
+      stderrBytes += chunk.length;
+      if (stderrBytes <= maxStderrBytes) stderr += chunk;
+    }
+    return stderr;
+  })();
 
-    (async function () {
-      const code = await child.exited;
-      if (!truncated && code !== 0) {
-        reject(new Error('git ' + args.join(' ') + ' failed: ' + stderr));
-        return;
-      }
-      resolve({ truncated });
-    })();
-  });
+  await stdoutTask;
+  const [code, stderr] = await Promise.all([child.exited, stderrTask]);
+  if (!truncated && code !== 0) {
+    throw new Error('git ' + args.join(' ') + ' failed: ' + stderr);
+  }
+  return { truncated };
 }
 
 export async function spawnGitLines(

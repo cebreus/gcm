@@ -92,14 +92,14 @@ export function logOrWrite(
 }
 
 /**
- * Safely logs an error to console.error, catching any failures
+ * Safely logs an error to stderr, catching any failures
  */
 export function safeLogError(message: string, error?: unknown): void {
   try {
     if (error) {
-      console.error(message, error);
+      process.stderr.write(message + ' ' + String(error) + '\n');
     } else {
-      console.error(message);
+      process.stderr.write(message + '\n');
     }
   } catch {
     // Ignore logging errors
@@ -140,33 +140,34 @@ export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void 
 // (No concurrency helper; simplified, serial processing is used in summarizer)
 
 export function unescapeNewlinesInText(obj: unknown, maxDepth = 20): unknown {
-  function recurse(current: unknown, depth: number): unknown {
-    if (depth >= maxDepth) {
-      return '[REDACTED-MAX-DEPTH]';
-    }
-    if (typeof current === 'string') {
-      return current;
-    }
-    if (Array.isArray(current)) {
-      return current.map(item => recurse(item, depth + 1));
-    }
-    if (typeof current === 'object' && current !== null) {
-      const newObj: Record<string, unknown> = {};
-      for (const key in current as Record<string, unknown>) {
-        if (Object.prototype.hasOwnProperty.call(current, key)) {
-          const val = (current as Record<string, unknown>)[key];
-          if (key === 'text' && typeof val === 'string') {
-            newObj[key] = val.replace(/\\n/g, '\n');
-          } else {
-            newObj[key] = recurse(val, depth + 1);
-          }
-        }
-      }
-      return newObj;
-    }
+  return recurseUnescapeNewlines(obj, 0, maxDepth);
+}
+
+function recurseUnescapeNewlines(current: unknown, depth: number, maxDepth: number): unknown {
+  if (depth >= maxDepth) {
+    return '[REDACTED-MAX-DEPTH]';
+  }
+  if (typeof current === 'string') {
     return current;
   }
-  return recurse(obj, 0);
+  if (Array.isArray(current)) {
+    return current.map(item => recurseUnescapeNewlines(item, depth + 1, maxDepth));
+  }
+  if (typeof current === 'object' && current !== null) {
+    const newObj: Record<string, unknown> = {};
+    for (const key in current as Record<string, unknown>) {
+      if (Object.prototype.hasOwnProperty.call(current, key)) {
+        const val = (current as Record<string, unknown>)[key];
+        if (key === 'text' && typeof val === 'string') {
+          newObj[key] = val.replace(/\\n/g, '\n');
+        } else {
+          newObj[key] = recurseUnescapeNewlines(val, depth + 1, maxDepth);
+        }
+      }
+    }
+    return newObj;
+  }
+  return current;
 }
 
 /**

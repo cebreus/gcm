@@ -117,9 +117,12 @@ describe('Refactored Runner', () => {
   });
 
   test('Should print package version and exit on --version', async () => {
-    const originalConsoleLog = console.log;
-    const consoleLogMock = mock(() => {});
-    console.log = consoleLogMock;
+    const originalStdoutWrite = process.stdout.write;
+    const stdoutChunks: string[] = [];
+    process.stdout.write = mock((chunk: any) => {
+      stdoutChunks.push(String(chunk));
+      return true;
+    }) as any;
 
     try {
       await executeCommitMessageGeneration(['--version'], {
@@ -130,20 +133,22 @@ describe('Refactored Runner', () => {
         listModels: mockListModels,
       });
 
-      expect(consoleLogMock).toHaveBeenCalledTimes(1);
-      const output = String(consoleLogMock.mock.calls[0][0]);
+      const output = stdoutChunks.join('');
       expect(output).toContain('gcm');
-      expect(output).toContain('0.5.0');
+      expect(output).toContain('0.6.0');
       expect(mockIntro).not.toHaveBeenCalled();
     } finally {
-      console.log = originalConsoleLog;
+      process.stdout.write = originalStdoutWrite;
     }
   });
 
   test('Should include version details in --help output', async () => {
-    const originalConsoleLog = console.log;
-    const consoleLogMock = mock(() => {});
-    console.log = consoleLogMock;
+    const originalStdoutWrite = process.stdout.write;
+    const stdoutChunks: string[] = [];
+    process.stdout.write = mock((chunk: any) => {
+      stdoutChunks.push(String(chunk));
+      return true;
+    }) as any;
 
     try {
       await executeCommitMessageGeneration(['--help'], {
@@ -154,13 +159,12 @@ describe('Refactored Runner', () => {
         listModels: mockListModels,
       });
 
-      expect(consoleLogMock).toHaveBeenCalledTimes(1);
-      const output = String(consoleLogMock.mock.calls[0][0]);
+      const output = stdoutChunks.join('');
       expect(output).toContain('Version:');
-      expect(output).toContain('0.5.0');
+      expect(output).toContain('0.6.0');
       expect(output).toContain('--version');
     } finally {
-      console.log = originalConsoleLog;
+      process.stdout.write = originalStdoutWrite;
     }
   });
 
@@ -334,15 +338,9 @@ describe('Refactored Runner', () => {
     // Verify hint was passed to context service in second call
     expect(mockContextService.constructLLMPromptContext).toHaveBeenCalledTimes(2);
     expect(mockContextService.constructLLMPromptContext).toHaveBeenLastCalledWith(
-      expect.any(String),
-      expect.any(String),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Array),
-      expect.any(Array),
-      expect.any(Object),
-      expect.any(String),
-      'make it shorter', // This is the hint!
+      expect.objectContaining({
+        userHint: 'make it shorter',
+      }),
     );
   });
 
@@ -410,11 +408,9 @@ describe('Refactored Runner', () => {
     // Gemini should be called once with retryIfTruncated flag
     expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledTimes(1);
     expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      expect.any(Array),
-      expect.any(Object),
-      expect.objectContaining({ retryIfTruncated: true }),
+      expect.objectContaining({
+        opts: expect.objectContaining({ retryIfTruncated: true }),
+      }),
     );
     expect(mockNote).toHaveBeenCalledWith(
       expect.stringContaining('full message'),

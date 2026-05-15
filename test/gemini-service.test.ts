@@ -5,17 +5,11 @@ import type { GeminiClient, GeminiResponse } from '../src/gemini-client';
 async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
   let callCount = 0;
   const mockClient: Partial<GeminiClient> = {
-    async callGemini(
-      _apiKey: string,
-      _userContent: string,
-      _enableThinking: boolean,
-      _meta: any,
-      _opts?: any,
-    ) {
+    async callGemini(params: any) {
       callCount += 1;
       // Simulate client-side automatic retry when opts.retryIfTruncated is true
       if (callCount === 1) {
-        if (_opts?.retryIfTruncated) {
+        if (params?.callOptions?.retryIfTruncated) {
           // pretend the client retried internally and returned a full result
           callCount += 1;
           return {
@@ -40,16 +34,20 @@ async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
 
   const service = createGeminiService({
     client: mockClient as GeminiClient,
-    logger: console as any,
+    logger: { log: () => {}, flush: async () => {}, flushSync: () => {} } as any,
     apiKey: 'fake',
   });
-  const res = await service.callGeminiAPI(
-    'ctx',
-    'sys',
-    [],
-    {},
-    { retryIfTruncated: true, retryIfTruncatedMaxRetries: 2, retryIfTruncatedIncreaseTokens: 100 },
-  );
+  const res = await service.callGeminiAPI({
+    promptContext: 'ctx',
+    systemPrompt: 'sys',
+    stagedFiles: [],
+    meta: {},
+    opts: {
+      retryIfTruncated: true,
+      retryIfTruncatedMaxRetries: 2,
+      retryIfTruncatedIncreaseTokens: 100,
+    },
+  });
   expect(callCount).toBeGreaterThanOrEqual(2);
   expect(res?.truncated).toBeFalsy();
 }
