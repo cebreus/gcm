@@ -204,7 +204,7 @@ export async function executeCommitMessageGeneration(
   }
 
   // Initialize Clack Intro
-  intro(`${C.bright}Gemini Commit Message Helper${C.reset}`);
+  intro(`${C.bright}Gemini Commit Message Helper v${packageInfo.version}${C.reset}`);
 
   if (parsedArgs.help) {
     showHelp();
@@ -361,6 +361,11 @@ export async function executeCommitMessageGeneration(
       const safeMaxTokens = modelSpec.maxInputTokens - CONFIG.MAX_OUTPUT_TOKENS - 1000;
 
       // 6. Build Context (Prompt)
+      const customHeader =
+        outputMode === 'full'
+          ? 'Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following'
+          : 'Generate a professional conventional commit message based on the following';
+
       const { promptContext, processedDiffContent, tokens } =
         await contextService.constructLLMPromptContext(
           staged.stagedDiff,
@@ -370,6 +375,7 @@ export async function executeCommitMessageGeneration(
           staged.stagedFiles,
           scopeSuggestions,
           logger,
+          customHeader,
         );
 
       // 7. Call Gemini
