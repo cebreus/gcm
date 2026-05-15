@@ -1,5 +1,16 @@
 # gcm
 
+## 0.6.1
+
+> This release changes internal code and development checks. It does not intend to change normal GCM behaviour.
+
+### Patch Changes
+
+- **Smaller functions:** Large generation, parsing, logging, Git, and AI service functions are split into smaller internal helpers. This is an internal structure change with no intended user-visible effect.
+- **Checked model list:** Gemini model-list JSON is now read as unknown data. GCM checks the response object, model entries, names, and generation-method lists before use. Bad model entries are ignored instead of being trusted.
+- **Stronger development checks:** Developer-only lint rules now check full switches, object-literal type assertions, unsafe `any` use, unsafe data access, negative conditions, and task comments. They also warn above two nested callbacks, four parameters, or 18 statements.
+- **Type-check command:** The package script `typecheck` is renamed to `check`. Developers must use `bun run check`; `bun run typecheck` no longer exists.
+
 ## 0.6.0
 
 > GCM now has an interactive loop. The user can review, edit, copy, commit, or generate the message again before leaving. GCM remembers the last model and output type after a successful Git action.
