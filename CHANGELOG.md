@@ -1,5 +1,23 @@
 # gcm
 
+## 0.5.0
+
+> GCM now shows its version in help and in the start banner. It also adds tools for a reply that may be cut and keeps letters and symbols from languages other than English.
+
+### Minor Changes
+
+- **Version output:** `--version` prints the version from `package.json` and exits. `--help` and the start banner show it too. If the file or version cannot be read, they show `unknown`; the product name falls back to `gcm`.
+
+### Patch Changes
+
+- **Reply markers:** When `GCM_ADD_RESPONSE_MARKERS=true`, which is the default, GCM asks Gemini to use reply markers. When `<<START>>` has no later `<<END>>`, or when `<<END_TRUNCATED>>` is present, GCM treats the reply as cut. A normal end marker cannot prove that all wanted text is present.
+- **Cut reply retry:** GCM first asks the user whether to retry a reply marked as cut. If the user agrees, it starts a new request. That request may make up to two more automatic retries, and each adds `GCM_MAX_OUTPUT_TOKENS` of output space. This does not guarantee a full reply.
+- **Known overflow bug:** After a no-text or `MAX_TOKENS` error, GCM first retries with selected diff sections and 1,024 more output tokens. If that still overflows and another attempt runs, the code can read an undefined `shrinkFactor` and fail with `ReferenceError`.
+- **Clear prompt:** Commit-only mode asks only for a commit message. Full mode asks for a branch name, pull request title and text, and a commit message.
+- **English cut-reply UI:** Questions, choices, and progress text for a cut reply change from Czech to English.
+- **More writing systems:** GCM keeps letters and symbols from languages other than English. It still removes basic control characters, except tab and line breaks.
+- **Project tools:** Formatting now ignores `dist`. `.prettierignore` adds `node_modules`, `dist`, `bun.lock`, and `pnpm-lock.yaml`. This does not change generated messages.
+
 ## 0.4.0
 
 > GCM adds an `--exclude` option, but this release filters only the file-name list and still sends excluded file text to Gemini. It also adds reply markers, cut-reply handling, model filtering, and broad error retries.
