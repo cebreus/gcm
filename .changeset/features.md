@@ -1,5 +1,5 @@
 ---
-"gcm": minor
+'gcm': minor
 ---
 
 Introduced intelligent scope detection to provide contextually relevant commit suggestions.

@@ -1,5 +1,5 @@
 ---
-"gcm": minor
+'gcm': minor
 ---
 
 Implemented automatic commit message line wrapping to ensure standard git terminal readability.
