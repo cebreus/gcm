@@ -26,7 +26,12 @@ mock.module('@clack/prompts', () => ({
 }));
 
 // Mock ../src/session.js
-const mockLoadSession = mock(() => Promise.resolve({ modelName: null, outputMode: null }));
+const mockLoadSession = mock(() =>
+  Promise.resolve({
+    modelName: null as string | null,
+    outputMode: null as 'full' | 'commit-only' | null,
+  }),
+);
 const mockSaveSession = mock(() => Promise.resolve());
 mock.module('../src/session.js', () => ({
   loadSession: mockLoadSession,
@@ -373,6 +378,39 @@ describe('Refactored Runner', () => {
     // Verify session was saved with the model used
     expect(mockSaveSession).toHaveBeenCalledWith(
       expect.objectContaining({ modelName: 'gemini-special' }),
+    );
+  });
+
+  test('Should migrate legacy session pro model to faster default', async () => {
+    mockLoadSession.mockResolvedValueOnce({ modelName: 'gemini-2.5-pro', outputMode: null });
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.callGeminiAPI.mockResolvedValue({
+      text: 'COMMIT_MESSAGE: msg',
+      usage: {},
+    });
+    mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+
+    await executeCommitMessageGeneration([], {
+      logger: mockLogger as any,
+      gitService: mockGitService,
+      contextService: mockContextService,
+      geminiService: mockGeminiService,
+      listModels: mockListModels,
+    });
+
+    expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledWith(
+      expect.objectContaining({
+        opts: expect.objectContaining({ modelOverride: 'gemini-2.5-flash' }),
+      }),
     );
   });
 
