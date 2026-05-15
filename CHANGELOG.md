@@ -1,5 +1,13 @@
 # gcm
 
+## 0.6.1
+
+### Patch Changes
+
+- Refined the app structure by breaking down large tasks into smaller, simpler pieces. This makes the code easier to read and maintain.
+- Improved how the app handles data by adding stricter rules for information types. This helps prevent hidden errors.
+- Added stronger checks for code quality. This ensures the app stays reliable as it grows.
+
 ## 0.6.0
 
 ### Minor Changes
