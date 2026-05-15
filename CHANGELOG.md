@@ -1,5 +1,16 @@
 # gcm
 
+## 0.6.0
+
+### Minor Changes
+
+- Added an interactive menu to let you commit, copy, or edit the message without typing more commands.
+- Added session memory so the app remembers your preferred AI model and avoids repetitive setup.
+- Added a hint feature so you can tell the AI exactly how to improve a draft message.
+- Added a "commit-only" mode to give you shorter messages when you do not need a full description.
+- Improved the message cleaner to remove internal markers and fix messages that were cut off.
+- Updated the system configuration and tools to ensure smoother development and faster startup.
+
 ## 0.5.0
 
 ### Minor Changes
