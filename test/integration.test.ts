@@ -9,7 +9,7 @@ const mockIntro = mock();
 const mockOutro = mock();
 const mockSpinner = mock(() => ({ start: mock(), stop: mock() }));
 const mockNote = mock();
-const mockSelect = mock(() => Promise.resolve('commit'));
+const mockSelect = mock(() => Promise.resolve('continue'));
 const mockText = mock(() => Promise.resolve('edited message'));
 const mockIsCancel = mock(() => false);
 const mockCancel = mock();
