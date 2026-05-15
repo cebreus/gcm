@@ -46,6 +46,7 @@ interface RunnerServices {
 }
 
 interface GenerationState {
+  baselineModelName: string;
   modelName: string;
   outputMode: 'full' | 'commit-only';
   userHint?: string;
@@ -296,7 +297,10 @@ async function runPreflightIfNeeded(params: {
         message: 'Select AI Model',
         options: modelOptions,
       });
-      if (!isCancel(selectedModel)) state.modelName = String(selectedModel);
+      if (!isCancel(selectedModel)) {
+        state.baselineModelName = String(selectedModel);
+        state.modelName = state.baselineModelName;
+      }
     } else if (configAction === 'mode') {
       const selectedMode = await select({
         message: 'Select Output Mode',
@@ -535,10 +539,14 @@ async function buildGenerationState(parsedArgs: ParsedOptions): Promise<{
 }> {
   const targetCommit = parsedArgs.commit || null;
   const session = await loadSession();
+  const resolvedSessionModel =
+    session.modelName === 'gemini-2.5-pro' ? CONFIG.MODEL_NAME : session.modelName;
+  const initialModelName = parsedArgs.model || resolvedSessionModel || CONFIG.MODEL_NAME;
   return {
     targetCommit,
     state: {
-      modelName: parsedArgs.model || session.modelName || CONFIG.MODEL_NAME,
+      baselineModelName: initialModelName,
+      modelName: initialModelName,
       outputMode: parsedArgs.mode || session.outputMode || 'commit-only',
       userHint: undefined,
     },
@@ -959,6 +967,7 @@ async function handleSuccessfulGeneration(params: {
     listModelsFn: services.listModelsFn,
   });
   if (actionResult.type === 'cancel') return 'done';
+  state.baselineModelName = actionResult.modelName;
   state.modelName = actionResult.modelName;
   state.userHint = actionResult.userHint;
   if (actionResult.type === 'regenerate') return 'regenerate';
@@ -982,7 +991,7 @@ async function commitGeneratedMessage(params: {
   s.start('Committing changes...');
   try {
     await services.gitService.commitChanges(commitMessage, logger);
-    await saveSession({ modelName: state.modelName, outputMode: state.outputMode });
+    await saveSession({ modelName: state.baselineModelName, outputMode: state.outputMode });
     s.stop('Changes committed successfully');
     outro(`${C.cyan}Commit successfully created!${C.reset}`);
   } catch (error) {
