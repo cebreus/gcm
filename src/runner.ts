@@ -6,7 +6,8 @@ import type { Logger, LoggerConfig, LogMetadata } from './logger.js';
 import { createGeminiClient } from './gemini-client.js';
 import { parseGeminiOutput } from './parser.js';
 import type { Labels } from './parser.js';
-import { getScopeSuggestions } from './scope-detector.js';
+import { getCommitContextHints } from './scope-detector.js';
+import type { CommitContextHints } from './scope-detector.js';
 import { listGeminiModels } from './gemini-client/listModels.js';
 import { createGitService } from './services/git-service.js';
 import type { GitService } from './services/git-service.js';
@@ -133,9 +134,33 @@ function detectRuntime(): string {
   return 'bun';
 }
 
-const SYSTEM_INSTRUCTIONS_FULL = `You are an expert at writing concise, professional conventional commit messages.\n\nOutput format (follow exactly):\n\nBRANCH: [Generated branch name]\nCOMMIT_MESSAGE: [Generated conventional commit message]\nPR_TITLE: [Generated pull request title]\nPR_DESCRIPTION: [Generated pull request description]\n\n--- RULES ---\n1. **Branch Name**: Format: \`type/short-description\`, Types: feat, fix, refactor, chore, docs\n2. **Commit Message** (MOST IMPORTANT): CRITICAL: First line MUST be ≤60 characters (type(scope): summary), BLANK LINE after first line, Body: Use bullet points with dash (-), EACH LINE MUST be ≤80 characters maximum, Focus on WHAT changed not WHY, Group related changes, Be specific and concise, If breaking change add BREAKING CHANGE: footer. Your response will be automatically formatted to enforce these limits.\n3. **PR Title**: Same as commit first line, Max 60 characters\n4. **PR Description**: 2-3 paragraphs maximum, Bulleted list of key changes, Use GitHub-flavored Markdown`;
+const COMMIT_MESSAGE_RULES = `Commit message rules:
+- Subject format: type(scope): summary
+- Allowed types: feat, fix, refactor, perf, style, docs, test, build, ci, chore
+- Subject must start lowercase after the colon, use imperative mood, have no trailing period, and be at most 60 characters.
+- Body is optional. Use it only for non-trivial changes.
+- Body bullets must start with "- " and each line must be at most 80 characters.
 
-const SYSTEM_INSTRUCTIONS_COMMIT_ONLY = `You are an expert at writing concise, professional conventional commit messages. Use GitHub-flavored Markdown as required format.\n\nOutput format (follow exactly):\n\n[Generated conventional commit message]\n\n--- RULES ---\n1. **Commit Message** (MOST IMPORTANT): CRITICAL: First line MUST be ≤60 characters (type(scope): summary), BLANK LINE after first line, Body: Use bullet points with dash (-), EACH LINE MUST be ≤80 characters maximum, Focus on WHAT changed not WHY, Group related changes, Be specific and concise, If breaking change add BREAKING CHANGE: footer. Your response will be automatically formatted to enforce these limits.`;
+Body semantics:
+- Describe observable behaviour, business rules, or technical invariants changed by the diff.
+- Write bullets as acceptance-style technical outcomes, not as user stories.
+- Prefer what behaviour now holds true over implementation narration.
+- Do not list filenames.
+- Include implementation details only when they clarify behaviour, risk, or compatibility.
+
+Grounding:
+- Use only facts present in the changed file list, diff, and recent commit examples.
+- Do not mention tools, frameworks, modules, APIs, versions, or behaviours unless visible in the provided context.
+- Never invent motivation, performance impact, security impact, migration impact, or breaking-change status.
+- If intent is ambiguous, use conservative wording.
+
+Style alignment:
+- Use recent commit examples only to align type, scope, and wording style.
+- Do not copy unrelated content from history.`;
+
+const SYSTEM_INSTRUCTIONS_FULL = `You generate concise, evidence-grounded Conventional Commit metadata from git diffs.\n\nOutput format (follow exactly):\n\nBRANCH: [Generated branch name]\nCOMMIT_MESSAGE: [Generated conventional commit message]\nPR_TITLE: [Generated pull request title]\nPR_DESCRIPTION: [Generated pull request description]\n\nBranch rules:\n- Format: type/short-description\n- Allowed branch types: feat, fix, refactor, chore, docs\n\n${COMMIT_MESSAGE_RULES}\n\nPR rules:\n- PR title must match the commit subject and be at most 60 characters.\n- PR description must use GitHub-flavoured Markdown and stay to 2-3 short paragraphs or bullets.`;
+
+const SYSTEM_INSTRUCTIONS_COMMIT_ONLY = `You generate concise, evidence-grounded Conventional Commit messages from git diffs.\n\nOutput only the commit message.\n\n${COMMIT_MESSAGE_RULES}`;
 
 function logTokenInfo(params: {
   modelName: string;
@@ -569,7 +594,13 @@ async function runGenerationWorkflow(params: {
   const staged = await loadStagedChanges({ services, parsedArgs, targetCommit, logger, s });
   if (!staged) return;
   const meta = buildLogMetadata(staged, targetCommit);
-  const scopeSuggestions = await resolveScopeSuggestions(staged.stagedFiles, logger);
+  const commitContextHints = await resolveCommitContextHints(staged.stagedFiles, logger);
+  const shouldContinue = await confirmAtomicityIfNeeded(
+    commitContextHints.scopeSuggestions,
+    staged.stagedFiles,
+    targetCommit,
+  );
+  if (!shouldContinue) return;
   await runGenerationCycle({
     services,
     parsedArgs,
@@ -579,7 +610,7 @@ async function runGenerationWorkflow(params: {
     s,
     staged,
     meta,
-    scopeSuggestions,
+    commitContextHints,
     targetCommit,
   });
 }
@@ -619,13 +650,97 @@ async function loadStagedChanges(params: {
   return staged;
 }
 
-async function resolveScopeSuggestions(stagedFiles: string[], logger: Logger): Promise<string[]> {
+async function resolveCommitContextHints(
+  stagedFiles: string[],
+  logger: Logger,
+): Promise<CommitContextHints> {
   try {
-    return await getScopeSuggestions(stagedFiles);
+    return await getCommitContextHints(stagedFiles);
   } catch (error) {
-    logger.log('debug', 'Failed to get scope suggestions', { error: String(error) });
-    return [];
+    logger.log('debug', 'Failed to get commit context hints', { error: String(error) });
+    return { scopeSuggestions: [], recentCommitSubjects: [] };
   }
+}
+
+async function confirmAtomicityIfNeeded(
+  scopeSuggestions: string[],
+  stagedFiles: string[],
+  targetCommit: string | null,
+): Promise<boolean> {
+  if (targetCommit || scopeSuggestions.length <= 1) return true;
+  for (;;) {
+    const action = await select({
+      message: [
+        `Staged files suggest multiple possible scopes: ${scopeSuggestions.join(', ')}.`,
+        'Atomic commits are preferred; split unrelated changes unless this is one functional unit.',
+      ].join('\n'),
+      options: [
+        { value: 'split', label: 'Show split proposal' },
+        { value: 'continue', label: 'Continue anyway' },
+        { value: 'cancel', label: 'Cancel' },
+      ],
+    });
+    if (isCancel(action) || action === 'cancel') {
+      outro('Commit cancelled.');
+      return false;
+    }
+    if (action === 'continue') return true;
+    note(buildAtomicSplitProposal(stagedFiles), 'Atomic split proposal');
+  }
+}
+
+function buildAtomicSplitProposal(stagedFiles: string[]): string {
+  const groups = new Map<string, string[]>();
+  for (const file of stagedFiles) {
+    const scope = detectAtomicScope(file);
+    const list = groups.get(scope) || [];
+    list.push(file);
+    groups.set(scope, list);
+  }
+
+  const sections: string[] = [];
+  let index = 0;
+  for (const [scope, files] of groups) {
+    index += 1;
+    const escapedFiles = files.map(escapeShellArg).join(' ');
+    sections.push(
+      [
+        `Commit ${index}: ${scope}`,
+        ...files.map(file => `- ${file}`),
+        '',
+        'Suggested commands:',
+        `git reset`,
+        `git add ${escapedFiles}`,
+        `# run gcm and commit this atomic unit`,
+      ].join('\n'),
+    );
+  }
+
+  return [
+    `Found ${stagedFiles.length} staged file(s), proposed ${groups.size} atomic group(s).`,
+    '',
+    ...sections,
+  ].join('\n\n');
+}
+
+function detectAtomicScope(file: string): string {
+  const workspaceMatch = /^(apps|packages|sites|tools)\/([^/]+)/.exec(file);
+  if (workspaceMatch?.[2]) return workspaceMatch[2];
+  if (file.startsWith('.github/')) return 'ci';
+  if (/^(infra|scripts)\//.test(file)) return 'tooling';
+  if (/^test\//.test(file) || /\.test\./.test(file)) return 'tests';
+  if (/^src\/services\//.test(file)) return 'services';
+  if (/^src\/models\//.test(file)) return 'models';
+  if (/^src\/.*runner/.test(file) || file.includes('runner.ts')) return 'runner';
+  if (/^src\/.*scope-detector/.test(file) || file.includes('scope-detector.ts')) return 'scope';
+  if (/(\.md$|\.json$|\.yaml$|\.yml$)/.test(file)) return 'formatting';
+  const topLevel = file.split('/')[0];
+  if (topLevel && topLevel !== file) return topLevel;
+  return 'core';
+}
+
+function escapeShellArg(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 async function runGenerationCycle(params: {
@@ -637,10 +752,10 @@ async function runGenerationCycle(params: {
   s: ReturnType<typeof spinner>;
   staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>;
   meta: LogMetadata;
-  scopeSuggestions: string[];
+  commitContextHints: CommitContextHints;
   targetCommit: string | null;
 }): Promise<void> {
-  const { services, logger, apiKey, state, s, staged, meta, scopeSuggestions, targetCommit } =
+  const { services, logger, apiKey, state, s, staged, meta, commitContextHints, targetCommit } =
     params;
   for (;;) {
     const outcome = await runSingleGenerationAttempt({
@@ -651,7 +766,7 @@ async function runGenerationCycle(params: {
       s,
       staged,
       meta,
-      scopeSuggestions,
+      commitContextHints,
       targetCommit,
     });
     if (outcome === 'regenerate') continue;
@@ -667,10 +782,10 @@ async function runSingleGenerationAttempt(params: {
   s: ReturnType<typeof spinner>;
   staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>;
   meta: LogMetadata;
-  scopeSuggestions: string[];
+  commitContextHints: CommitContextHints;
   targetCommit: string | null;
 }): Promise<'done' | 'regenerate'> {
-  const { services, logger, apiKey, state, s, staged, meta, scopeSuggestions, targetCommit } =
+  const { services, logger, apiKey, state, s, staged, meta, commitContextHints, targetCommit } =
     params;
   const modelSpec = getModelSpec(state.modelName);
   const safeMaxTokens = modelSpec.maxInputTokens - CONFIG.MAX_OUTPUT_TOKENS - 1000;
@@ -684,7 +799,8 @@ async function runSingleGenerationAttempt(params: {
     maxAvailableTokens: safeMaxTokens,
     tokenBytesRatio: CONFIG.TOKEN_BYTES_RATIO,
     stagedFiles: staged.stagedFiles,
-    scopeSuggestions,
+    scopeSuggestions: commitContextHints.scopeSuggestions,
+    recentCommitSubjects: commitContextHints.recentCommitSubjects,
     logger,
     customHeader,
     userHint: state.userHint,

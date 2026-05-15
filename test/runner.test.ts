@@ -135,7 +135,7 @@ describe('Refactored Runner', () => {
 
       const output = stdoutChunks.join('');
       expect(output).toContain('gcm');
-      expect(output).toContain('0.6.0');
+      expect(output).toContain('0.6.1');
       expect(mockIntro).not.toHaveBeenCalled();
     } finally {
       process.stdout.write = originalStdoutWrite;
@@ -161,7 +161,7 @@ describe('Refactored Runner', () => {
 
       const output = stdoutChunks.join('');
       expect(output).toContain('Version:');
-      expect(output).toContain('0.6.0');
+      expect(output).toContain('0.6.1');
       expect(output).toContain('--version');
     } finally {
       process.stdout.write = originalStdoutWrite;
