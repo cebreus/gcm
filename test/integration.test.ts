@@ -41,9 +41,16 @@ const mockLoggerInstance = {
 const mockCreateLogger = mock(() => mockLoggerInstance);
 
 const mockGetScopeSuggestions = mock(async () => ['feat', 'fix']);
+const mockGetCommitContextHints = mock(async () => ({
+  scopeSuggestions: ['feat'],
+  recentCommitSubjects: ['feat(test): align existing style'],
+}));
 
 // Mock only the scope-detector to avoid polluting other tests
-mock.module('../src/scope-detector', () => ({ getScopeSuggestions: mockGetScopeSuggestions }));
+mock.module('../src/scope-detector', () => ({
+  getScopeSuggestions: mockGetScopeSuggestions,
+  getCommitContextHints: mockGetCommitContextHints,
+}));
 
 const mockSummarizeLargeDiff = mock(async () => ({
   text: 'summary',
@@ -60,6 +67,7 @@ afterEach(() => {
   mockCreateGeminiClient.mockClear();
   mockLoggerInstance.log.mockClear();
   mockGetScopeSuggestions.mockClear();
+  mockGetCommitContextHints.mockClear();
 
   mockIntro.mockClear();
   mockOutro.mockClear();
@@ -114,7 +122,7 @@ test('integration: end-to-end - stage files -> generate commit message', async (
   });
 
   expect(mockCallGemini).toHaveBeenCalled();
-  expect(mockGetScopeSuggestions).toHaveBeenCalledWith(['file1.ts', 'file2.js']);
+  expect(mockGetCommitContextHints).toHaveBeenCalledWith(['file1.ts', 'file2.js']);
 });
 
 test('integration: end-to-end - analyze specific commit', async () => {
@@ -134,7 +142,7 @@ test('integration: end-to-end - analyze specific commit', async () => {
   });
 
   expect(mockCallGemini).toHaveBeenCalled();
-  expect(mockGetScopeSuggestions).toHaveBeenCalledWith(['src/index.js']);
+  expect(mockGetCommitContextHints).toHaveBeenCalledWith(['src/index.js']);
 });
 
 test('integration: token limit scenario - should trigger fallback', async () => {
@@ -194,7 +202,7 @@ test('integration: should handle various file types', async () => {
     contextService,
   });
 
-  expect(mockGetScopeSuggestions).toHaveBeenCalledWith([
+  expect(mockGetCommitContextHints).toHaveBeenCalledWith([
     'src/component.tsx',
     'styles/main.css',
     'README.md',

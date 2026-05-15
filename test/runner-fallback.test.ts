@@ -1,8 +1,19 @@
-import { test, expect } from 'bun:test';
+import { test, expect, mock } from 'bun:test';
 import { createLogger } from '../src/logger.ts';
 import runner from '../src/runner.ts';
 import type { SpawnGitStreamResult } from '../src/git-utils.ts';
 import type { GeminiClient } from '../src/gemini-client.ts';
+
+mock.module('@clack/prompts', () => ({
+  intro: mock(() => {}),
+  outro: mock(() => {}),
+  spinner: mock(() => ({ start: mock(() => {}), stop: mock(() => {}) })),
+  note: mock(() => {}),
+  select: mock(() => Promise.resolve('continue')),
+  text: mock(() => Promise.resolve('')),
+  isCancel: mock((value: unknown) => value === 'cancel'),
+  cancel: mock(() => {}),
+}));
 
 async function runnerFallbackStructuredOutputTest(): Promise<void> {
   // Stubbed spawnStream implementation to simulate a staged diff and file list
