@@ -11,6 +11,7 @@ import type { CommitContextHints } from './scope-detector.js';
 import { listGeminiModels } from './gemini-client/listModels.js';
 import { createGitService } from './services/git-service.js';
 import type { GitService } from './services/git-service.js';
+import type { RepositoryState } from './services/git-service.js';
 import { createContextService } from './services/context-service.js';
 import type { ContextService } from './services/context-service.js';
 import { createGeminiService } from './services/gemini-service.js';
@@ -58,6 +59,11 @@ interface ActionMenuResult {
   userHint?: string;
 }
 
+interface CommitCapability {
+  allowed: boolean;
+  reason?: string;
+}
+
 type ActionChoice =
   | 'commit'
   | 'copy'
@@ -102,6 +108,11 @@ export function showHelp() {
                                 Can be comma-separated or used multiple times.
       ${C.cyan}--model <name>${C.reset}            Specify an alternative Gemini model to use.
       ${C.cyan}--list-models${C.reset}             List available Gemini models and exit.
+
+    ${C.bright}Commit Safety:${C.reset}
+      - Commit action is disabled in ${C.cyan}--commit${C.reset} analysis mode (read-only).
+      - Commit action is disabled when git has unresolved conflicts.
+      - Commit action is disabled while merge/rebase/cherry-pick/revert/bisect is in progress.
 
     `;
   process.stdout.write(helpText.trim() + '\n');
@@ -379,12 +390,16 @@ async function runActionMenu(params: {
   apiKey: string;
   logger: Logger;
   listModelsFn: (apiKey: string) => Promise<string[]>;
+  commitCapability: CommitCapability;
 }): Promise<ActionMenuResult> {
-  const { state, parsedOut, apiKey, logger, listModelsFn } = params;
+  const { state, parsedOut, apiKey, logger, listModelsFn, commitCapability } = params;
   let finalMessage = parsedOut.COMMIT_MESSAGE;
+  if (!commitCapability.allowed && commitCapability.reason) {
+    note(commitCapability.reason, 'Commit unavailable');
+  }
 
   for (;;) {
-    const action = await selectAction();
+    const action = await selectAction(commitCapability);
     if (action === null || action === 'cancel') {
       outro('Commit cancelled.');
       return { type: 'cancel', modelName: state.modelName, userHint: state.userHint };
@@ -407,18 +422,20 @@ async function runActionMenu(params: {
   }
 }
 
-async function selectAction(): Promise<ActionChoice | null> {
+async function selectAction(commitCapability: CommitCapability): Promise<ActionChoice | null> {
+  const options: Array<{ value: ActionChoice; label: string }> = [];
+  if (commitCapability.allowed) options.push({ value: 'commit', label: 'Commit' });
+  options.push(
+    { value: 'copy', label: 'Copy to clipboard' },
+    { value: 'edit', label: 'Edit message' },
+    { value: 'regenerate', label: 'Regenerate (same model)' },
+    { value: 'regenerate-hint', label: 'Regenerate with Hint...' },
+    { value: 'switch', label: 'Switch Model & Regenerate' },
+    { value: 'cancel', label: 'Cancel' },
+  );
   const action = await select({
     message: 'What would you like to do?',
-    options: [
-      { value: 'commit', label: 'Commit' },
-      { value: 'copy', label: 'Copy to clipboard' },
-      { value: 'edit', label: 'Edit message' },
-      { value: 'regenerate', label: 'Regenerate (same model)' },
-      { value: 'regenerate-hint', label: 'Regenerate with Hint...' },
-      { value: 'switch', label: 'Switch Model & Regenerate' },
-      { value: 'cancel', label: 'Cancel' },
-    ],
+    options,
   });
   if (isCancel(action)) return null;
   return action as ActionChoice;
@@ -589,8 +606,19 @@ async function runGenerationWorkflow(params: {
   s: ReturnType<typeof spinner>;
 }): Promise<void> {
   const { services, parsedArgs, logger, apiKey, targetCommit, state, s } = params;
-  if (targetCommit)
-    logger.log('info', `${C.dim}Using commit ${targetCommit} for analysis${C.reset}`);
+  logTargetCommitInfo(logger, targetCommit);
+  const readyState = await resolveReadyRepositoryState({
+    services,
+    parsedArgs,
+    targetCommit,
+    logger,
+    s,
+  });
+  if (!readyState) return;
+  const { repositoryState, staged } = readyState;
+
+  const initialCommitCapability = evaluateCommitCapability(repositoryState, targetCommit);
+  showRepositoryWarnings(repositoryState, targetCommit, initialCommitCapability);
   const preflight = await runPreflightIfNeeded({
     parsedArgs,
     state,
@@ -599,8 +627,13 @@ async function runGenerationWorkflow(params: {
     listModelsFn: services.listModelsFn,
   });
   if (preflight === 'exit') return;
-  const staged = await loadStagedChanges({ services, parsedArgs, targetCommit, logger, s });
-  if (!staged) return;
+  if (repositoryState.hasUnmergedPaths) {
+    cancel(
+      'Git index has unresolved conflicts. Resolve conflicts before generating or committing.',
+    );
+    return;
+  }
+  const commitCapability = evaluateCommitCapability(repositoryState, targetCommit);
   const meta = buildLogMetadata(staged, targetCommit);
   const commitContextHints = await resolveCommitContextHints(staged.stagedFiles, logger);
   const shouldContinue = await confirmAtomicityIfNeeded(
@@ -620,7 +653,166 @@ async function runGenerationWorkflow(params: {
     meta,
     commitContextHints,
     targetCommit,
+    commitCapability,
   });
+}
+
+function logTargetCommitInfo(logger: Logger, targetCommit: string | null): void {
+  if (!targetCommit) return;
+  logger.log('info', `${C.dim}Using commit ${targetCommit} for analysis${C.reset}`);
+}
+
+async function resolveReadyRepositoryState(params: {
+  services: RunnerServices;
+  parsedArgs: ParsedOptions;
+  targetCommit: string | null;
+  logger: Logger;
+  s: ReturnType<typeof spinner>;
+}): Promise<{
+  repositoryState: RepositoryState;
+  staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>;
+} | null> {
+  const { services, parsedArgs, targetCommit, logger, s } = params;
+  let repositoryState = await getRepositoryStateSafe(services.gitService, logger);
+  let staged = await loadStagedChanges({
+    services,
+    parsedArgs,
+    targetCommit,
+    logger,
+    s,
+    suppressNoChangesMessage: true,
+  });
+
+  while (!staged) {
+    const nextStep = await handleEmptyStaging({
+      repositoryState,
+      targetCommit,
+      stagedFilesFromWorktree: repositoryState.changedFiles,
+    });
+    if (nextStep === 'cancel') return null;
+    repositoryState = await getRepositoryStateSafe(services.gitService, logger);
+    staged = await loadStagedChanges({
+      services,
+      parsedArgs,
+      targetCommit,
+      logger,
+      s,
+      suppressNoChangesMessage: true,
+    });
+  }
+
+  return { repositoryState, staged };
+}
+
+function evaluateCommitCapability(
+  repositoryState: RepositoryState,
+  targetCommit: string | null,
+): CommitCapability {
+  if (targetCommit) {
+    return {
+      allowed: false,
+      reason: 'Commit is disabled in analyze-commit mode. This mode is read-only.',
+    };
+  }
+  if (repositoryState.inProgressOperation) {
+    return {
+      allowed: false,
+      reason: `Commit is disabled while a git ${repositoryState.inProgressOperation} is in progress. Finish or abort the operation first.`,
+    };
+  }
+  return { allowed: true };
+}
+
+function showRepositoryWarnings(
+  repositoryState: RepositoryState,
+  targetCommit: string | null,
+  commitCapability: CommitCapability,
+): void {
+  const warnings: string[] = [];
+  if (targetCommit) {
+    warnings.push(
+      'Read-only analysis mode is active (`--commit`): commit action will be disabled.',
+    );
+  }
+  if (repositoryState.hasUnmergedPaths) {
+    warnings.push('Unresolved merge conflicts detected in index.');
+  }
+  if (repositoryState.inProgressOperation) {
+    warnings.push(
+      `Git operation in progress: ${repositoryState.inProgressOperation}. Commit action will be disabled.`,
+    );
+  }
+  if (!commitCapability.allowed && commitCapability.reason) {
+    warnings.push(commitCapability.reason);
+  }
+  if (!warnings.length) return;
+  note(warnings.map((entry, idx) => `${idx + 1}. ${entry}`).join('\n'), 'Repository warnings');
+}
+
+async function handleEmptyStaging(params: {
+  repositoryState: RepositoryState;
+  targetCommit: string | null;
+  stagedFilesFromWorktree: string[];
+}): Promise<'retry' | 'cancel'> {
+  const { repositoryState, targetCommit, stagedFilesFromWorktree } = params;
+  if (targetCommit) {
+    cancel(`No changes found in commit ${targetCommit}.`);
+    return 'cancel';
+  }
+
+  const hasWorktreeChanges = stagedFilesFromWorktree.length > 0;
+  const warningLines = hasWorktreeChanges
+    ? [
+        'No files are selected for commit (stage).',
+        'Add files with `git add <files>`, then choose "Re-check changes".',
+        'Or choose "Show split proposal" for a commit split suggestion.',
+      ]
+    : [
+        'No files are selected for commit (stage).',
+        'Worktree is clean. Create or change files, then add them with `git add`.',
+      ];
+  note(warningLines.join('\n'), 'TIP');
+
+  for (;;) {
+    const action = await select({
+      message: 'How do you want to proceed?',
+      options: [
+        { value: 'retry', label: 'Re-check changes' },
+        ...(hasWorktreeChanges ? [{ value: 'split', label: 'Show split proposal' as const }] : []),
+        { value: 'cancel', label: 'Cancel' },
+      ],
+    });
+    if (isCancel(action) || action === 'cancel') return 'cancel';
+    if (action === 'split') {
+      note(buildAtomicSplitProposal(stagedFilesFromWorktree), 'Atomic split proposal');
+      continue;
+    }
+    if (repositoryState.hasUnmergedPaths) {
+      note(
+        'Unresolved conflicts are present. Resolve them before staging and committing.',
+        'Warning',
+      );
+    }
+    return 'retry';
+  }
+}
+
+async function getRepositoryStateSafe(
+  gitService: GitService,
+  logger: Logger,
+): Promise<RepositoryState> {
+  if (typeof gitService.getRepositoryState === 'function') {
+    return gitService.getRepositoryState(logger);
+  }
+  logger.log('debug', 'Git service does not expose repository state; using safe fallback.');
+  return {
+    hasStagedChanges: false,
+    hasUnstagedChanges: false,
+    hasUntrackedFiles: false,
+    hasUnmergedPaths: false,
+    inProgressOperation: null,
+    changedFiles: [],
+  };
 }
 
 function buildLogMetadata(
@@ -641,8 +833,9 @@ async function loadStagedChanges(params: {
   targetCommit: string | null;
   logger: Logger;
   s: ReturnType<typeof spinner>;
+  suppressNoChangesMessage?: boolean;
 }): Promise<NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>> | null> {
-  const { services, parsedArgs, targetCommit, logger, s } = params;
+  const { services, parsedArgs, targetCommit, logger, s, suppressNoChangesMessage } = params;
   s.start('Analyzing repository changes...');
   const staged = await services.gitService.retrieveStagedChanges(
     targetCommit,
@@ -650,8 +843,10 @@ async function loadStagedChanges(params: {
     parsedArgs.exclude,
   );
   if (!staged) {
-    s.stop('No changes found');
-    cancel('No staged changes found. Use "git add" to stage files.');
+    s.stop(`${C.yellow}No staged changes found${C.reset}`);
+    if (!suppressNoChangesMessage) {
+      cancel('No staged changes found. Use "git add" to stage files.');
+    }
     return null;
   }
   s.stop(`Found ${staged.stagedFiles.length} file(s) changed`);
@@ -837,9 +1032,20 @@ async function runGenerationCycle(params: {
   meta: LogMetadata;
   commitContextHints: CommitContextHints;
   targetCommit: string | null;
+  commitCapability: CommitCapability;
 }): Promise<void> {
-  const { services, logger, apiKey, state, s, staged, meta, commitContextHints, targetCommit } =
-    params;
+  const {
+    services,
+    logger,
+    apiKey,
+    state,
+    s,
+    staged,
+    meta,
+    commitContextHints,
+    targetCommit,
+    commitCapability,
+  } = params;
   for (;;) {
     const outcome = await runSingleGenerationAttempt({
       services,
@@ -851,6 +1057,7 @@ async function runGenerationCycle(params: {
       meta,
       commitContextHints,
       targetCommit,
+      commitCapability,
     });
     if (outcome === 'regenerate') continue;
     return;
@@ -867,9 +1074,20 @@ async function runSingleGenerationAttempt(params: {
   meta: LogMetadata;
   commitContextHints: CommitContextHints;
   targetCommit: string | null;
+  commitCapability: CommitCapability;
 }): Promise<'done' | 'regenerate'> {
-  const { services, logger, apiKey, state, s, staged, meta, commitContextHints, targetCommit } =
-    params;
+  const {
+    services,
+    logger,
+    apiKey,
+    state,
+    s,
+    staged,
+    meta,
+    commitContextHints,
+    targetCommit,
+    commitCapability,
+  } = params;
   const modelSpec = getModelSpec(state.modelName);
   const safeMaxTokens = modelSpec.maxInputTokens - CONFIG.MAX_OUTPUT_TOKENS - 1000;
   const customHeader =
@@ -928,6 +1146,7 @@ async function runSingleGenerationAttempt(params: {
     services,
     meta,
     s,
+    commitCapability,
   });
   return action;
 }
@@ -940,8 +1159,9 @@ async function handleSuccessfulGeneration(params: {
   services: RunnerServices;
   meta: LogMetadata;
   s: ReturnType<typeof spinner>;
+  commitCapability: CommitCapability;
 }): Promise<'done' | 'regenerate'> {
-  const { response, state, logger, apiKey, services, meta, s } = params;
+  const { response, state, logger, apiKey, services, meta, s, commitCapability } = params;
   logger.log('debug', 'LLM response received', {
     promptTokens: response.usage.promptTokens,
     outputTokens: response.usage.outputTokens,
@@ -965,6 +1185,7 @@ async function handleSuccessfulGeneration(params: {
     apiKey,
     logger,
     listModelsFn: services.listModelsFn,
+    commitCapability,
   });
   if (actionResult.type === 'cancel') return 'done';
   state.baselineModelName = actionResult.modelName;

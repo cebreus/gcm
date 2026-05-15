@@ -68,8 +68,13 @@ describe('Refactored Runner', () => {
     mockOutro.mockClear();
     mockSpinner.mockClear();
     mockNote.mockClear();
-    mockSelect.mockClear();
-    mockText.mockClear();
+    mockSelect.mockReset();
+    mockSelect.mockImplementation(arg => {
+      console.log('Unexpected Select:', arg.message);
+      return Promise.resolve('cancel');
+    });
+    mockText.mockReset();
+    mockText.mockImplementation(() => Promise.resolve('edited message'));
 
     // Clear clipboardy mock
     mockClipboardyWrite.mockClear();
