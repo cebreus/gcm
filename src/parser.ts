@@ -27,7 +27,7 @@ function parseLinesToLabels(lines: string[]): Labels {
   return labels;
 }
 
-export function parseGeminiOutput(text: string): Labels {
+export function parseGeminiOutput(text: string, mode: 'full' | 'commit-only' = 'full'): Labels {
   if (!text || typeof text !== 'string') throw new Error('parseGeminiOutput expects a string');
 
   // Add a sanity limit to prevent parsing excessively large responses
@@ -50,13 +50,25 @@ export function parseGeminiOutput(text: string): Labels {
 
   labels.COMMIT_MESSAGE = formatCommitMessage(labels.COMMIT_MESSAGE);
 
-  if (!labels.BRANCH || !labels.COMMIT_MESSAGE) {
-    throw new Error('LLM output missing required BRANCH or COMMIT_MESSAGE fields');
+  if (mode === 'full') {
+    if (!labels.BRANCH || !labels.COMMIT_MESSAGE) {
+      throw new Error('LLM output missing required BRANCH or COMMIT_MESSAGE fields');
+    }
+  } else if (mode === 'commit-only') {
+    if (!labels.COMMIT_MESSAGE) {
+      // If parsing failed but we have text, use text as fallback COMMIT_MESSAGE
+      if (text.trim().length > 0) {
+        labels.COMMIT_MESSAGE = formatCommitMessage(text.trim());
+      } else {
+        throw new Error('LLM output missing required COMMIT_MESSAGE field');
+      }
+    }
   }
+
   function isValidBranchName(b: string): boolean {
     return /^\w+\/[a-z0-9_.-]+$/i.test(b);
   }
-  if (typeof labels.BRANCH === 'string' && !isValidBranchName(labels.BRANCH)) {
+  if (labels.BRANCH && !isValidBranchName(labels.BRANCH)) {
     // Sanitize the branch name as a fallback
     const sanitized = labels.BRANCH.replace(/[^a-zA-Z0-9/_-]/g, '-').toLowerCase();
     labels.BRANCH = sanitized;

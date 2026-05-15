@@ -25,6 +25,14 @@ mock.module('@clack/prompts', () => ({
   cancel: mockCancel,
 }));
 
+// Mock ../src/session.js
+const mockLoadSession = mock(() => Promise.resolve({ modelName: null, outputMode: null }));
+const mockSaveSession = mock(() => Promise.resolve());
+mock.module('../src/session.js', () => ({
+  loadSession: mockLoadSession,
+  saveSession: mockSaveSession,
+}));
+
 // Mock clipboardy
 const mockClipboardyWrite = mock(() => Promise.resolve());
 mock.module('clipboardy', () => ({
@@ -125,7 +133,7 @@ describe('Refactored Runner', () => {
       expect(consoleLogMock).toHaveBeenCalledTimes(1);
       const output = String(consoleLogMock.mock.calls[0][0]);
       expect(output).toContain('gcm');
-      expect(output).toContain('0.4.0');
+      expect(output).toContain('0.5.0');
       expect(mockIntro).not.toHaveBeenCalled();
     } finally {
       console.log = originalConsoleLog;
@@ -149,7 +157,7 @@ describe('Refactored Runner', () => {
       expect(consoleLogMock).toHaveBeenCalledTimes(1);
       const output = String(consoleLogMock.mock.calls[0][0]);
       expect(output).toContain('Version:');
-      expect(output).toContain('0.4.0');
+      expect(output).toContain('0.5.0');
       expect(output).toContain('--version');
     } finally {
       console.log = originalConsoleLog;
@@ -239,8 +247,8 @@ describe('Refactored Runner', () => {
       listModels: mockListModels,
     });
 
-    // Verify clipboardy.write was called with correct message (full output including prefix)
-    expect(mockClipboardyWrite).toHaveBeenCalledWith('COMMIT_MESSAGE: test message');
+    // Verify clipboardy.write was called with correct message (extracted)
+    expect(mockClipboardyWrite).toHaveBeenCalledWith('test message');
     // Verify note was shown about successful copy
     expect(mockNote).toHaveBeenCalledWith('Commit message copied to clipboard!', 'Success');
     // Verify commit was eventually called
@@ -273,7 +281,7 @@ describe('Refactored Runner', () => {
 
     mockSelect
       .mockResolvedValueOnce('generate') // 1
-      .mockResolvedValueOnce('regenerate') // 2
+      .mockResolvedValueOnce('switch') // 2 (Changed from 'regenerate' to 'switch')
       .mockResolvedValueOnce('gemini-2.5-pro') // 3
       .mockResolvedValueOnce('commit'); // 4
 
@@ -290,5 +298,127 @@ describe('Refactored Runner', () => {
     expect(mockListModels).toHaveBeenCalled();
     // Git commit called once
     expect(mockGitService.commitChanges).toHaveBeenCalled();
+  });
+
+  test('Should handle Regenerate with Hint flow', async () => {
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.callGeminiAPI.mockResolvedValue({
+      text: 'COMMIT_MESSAGE: msg',
+      usage: {},
+    });
+
+    // Flow: 'generate' -> 'regenerate-hint' -> enter hint -> 'commit'
+    mockSelect
+      .mockResolvedValueOnce('generate')
+      .mockResolvedValueOnce('regenerate-hint')
+      .mockResolvedValueOnce('commit');
+    mockText.mockResolvedValue('make it shorter');
+
+    await executeCommitMessageGeneration([], {
+      logger: mockLogger as any,
+      gitService: mockGitService,
+      contextService: mockContextService,
+      geminiService: mockGeminiService,
+      listModels: mockListModels,
+    });
+
+    // Verify hint was passed to context service in second call
+    expect(mockContextService.constructLLMPromptContext).toHaveBeenCalledTimes(2);
+    expect(mockContextService.constructLLMPromptContext).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Array),
+      expect.any(Array),
+      expect.any(Object),
+      expect.any(String),
+      'make it shorter', // This is the hint!
+    );
+  });
+
+  test('Should save session on successful commit', async () => {
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.callGeminiAPI.mockResolvedValue({
+      text: 'COMMIT_MESSAGE: msg',
+      usage: {},
+    });
+
+    mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+
+    await executeCommitMessageGeneration(['--model', 'gemini-special'], {
+      logger: mockLogger as any,
+      gitService: mockGitService,
+      contextService: mockContextService,
+      geminiService: mockGeminiService,
+      listModels: mockListModels,
+    });
+
+    // Verify session was saved with the model used
+    expect(mockSaveSession).toHaveBeenCalledWith(
+      expect.objectContaining({ modelName: 'gemini-special' }),
+    );
+  });
+
+  test('Should perform auto-retry on truncated response', async () => {
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+
+    // First call returns full (internal retry logic is handled by the client/service)
+    mockGeminiService.callGeminiAPI.mockResolvedValueOnce({
+      text: 'COMMIT_MESSAGE: full message',
+      truncated: false,
+      usage: { outputTokens: 20, promptTokens: 10 },
+    });
+
+    mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+
+    await executeCommitMessageGeneration([], {
+      logger: mockLogger as any,
+      gitService: mockGitService,
+      contextService: mockContextService,
+      geminiService: mockGeminiService,
+      listModels: mockListModels,
+    });
+
+    // Gemini should be called once with retryIfTruncated flag
+    expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledTimes(1);
+    expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.any(Array),
+      expect.any(Object),
+      expect.objectContaining({ retryIfTruncated: true }),
+    );
+    expect(mockNote).toHaveBeenCalledWith(
+      expect.stringContaining('full message'),
+      expect.any(String),
+    );
   });
 });

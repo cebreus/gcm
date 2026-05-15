@@ -148,9 +148,11 @@ test('gemini-client: networkErrorTest', geminiClientNetworkErrorTest);
 
 async function geminiClientInvalidJsonTest(): Promise<void> {
   const origFetch = globalThis.fetch;
+  let callCount = 0;
   async function fetchStub(input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
     void input;
     void _init;
+    callCount += 1;
     return {
       ok: true,
       status: 200,
@@ -168,6 +170,7 @@ async function geminiClientInvalidJsonTest(): Promise<void> {
     await expect(
       client.callGemini('fake-key', 'hello', false, {}, { maxOutputTokens: 256 }),
     ).rejects.toThrow();
+    expect(callCount).toBe(1);
   } finally {
     globalThis.fetch = origFetch;
   }

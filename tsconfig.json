@@ -1,18 +1,19 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "strict": true,
-    "strictNullChecks": true,
     "skipLibCheck": true,
+    "noEmit": true,
     "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "isolatedModules": true,
+    "allowJs": true,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["bun-types"]
   },
-  "include": ["src/**/*.ts", "gcm.ts", "eslint.config.ts", "test/**/*.ts"],
-  "exclude": ["node_modules", "dist", "test"]
+  "include": ["**/*.ts", "**/*.tsx", "eslint.config.js"],
+  "exclude": ["node_modules", "dist"]
 }

@@ -176,17 +176,21 @@ export function unescapeNewlinesInText(obj: unknown, maxDepth = 20): unknown {
 export function sanitizeForDisplay(text: string): string {
   if (!text || typeof text !== 'string') return text;
 
-  // Remove internal control markers (with or without backtick prefix)
-  let cleaned = text
-    .replace(/`<<START>>/g, '')
-    .replace(/`<<END>>/g, '')
-    .replace(/`<<END_TRUNCATED>>/g, '')
-    .replace(/\.<<START>>/g, '')
-    .replace(/\.<<END>>/g, '')
-    .replace(/\.<<END_TRUNCATED>>/g, '')
-    .replace(/<<START>>/g, '')
-    .replace(/<<END>>/g, '')
-    .replace(/<<END_TRUNCATED>>/g, '');
+  // Remove protocol markers, but preserve likely natural-language mentions like
+  // "what <<END>> marker means".
+  let cleaned = text.replace(
+    /`?\.?<<(START|END|END_TRUNCATED)>>`?/g,
+    function (match: string, _marker: string, offset: number, fullText: string): string {
+      const prevChar = offset > 0 ? fullText[offset - 1] : '';
+      const nextIndex = offset + match.length;
+      const nextChar = nextIndex < fullText.length ? fullText[nextIndex] : '';
+      const tail = fullText.slice(nextIndex);
+      const looksLikeNarrativeMention =
+        /\s/.test(prevChar) && /\s/.test(nextChar) && /^\s+[a-z]/i.test(tail);
+      return looksLikeNarrativeMention ? match : '';
+    },
+  );
+  cleaned = cleaned.replace(/^[ \t]+/, '').replace(/[ \t]+$/, '');
 
   // Allow printable ASCII and all UTF-8 characters. Remove non-printable control characters (0-31) except tab, newline, CR.
   return cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');

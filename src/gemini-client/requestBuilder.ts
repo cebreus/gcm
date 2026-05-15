@@ -18,7 +18,9 @@ export function buildRequestBody(
   const START = '<<START>>';
   const END = '<<END>>';
 
-  const wrappedUserContent = userContent;
+  const wrappedUserContent = config.ADD_RESPONSE_MARKERS
+    ? `${START}\n${userContent}\n${END}`
+    : userContent;
 
   // Ensure marker-focused system instruction is present. If caller provided system
   // instructions, append ours so we keep their intent while enforcing markers.

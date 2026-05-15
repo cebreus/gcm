@@ -40,6 +40,7 @@ export interface GeminiClient {
     enableThinking: boolean,
     telemetryMeta: LogMetadata,
     callOptions: GeminiCallOpts,
+    modelOverride?: string,
   ) => Promise<GeminiResponse | null>;
 }
 
@@ -47,6 +48,13 @@ interface GeminiClientOptions {
   config?: Partial<typeof CONFIG>;
   fetchImpl?: typeof fetch;
   logger?: Logger;
+}
+
+function shouldRetryClientError(error: unknown): boolean {
+  if (error instanceof GeminiApiError) return false;
+  const errStr = String(error);
+  if (/invalid json|returned no text/i.test(errStr)) return false;
+  return /aborted|network|fetch|timed?\s*out|econnreset|enotfound|eai_again/i.test(errStr);
 }
 
 function createDefaultLogger(): Logger {
@@ -102,15 +110,15 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
     enableThinking: boolean,
     telemetryMeta: LogMetadata,
     callOptions: GeminiCallOpts,
+    modelOverride?: string,
   ): Promise<GeminiResponse | null> {
     const opts = callOptions || {};
     if (!apiKey) throw new Error('API key required');
     const start = Date.now();
     let attempt = 0;
+    const activeModel = modelOverride || config.MODEL_NAME || 'gemini-2.5-flash';
     const urlBase =
-      'https://generativelanguage.googleapis.com/v1beta/models/' +
-      (config.MODEL_NAME || 'gemini-2.5-flash') +
-      ':generateContent';
+      'https://generativelanguage.googleapis.com/v1beta/models/' + activeModel + ':generateContent';
 
     // Truncation retry state
     let truncRetries = 0;
@@ -273,7 +281,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
           snippet: textRes.slice(0, 256),
         });
       } catch (err) {
-        if (attempt <= maxRetries) {
+        if (attempt <= maxRetries && shouldRetryClientError(err)) {
           const backoff = Math.min(retryMaxMs, retryBaseMs * 2 ** (attempt - 1));
           logger.log(
             'warn',

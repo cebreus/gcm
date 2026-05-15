@@ -14,6 +14,7 @@ export interface GeminiService {
       retryIfTruncatedMaxRetries?: number;
       retryIfTruncatedIncreaseTokens?: number;
       timeoutMs?: number;
+      modelOverride?: string;
     },
   ): Promise<GeminiResponse | null>;
 }
@@ -25,6 +26,8 @@ export interface GeminiServiceDeps {
 }
 
 export function createGeminiService({ client, logger, apiKey }: GeminiServiceDeps): GeminiService {
+  const INPUT_SHRINK_FACTOR = 0.7;
+
   async function handleContextOverflow(
     stagedFiles: string[],
     input: string,
@@ -49,7 +52,7 @@ export function createGeminiService({ client, logger, apiKey }: GeminiServiceDep
       return { input: newInput, maxOutputTokens: newMaxOutput, summaryUsed: true };
     }
 
-    const allowedBytesNow = Math.max(0, Math.floor(input.length * shrinkFactor));
+    const allowedBytesNow = Math.max(0, Math.floor(input.length * INPUT_SHRINK_FACTOR));
     let newInput = input.substring(0, allowedBytesNow);
     newInput = `Analyze the following (input truncated to fit model context) to generate the requested commit information:\n\n${newInput}`;
     const newMaxOutput = maxOutputTokens + 1024;
@@ -77,6 +80,7 @@ export function createGeminiService({ client, logger, apiKey }: GeminiServiceDep
       retryIfTruncatedMaxRetries?: number;
       retryIfTruncatedIncreaseTokens?: number;
       timeoutMs?: number;
+      modelOverride?: string;
     },
   ): Promise<GeminiResponse | null> {
     const maxAttempts = Math.max(1, CONFIG.GEMINI_MAX_RETRIES || 3);
@@ -90,14 +94,21 @@ export function createGeminiService({ client, logger, apiKey }: GeminiServiceDep
     for (;;) {
       attempt += 1;
       try {
-        return await client.callGemini(apiKey, input, enableThinking, meta, {
-          maxOutputTokens: maxOutputOverride,
-          systemInstructions: systemPrompt,
-          timeoutMs: typeof opts?.timeoutMs === 'number' ? opts.timeoutMs : 60000,
-          retryIfTruncated: opts?.retryIfTruncated,
-          retryIfTruncatedMaxRetries: opts?.retryIfTruncatedMaxRetries,
-          retryIfTruncatedIncreaseTokens: opts?.retryIfTruncatedIncreaseTokens,
-        });
+        return await client.callGemini(
+          apiKey,
+          input,
+          enableThinking,
+          meta,
+          {
+            maxOutputTokens: maxOutputOverride,
+            systemInstructions: systemPrompt,
+            timeoutMs: typeof opts?.timeoutMs === 'number' ? opts.timeoutMs : 60000,
+            retryIfTruncated: opts?.retryIfTruncated,
+            retryIfTruncatedMaxRetries: opts?.retryIfTruncatedMaxRetries,
+            retryIfTruncatedIncreaseTokens: opts?.retryIfTruncatedIncreaseTokens,
+          },
+          opts?.modelOverride,
+        );
       } catch (err: unknown) {
         const errStr = String(err);
         const isMaxTokens = /MAX_TOKENS/i.test(errStr) || /returned no text/i.test(errStr);
@@ -116,7 +127,6 @@ export function createGeminiService({ client, logger, apiKey }: GeminiServiceDep
           continue;
         }
 
-        if (attempt >= maxAttempts) throw err;
         throw err;
       }
     }
