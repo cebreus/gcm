@@ -188,8 +188,8 @@ export function sanitizeForDisplay(text: string): string {
     .replace(/<<END>>/g, '')
     .replace(/<<END_TRUNCATED>>/g, '');
 
-  // Allow printable ASCII, tabs, newlines, carriage returns. Remove others.
-  return cleaned.replace(/[^\x20-\x7E\t\n\r]/g, '');
+  // Allow printable ASCII and all UTF-8 characters. Remove non-printable control characters (0-31) except tab, newline, CR.
+  return cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
 /**

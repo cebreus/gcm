@@ -11,12 +11,16 @@ export interface ContextService {
     stagedFiles: string[],
     scopeSuggestions: string[],
     logger: Logger | null,
+    customHeader?: string,
   ): Promise<{ promptContext: string; processedDiffContent: string; tokens: number }>;
 }
 
 export function createContextService(): ContextService {
-  function buildPromptHeader(promptSuffix: string): string {
-    return `Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following ${promptSuffix}.\n\n`;
+  function buildPromptHeader(promptSuffix: string, customHeader?: string): string {
+    if (customHeader) {
+      return `${customHeader} ${promptSuffix}:\n\n`;
+    }
+    return `Analyze the following ${promptSuffix} to generate the requested commit information:\n\n`;
   }
 
   async function constructLLMPromptContext(
@@ -27,9 +31,10 @@ export function createContextService(): ContextService {
     stagedFiles: string[],
     scopeSuggestions: string[],
     logger: Logger | null,
+    customHeader?: string,
   ): Promise<{ promptContext: string; processedDiffContent: string; tokens: number }> {
     // 1. Initial Prompt Construction
-    const header = buildPromptHeader(promptSuffix);
+    const header = buildPromptHeader(promptSuffix, customHeader);
     let scopeHint = '';
 
     if (scopeSuggestions && scopeSuggestions.length > 0) {
