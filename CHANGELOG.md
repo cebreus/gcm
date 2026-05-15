@@ -1,5 +1,20 @@
 # gcm
 
+## 0.6.0
+
+> GCM now has an interactive loop. The user can review, edit, copy, commit, or generate the message again before leaving. GCM remembers the last model and output type after a successful Git action.
+
+### Minor Changes
+
+- **Review menu:** After generation, the user can commit, edit, copy, generate again with extra guidance, choose another model, or stop. Copy and Edit work only with the commit message, not branch or pull request text. GCM does not reject an empty edit in this release, so Git may reject it later.
+- **Output type:** `--mode commit-only` asks for a Conventional Commit message. `--mode full` also asks for a branch name and pull request text. `-m` is the short form. With no CLI or saved choice, the default is `commit-only`.
+- **Settings menu rule:** The settings menu opens only when neither `--model` nor `--mode` is given. Either option skips the menu, and a missing choice comes from the session or default. An invalid `--mode` is silently ignored.
+- **Saved settings:** After a successful commit, GCM saves the model and output type in `~/.gcm-session.json`. It does not save after copy, edit, or cancel. Read, parse, and write errors are silently ignored. This release does not check the saved data shape, model, or mode before use.
+- **Interactive guidance:** The user can enter extra guidance after reviewing a draft. GCM adds it to the next AI request. This release does not add the later `--hint` CLI option.
+- **Truncated reply:** GCM retries one cut reply with a larger output limit. If a commit message is present, and full mode also has a branch name, it may show a partial result with a warning. Pull request title and description may still be missing. Commit-only mode accepts any non-empty raw reply as the message.
+- **Reply markers:** GCM removes protocol markers `<<START>>`, `<<END>>`, and `<<END_TRUNCATED>>` when they look like protocol text. It keeps likely natural-language mentions of the same words.
+- **Contributor tools:** TypeScript now uses ESNext modules, bundler resolution, no emit, isolated modules, and Bun types. ESLint config moves from `.ts` to `.js`, and major ESLint and Clack versions change. Users need no migration, but contributors need the new project toolchain.
+
 ## 0.5.0
 
 > GCM now shows its version in help and in the start banner. It also adds tools for a reply that may be cut and keeps letters and symbols from languages other than English.
