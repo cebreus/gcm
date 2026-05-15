@@ -554,18 +554,18 @@ export async function executeCommitMessageGeneration(
       const systemPrompt =
         state.outputMode === 'full' ? SYSTEM_INSTRUCTIONS_FULL : SYSTEM_INSTRUCTIONS_COMMIT_ONLY;
 
-      const response = await services.geminiService.callGeminiAPI(
-        contextResult.promptContext,
+      const response = await services.geminiService.callGeminiAPI({
+        promptContext: contextResult.promptContext,
         systemPrompt,
-        staged.stagedFiles,
+        stagedFiles: staged.stagedFiles,
         meta,
-        {
+        opts: {
           modelOverride: state.modelName,
           retryIfTruncated: true,
           retryIfTruncatedMaxRetries: 1,
           retryIfTruncatedIncreaseTokens: CONFIG.MAX_OUTPUT_TOKENS,
         },
-      );
+      });
       s.stop('Gemini response received');
 
       if (!response) {

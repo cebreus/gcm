@@ -95,7 +95,7 @@ function createDebugLogger(config: Partial<typeof CONFIG>): (label: string, data
 
 export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiClient {
   const options = userOptions || {};
-  const config = { ...CONFIG, ...options.config } as typeof CONFIG;
+  const config: typeof CONFIG = { ...CONFIG, ...options.config };
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const logger = options.logger || createLogger(config);
   const writeDebug = createDebugLogger(config);
@@ -200,7 +200,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
 
           // Log the pretty-printed version
           try {
-            const jsonRes = JSON.parse(textRes);
+            const jsonRes: unknown = JSON.parse(textRes);
             const unescapedJsonRes = unescapeNewlinesInText(jsonRes); // Use the helper
             writeDebug('API RESPONSE BODY (pretty-printed)', unescapedJsonRes);
           } catch {
