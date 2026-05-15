@@ -4,19 +4,7 @@ import { summarizeLargeDiff } from '../summarizer.js';
 import { CONFIG } from '../../gcm.config.js';
 
 export interface GeminiService {
-  callGeminiAPI(
-    promptContext: string,
-    systemPrompt: string,
-    stagedFiles: string[],
-    meta: LogMetadata,
-    opts?: {
-      retryIfTruncated?: boolean;
-      retryIfTruncatedMaxRetries?: number;
-      retryIfTruncatedIncreaseTokens?: number;
-      timeoutMs?: number;
-      modelOverride?: string;
-    },
-  ): Promise<GeminiResponse | null>;
+  callGeminiAPI(params: CallGeminiApiParams): Promise<GeminiResponse | null>;
 }
 
 export interface GeminiServiceDeps {
@@ -25,16 +13,40 @@ export interface GeminiServiceDeps {
   apiKey: string;
 }
 
+type CallGeminiOptions = {
+  retryIfTruncated?: boolean;
+  retryIfTruncatedMaxRetries?: number;
+  retryIfTruncatedIncreaseTokens?: number;
+  timeoutMs?: number;
+  modelOverride?: string;
+};
+
+interface CallGeminiApiParams {
+  promptContext: string;
+  systemPrompt: string;
+  stagedFiles: string[];
+  meta: LogMetadata;
+  opts?: CallGeminiOptions;
+}
+
+interface OverflowParams {
+  stagedFiles: string[];
+  input: string;
+  maxOutputTokens: number;
+  attempt: number;
+  summaryUsed: boolean;
+}
+
 export function createGeminiService({ client, logger, apiKey }: GeminiServiceDeps): GeminiService {
   const INPUT_SHRINK_FACTOR = 0.7;
 
-  async function handleContextOverflow(
-    stagedFiles: string[],
-    input: string,
-    maxOutputTokens: number,
-    attempt: number,
-    summaryUsed: boolean,
-  ): Promise<{ input: string; maxOutputTokens: number; summaryUsed: boolean }> {
+  async function handleContextOverflow({
+    stagedFiles,
+    input,
+    maxOutputTokens,
+    attempt,
+    summaryUsed,
+  }: OverflowParams): Promise<{ input: string; maxOutputTokens: number; summaryUsed: boolean }> {
     if (!summaryUsed && Array.isArray(stagedFiles) && stagedFiles.length) {
       logger.log(
         'warn',
@@ -70,19 +82,13 @@ export function createGeminiService({ client, logger, apiKey }: GeminiServiceDep
     return { input: newInput, maxOutputTokens: newMaxOutput, summaryUsed };
   }
 
-  async function callGeminiAPI(
-    promptContext: string,
-    systemPrompt: string,
-    stagedFiles: string[],
-    meta: LogMetadata,
-    opts?: {
-      retryIfTruncated?: boolean;
-      retryIfTruncatedMaxRetries?: number;
-      retryIfTruncatedIncreaseTokens?: number;
-      timeoutMs?: number;
-      modelOverride?: string;
-    },
-  ): Promise<GeminiResponse | null> {
+  async function callGeminiAPI({
+    promptContext,
+    systemPrompt,
+    stagedFiles,
+    meta,
+    opts,
+  }: CallGeminiApiParams): Promise<GeminiResponse | null> {
     const maxAttempts = Math.max(1, CONFIG.GEMINI_MAX_RETRIES || 3);
     const enableThinking = CONFIG.ENABLE_THINKING;
 
@@ -114,13 +120,13 @@ export function createGeminiService({ client, logger, apiKey }: GeminiServiceDep
         const isMaxTokens = /MAX_TOKENS/i.test(errStr) || /returned no text/i.test(errStr);
 
         if (isMaxTokens && attempt < maxAttempts) {
-          const result = await handleContextOverflow(
+          const result = await handleContextOverflow({
             stagedFiles,
             input,
-            maxOutputOverride,
+            maxOutputTokens: maxOutputOverride,
             attempt,
             summaryUsed,
-          );
+          });
           input = result.input;
           maxOutputOverride = result.maxOutputTokens;
           summaryUsed = result.summaryUsed;

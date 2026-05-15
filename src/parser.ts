@@ -27,6 +27,36 @@ function parseLinesToLabels(lines: string[]): Labels {
   return labels;
 }
 
+function trimLabels(labels: Labels): Labels {
+  return {
+    BRANCH: labels.BRANCH.trim(),
+    COMMIT_MESSAGE: labels.COMMIT_MESSAGE.trim(),
+    PR_TITLE: labels.PR_TITLE.trim(),
+    PR_DESCRIPTION: labels.PR_DESCRIPTION.trim(),
+  };
+}
+
+function ensureRequiredFields(labels: Labels, mode: 'full' | 'commit-only', text: string): Labels {
+  if (mode === 'full') {
+    if (!labels.BRANCH || !labels.COMMIT_MESSAGE) {
+      throw new Error('LLM output missing required BRANCH or COMMIT_MESSAGE fields');
+    }
+    return labels;
+  }
+
+  if (labels.COMMIT_MESSAGE) return labels;
+  if (!text.trim()) {
+    throw new Error('LLM output missing required COMMIT_MESSAGE field');
+  }
+  return { ...labels, COMMIT_MESSAGE: formatCommitMessage(text.trim()) };
+}
+
+function sanitizeBranchName(branch: string): string {
+  const isValidBranchName = /^\w+\/[a-z0-9_.-]+$/i.test(branch);
+  if (isValidBranchName) return branch;
+  return branch.replace(/[^a-zA-Z0-9/_-]/g, '-').toLowerCase();
+}
+
 export function parseGeminiOutput(text: string, mode: 'full' | 'commit-only' = 'full'): Labels {
   if (!text || typeof text !== 'string') throw new Error('parseGeminiOutput expects a string');
 
@@ -36,42 +66,13 @@ export function parseGeminiOutput(text: string, mode: 'full' | 'commit-only' = '
     text = text.substring(0, MAX_RESPONSE_SIZE);
   }
 
-  const labels: Labels = { BRANCH: '', COMMIT_MESSAGE: '', PR_TITLE: '', PR_DESCRIPTION: '' };
   const lines = text.split(/\r?\n/);
   const parsedLabels = parseLinesToLabels(lines);
-  Object.assign(labels, parsedLabels);
-  {
-    const trimmed: Partial<Labels> = {};
-    for (const k of Object.keys(labels) as Array<keyof Labels>) {
-      trimmed[k] = labels[k].trim();
-    }
-    Object.assign(labels, trimmed);
-  }
-
+  const labels = trimLabels(parsedLabels);
   labels.COMMIT_MESSAGE = formatCommitMessage(labels.COMMIT_MESSAGE);
-
-  if (mode === 'full') {
-    if (!labels.BRANCH || !labels.COMMIT_MESSAGE) {
-      throw new Error('LLM output missing required BRANCH or COMMIT_MESSAGE fields');
-    }
-  } else if (mode === 'commit-only') {
-    if (!labels.COMMIT_MESSAGE) {
-      // If parsing failed but we have text, use text as fallback COMMIT_MESSAGE
-      if (text.trim().length > 0) {
-        labels.COMMIT_MESSAGE = formatCommitMessage(text.trim());
-      } else {
-        throw new Error('LLM output missing required COMMIT_MESSAGE field');
-      }
-    }
+  const labelsWithRequiredFields = ensureRequiredFields(labels, mode, text);
+  if (labelsWithRequiredFields.BRANCH) {
+    labelsWithRequiredFields.BRANCH = sanitizeBranchName(labelsWithRequiredFields.BRANCH);
   }
-
-  function isValidBranchName(b: string): boolean {
-    return /^\w+\/[a-z0-9_.-]+$/i.test(b);
-  }
-  if (labels.BRANCH && !isValidBranchName(labels.BRANCH)) {
-    // Sanitize the branch name as a fallback
-    const sanitized = labels.BRANCH.replace(/[^a-zA-Z0-9/_-]/g, '-').toLowerCase();
-    labels.BRANCH = sanitized;
-  }
-  return labels;
+  return labelsWithRequiredFields;
 }

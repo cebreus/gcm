@@ -251,29 +251,29 @@ function wrapLine(line: string, maxLen: number): string {
   const words = smartSplit(content);
 
   const wrappedLines: string[] = [];
-  let currentLine = '';
-
-  for (const word of words) {
-    const testLine = currentLine ? currentLine + ' ' + word : word;
-
-    if (testLine.length + bulletIndent <= maxLen) {
-      currentLine = testLine;
-    } else {
-      if (currentLine) {
-        wrappedLines.push(currentLine);
-      }
-      currentLine = word;
-    }
-  }
-
-  if (currentLine) {
-    wrappedLines.push(currentLine);
-  }
+  pushWrappedWords(words, wrappedLines, bulletIndent, maxLen);
 
   // Rejoin with bullet prefix on first line, indent on continuations
-  return wrappedLines
-    .map((line, i) => (i === 0 ? bulletPrefix + line : bulletPrefix + line))
-    .join('\n');
+  return wrappedLines.map(wrappedLine => bulletPrefix + wrappedLine).join('\n');
+}
+
+function pushWrappedWords(
+  words: string[],
+  wrappedLines: string[],
+  bulletIndent: number,
+  maxLen: number,
+): void {
+  let currentLine = '';
+  for (const word of words) {
+    const testLine = currentLine ? currentLine + ' ' + word : word;
+    if (testLine.length + bulletIndent <= maxLen) {
+      currentLine = testLine;
+      continue;
+    }
+    if (currentLine) wrappedLines.push(currentLine);
+    currentLine = word;
+  }
+  if (currentLine) wrappedLines.push(currentLine);
 }
 
 /**
