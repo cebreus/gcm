@@ -25,19 +25,19 @@ async function geminiClientSuccessTest(): Promise<void> {
       },
     } as unknown as Response;
   }
-  globalThis.fetch = fetchStub;
+  globalThis.fetch = fetchStub as typeof fetch;
   try {
     const client: GeminiClient = createGeminiClient({
-      fetchImpl: fetchStub,
+      fetchImpl: fetchStub as typeof fetch,
       config: { GEMINI_MAX_RETRIES: 3, GEMINI_RETRY_BASE_MS: 5, GEMINI_RETRY_MAX_MS: 100 },
     });
-    const res: GeminiResponse | null = await client.callGemini(
-      'fake-key',
-      'hello',
-      false,
-      {},
-      { maxOutputTokens: 512, systemInstructions: 'instr' },
-    );
+    const res: GeminiResponse | null = await client.callGemini({
+      apiKey: 'fake-key',
+      userContent: 'hello',
+      enableThinking: false,
+      telemetryMeta: {},
+      callOptions: { maxOutputTokens: 512, systemInstructions: 'instr' },
+    });
     expect(called).toBe(true);
     expect(res?.text).toContain('BRANCH:');
     expect(res?.usage.promptTokens).toBe(10);
@@ -63,7 +63,7 @@ async function geminiClientRetryTest(): Promise<void> {
             error: { details: [{ '@type': 'RetryInfo', retryDelay: '0.01s' }] },
           });
         },
-      };
+      } as unknown as Response;
     }
     return {
       ok: true,
@@ -78,19 +78,19 @@ async function geminiClientRetryTest(): Promise<void> {
       },
     } as unknown as Response;
   }
-  globalThis.fetch = fetchStub;
+  globalThis.fetch = fetchStub as typeof fetch;
   try {
     const client: GeminiClient = createGeminiClient({
-      fetchImpl: fetchStub,
+      fetchImpl: fetchStub as typeof fetch,
       config: { GEMINI_MAX_RETRIES: 3, GEMINI_RETRY_BASE_MS: 5, GEMINI_RETRY_MAX_MS: 100 },
     });
-    const res: GeminiResponse | null = await client.callGemini(
-      'fake-key',
-      'hello',
-      false,
-      {},
-      { maxOutputTokens: 512 },
-    );
+    const res: GeminiResponse | null = await client.callGemini({
+      apiKey: 'fake-key',
+      userContent: 'hello',
+      enableThinking: false,
+      telemetryMeta: {},
+      callOptions: { maxOutputTokens: 512 },
+    });
     expect(callCount).toBeGreaterThanOrEqual(2);
     expect(res?.text).toContain('BRANCH');
     console.log('  retryTest -> passed');
@@ -125,19 +125,19 @@ async function geminiClientNetworkErrorTest(): Promise<void> {
       },
     } as unknown as Response;
   }
-  globalThis.fetch = fetchStub;
+  globalThis.fetch = fetchStub as typeof fetch;
   try {
     const client: GeminiClient = createGeminiClient({
-      fetchImpl: fetchStub,
+      fetchImpl: fetchStub as typeof fetch,
       config: { GEMINI_MAX_RETRIES: 3, GEMINI_RETRY_BASE_MS: 5, GEMINI_RETRY_MAX_MS: 100 },
     });
-    const res: GeminiResponse | null = await client.callGemini(
-      'fake-key',
-      'hello',
-      false,
-      {},
-      { maxOutputTokens: 256 },
-    );
+    const res: GeminiResponse | null = await client.callGemini({
+      apiKey: 'fake-key',
+      userContent: 'hello',
+      enableThinking: false,
+      telemetryMeta: {},
+      callOptions: { maxOutputTokens: 256 },
+    });
     expect(res?.text).toContain('BRANCH');
     console.log('  networkErrorTest -> passed');
   } finally {
@@ -161,14 +161,20 @@ async function geminiClientInvalidJsonTest(): Promise<void> {
       },
     } as unknown as Response;
   }
-  globalThis.fetch = fetchStub;
+  globalThis.fetch = fetchStub as typeof fetch;
   try {
     const client: GeminiClient = createGeminiClient({
-      fetchImpl: fetchStub,
+      fetchImpl: fetchStub as typeof fetch,
       config: { GEMINI_MAX_RETRIES: 3, GEMINI_RETRY_BASE_MS: 5, GEMINI_RETRY_MAX_MS: 100 },
     });
     await expect(
-      client.callGemini('fake-key', 'hello', false, {}, { maxOutputTokens: 256 }),
+      client.callGemini({
+        apiKey: 'fake-key',
+        userContent: 'hello',
+        enableThinking: false,
+        telemetryMeta: {},
+        callOptions: { maxOutputTokens: 256 },
+      }),
     ).rejects.toThrow();
     expect(callCount).toBe(1);
   } finally {
@@ -190,14 +196,20 @@ async function geminiClientTimeoutTest(): Promise<void> {
       // Do not resolve or reject otherwise (simulate a hang)
     })) as unknown as Response;
   }
-  globalThis.fetch = fetchStub;
+  globalThis.fetch = fetchStub as typeof fetch;
   try {
     const client: GeminiClient = createGeminiClient({
-      fetchImpl: fetchStub,
+      fetchImpl: fetchStub as typeof fetch,
       config: { GEMINI_MAX_RETRIES: 3, GEMINI_RETRY_BASE_MS: 5, GEMINI_RETRY_MAX_MS: 100 },
     });
     await expect(
-      client.callGemini('fake-key', 'hello', false, {}, { maxOutputTokens: 256, timeoutMs: 5 }),
+      client.callGemini({
+        apiKey: 'fake-key',
+        userContent: 'hello',
+        enableThinking: false,
+        telemetryMeta: {},
+        callOptions: { maxOutputTokens: 256, timeoutMs: 5 },
+      }),
     ).rejects.toThrow();
   } finally {
     globalThis.fetch = origFetch;
@@ -220,10 +232,16 @@ async function geminiClientTruncatedFlagMissingEndTest(): Promise<void> {
       },
     } as unknown as Response;
   }
-  globalThis.fetch = fetchStub;
+  globalThis.fetch = fetchStub as typeof fetch;
   try {
-    const client: GeminiClient = createGeminiClient({ fetchImpl: fetchStub });
-    const res = await client.callGemini('fake-key', 'hello', false, {}, { maxOutputTokens: 256 });
+    const client: GeminiClient = createGeminiClient({ fetchImpl: fetchStub as typeof fetch });
+    const res = await client.callGemini({
+      apiKey: 'fake-key',
+      userContent: 'hello',
+      enableThinking: false,
+      telemetryMeta: {},
+      callOptions: { maxOutputTokens: 256 },
+    });
     expect(res?.truncated).toBe(true);
   } finally {
     globalThis.fetch = origFetch;
@@ -246,10 +264,16 @@ async function geminiClientTruncatedFlagEndTruncatedTest(): Promise<void> {
       },
     } as unknown as Response;
   }
-  globalThis.fetch = fetchStub;
+  globalThis.fetch = fetchStub as typeof fetch;
   try {
-    const client: GeminiClient = createGeminiClient({ fetchImpl: fetchStub });
-    const res = await client.callGemini('fake-key', 'hello', false, {}, { maxOutputTokens: 256 });
+    const client: GeminiClient = createGeminiClient({ fetchImpl: fetchStub as typeof fetch });
+    const res = await client.callGemini({
+      apiKey: 'fake-key',
+      userContent: 'hello',
+      enableThinking: false,
+      telemetryMeta: {},
+      callOptions: { maxOutputTokens: 256 },
+    });
     expect(res?.truncated).toBe(true);
   } finally {
     globalThis.fetch = origFetch;
@@ -296,24 +320,24 @@ async function geminiClientRetryOnTruncatedTest(): Promise<void> {
       },
     } as unknown as Response;
   }
-  globalThis.fetch = fetchStub;
+  globalThis.fetch = fetchStub as typeof fetch;
   try {
     const client: GeminiClient = createGeminiClient({
-      fetchImpl: fetchStub,
+      fetchImpl: fetchStub as typeof fetch,
       config: { MAX_OUTPUT_TOKENS: 256 } as any,
     });
-    const res = await client.callGemini(
-      'fake-key',
-      'hello',
-      false,
-      {},
-      {
+    const res = await client.callGemini({
+      apiKey: 'fake-key',
+      userContent: 'hello',
+      enableThinking: false,
+      telemetryMeta: {},
+      callOptions: {
         maxOutputTokens: 256,
         retryIfTruncated: true,
         retryIfTruncatedMaxRetries: 2,
         retryIfTruncatedIncreaseTokens: 100,
       },
-    );
+    });
     expect(callCount).toBeGreaterThanOrEqual(2);
     expect(res?.truncated).toBeFalsy();
     expect(seenMaxOutput.length).toBeGreaterThanOrEqual(2);

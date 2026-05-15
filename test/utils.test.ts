@@ -101,7 +101,7 @@ test('utils: unescapeNewlinesInText - should handle nested objects and arrays', 
 });
 
 // --- Tests for detectRepoType ---
-const existsMock = mock(async () => false);
+const existsMock = mock(async (_path?: string) => false);
 const fileMock = mock((path: string) => ({
   exists: () => existsMock(path),
 }));
@@ -213,8 +213,8 @@ test('utils: formatCommitMessage - should handle empty string', () => {
 });
 
 test('utils: formatCommitMessage - should handle null/undefined gracefully', () => {
-  expect(formatCommitMessage(null as any)).toBe(null);
-  expect(formatCommitMessage(undefined as any)).toBe(undefined);
+  expect((formatCommitMessage as any)(null)).toBe(null);
+  expect((formatCommitMessage as any)(undefined)).toBe(undefined);
 });
 
 // --- Tests for shouldExcludeFile ---

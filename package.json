@@ -5,7 +5,7 @@
   "scripts": {
     "start": "bun run ./gcm.js",
     "test": "bun test",
-    "typecheck": "bunx tsc --noEmit",
+    "check": "bunx tsc --noEmit",
     "lint": "eslint",
     "format": "eslint --fix . --ignore-pattern dist && prettier -l -w .",
     "build": "bun build ./gcm.ts --outfile ./dist/gcm --target=bun --minify"

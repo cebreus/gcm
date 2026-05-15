@@ -56,6 +56,15 @@ interface ActionMenuResult {
   userHint?: string;
 }
 
+type ActionChoice =
+  | 'commit'
+  | 'copy'
+  | 'edit'
+  | 'regenerate'
+  | 'regenerate-hint'
+  | 'switch'
+  | 'cancel';
+
 function getPackageInfo(): PackageInfo {
   try {
     const packageJsonPath = new URL('../package.json', import.meta.url);
@@ -93,7 +102,7 @@ export function showHelp() {
       ${C.cyan}--list-models${C.reset}             List available Gemini models and exit.
 
     `;
-  console.log(helpText.trim());
+  process.stdout.write(helpText.trim() + '\n');
 }
 
 export function displayResultStructured(logger: Logger, res: Labels): void {
@@ -128,13 +137,14 @@ const SYSTEM_INSTRUCTIONS_FULL = `You are an expert at writing concise, professi
 
 const SYSTEM_INSTRUCTIONS_COMMIT_ONLY = `You are an expert at writing concise, professional conventional commit messages. Use GitHub-flavored Markdown as required format.\n\nOutput format (follow exactly):\n\n[Generated conventional commit message]\n\n--- RULES ---\n1. **Commit Message** (MOST IMPORTANT): CRITICAL: First line MUST be ≤60 characters (type(scope): summary), BLANK LINE after first line, Body: Use bullet points with dash (-), EACH LINE MUST be ≤80 characters maximum, Focus on WHAT changed not WHY, Group related changes, Be specific and concise, If breaking change add BREAKING CHANGE: footer. Your response will be automatically formatted to enforce these limits.`;
 
-function logTokenInfo(
-  modelName: string,
-  tokens: number,
-  inputLength: number,
-  enableThinking: boolean,
-  logger: Logger,
-): void {
+function logTokenInfo(params: {
+  modelName: string;
+  tokens: number;
+  inputLength: number;
+  enableThinking: boolean;
+  logger: Logger;
+}): void {
+  const { modelName, tokens, inputLength, enableThinking, logger } = params;
   if (enableThinking) {
     logger.log(
       'info',
@@ -218,13 +228,14 @@ async function getModelSelectionOptions(
   });
 }
 
-async function runPreflightIfNeeded(
-  parsedArgs: ParsedOptions,
-  state: GenerationState,
-  apiKey: string,
-  logger: Logger,
-  listModelsFn: (apiKey: string) => Promise<string[]>,
-): Promise<'continue' | 'exit'> {
+async function runPreflightIfNeeded(params: {
+  parsedArgs: ParsedOptions;
+  state: GenerationState;
+  apiKey: string;
+  logger: Logger;
+  listModelsFn: (apiKey: string) => Promise<string[]>;
+}): Promise<'continue' | 'exit'> {
+  const { parsedArgs, state, apiKey, logger, listModelsFn } = params;
   if (parsedArgs.model || parsedArgs.mode) return 'continue';
 
   for (;;) {
@@ -312,89 +323,143 @@ function parseAndSanitizeResponse(
   }
 }
 
-async function runActionMenu(
-  state: GenerationState,
-  parsedOut: Labels,
-  apiKey: string,
-  logger: Logger,
-  listModelsFn: (apiKey: string) => Promise<string[]>,
-): Promise<ActionMenuResult> {
+async function handleActionCopy(finalMessage: string): Promise<void> {
+  try {
+    await clipboardy.write(finalMessage);
+    note('Commit message copied to clipboard!', 'Success');
+  } catch (error) {
+    note(`Failed to copy to clipboard: ${error}`, 'Error');
+  }
+}
+
+async function handleActionEdit(finalMessage: string): Promise<string> {
+  const edited = await text({
+    message: 'Edit commit message',
+    initialValue: finalMessage,
+    placeholder: 'Enter commit message',
+  });
+  if (isCancel(edited)) return finalMessage;
+  const updated = String(edited);
+  note(updated, 'Updated Commit Message');
+  return updated;
+}
+
+async function runActionMenu(params: {
+  state: GenerationState;
+  parsedOut: Labels;
+  apiKey: string;
+  logger: Logger;
+  listModelsFn: (apiKey: string) => Promise<string[]>;
+}): Promise<ActionMenuResult> {
+  const { state, parsedOut, apiKey, logger, listModelsFn } = params;
   let finalMessage = parsedOut.COMMIT_MESSAGE;
 
   for (;;) {
-    const action = await select({
-      message: 'What would you like to do?',
-      options: [
-        { value: 'commit', label: 'Commit' },
-        { value: 'copy', label: 'Copy to clipboard' },
-        { value: 'edit', label: 'Edit message' },
-        { value: 'regenerate', label: 'Regenerate (same model)' },
-        { value: 'regenerate-hint', label: 'Regenerate with Hint...' },
-        { value: 'switch', label: 'Switch Model & Regenerate' },
-        { value: 'cancel', label: 'Cancel' },
-      ],
-    });
-
-    if (isCancel(action) || action === 'cancel') {
+    const action = await selectAction();
+    if (action === null || action === 'cancel') {
       outro('Commit cancelled.');
       return { type: 'cancel', modelName: state.modelName, userHint: state.userHint };
     }
-
-    if (action === 'copy') {
-      try {
-        await clipboardy.write(finalMessage);
-        note('Commit message copied to clipboard!', 'Success');
-      } catch (error) {
-        note(`Failed to copy to clipboard: ${error}`, 'Error');
-      }
+    const actionResult = await handleActionChoice({
+      action,
+      finalMessage,
+      parsedOut,
+      state,
+      apiKey,
+      logger,
+      listModelsFn,
+    });
+    if (actionResult.type === 'update-message') {
+      finalMessage = actionResult.message;
       continue;
     }
-
-    if (action === 'edit') {
-      const edited = await text({
-        message: 'Edit commit message',
-        initialValue: finalMessage,
-        placeholder: 'Enter commit message',
-      });
-      if (!isCancel(edited)) {
-        finalMessage = String(edited);
-        note(finalMessage, 'Updated Commit Message');
-      }
-      continue;
-    }
-
-    if (action === 'regenerate') {
-      return { type: 'regenerate', modelName: state.modelName, userHint: undefined };
-    }
-
-    if (action === 'regenerate-hint') {
-      const hint = await text({
-        message: 'Enter hint for regeneration (e.g. "emphasize refactoring")',
-        placeholder: 'Add instructions...',
-      });
-      if (!isCancel(hint)) {
-        return { type: 'regenerate', modelName: state.modelName, userHint: String(hint) };
-      }
-      continue;
-    }
-
-    if (action === 'switch') {
-      const modelOptions = await getModelSelectionOptions(apiKey, logger, listModelsFn);
-      const selectedModel = await select({
-        message: 'Select AI Model for Regeneration',
-        options: modelOptions,
-      });
-      if (!isCancel(selectedModel)) {
-        return { type: 'regenerate', modelName: String(selectedModel), userHint: undefined };
-      }
-      continue;
-    }
-
-    if (action === 'commit') {
-      parsedOut.COMMIT_MESSAGE = finalMessage;
-      return { type: 'commit', modelName: state.modelName, userHint: state.userHint };
-    }
+    if (actionResult.type === 'continue') continue;
+    return actionResult.result;
   }
+}
+
+async function selectAction(): Promise<ActionChoice | null> {
+  const action = await select({
+    message: 'What would you like to do?',
+    options: [
+      { value: 'commit', label: 'Commit' },
+      { value: 'copy', label: 'Copy to clipboard' },
+      { value: 'edit', label: 'Edit message' },
+      { value: 'regenerate', label: 'Regenerate (same model)' },
+      { value: 'regenerate-hint', label: 'Regenerate with Hint...' },
+      { value: 'switch', label: 'Switch Model & Regenerate' },
+      { value: 'cancel', label: 'Cancel' },
+    ],
+  });
+  if (isCancel(action)) return null;
+  return action as ActionChoice;
+}
+
+async function handleActionChoice(params: {
+  action: ActionChoice;
+  finalMessage: string;
+  parsedOut: Labels;
+  state: GenerationState;
+  apiKey: string;
+  logger: Logger;
+  listModelsFn: (apiKey: string) => Promise<string[]>;
+}): Promise<
+  | { type: 'continue' }
+  | { type: 'update-message'; message: string }
+  | { type: 'return'; result: ActionMenuResult }
+> {
+  const { action, finalMessage, parsedOut, state, apiKey, logger, listModelsFn } = params;
+  if (action === 'copy') {
+    await handleActionCopy(finalMessage);
+    return { type: 'continue' };
+  }
+  if (action === 'edit') {
+    return { type: 'update-message', message: await handleActionEdit(finalMessage) };
+  }
+  if (action === 'regenerate') {
+    return {
+      type: 'return',
+      result: { type: 'regenerate', modelName: state.modelName, userHint: undefined },
+    };
+  }
+  if (action === 'regenerate-hint') return handleRegenerateHint(state);
+  if (action === 'switch') return handleSwitchModel(apiKey, logger, listModelsFn);
+  parsedOut.COMMIT_MESSAGE = finalMessage;
+  return {
+    type: 'return',
+    result: { type: 'commit', modelName: state.modelName, userHint: state.userHint },
+  };
+}
+
+async function handleRegenerateHint(
+  state: GenerationState,
+): Promise<{ type: 'continue' } | { type: 'return'; result: ActionMenuResult }> {
+  const hint = await text({
+    message: 'Enter hint for regeneration (e.g. "emphasize refactoring")',
+    placeholder: 'Add instructions...',
+  });
+  if (isCancel(hint)) return { type: 'continue' };
+  return {
+    type: 'return',
+    result: { type: 'regenerate', modelName: state.modelName, userHint: String(hint) },
+  };
+}
+
+async function handleSwitchModel(
+  apiKey: string,
+  logger: Logger,
+  listModelsFn: (apiKey: string) => Promise<string[]>,
+): Promise<{ type: 'continue' } | { type: 'return'; result: ActionMenuResult }> {
+  const modelOptions = await getModelSelectionOptions(apiKey, logger, listModelsFn);
+  const selectedModel = await select({
+    message: 'Select AI Model for Regeneration',
+    options: modelOptions,
+  });
+  if (isCancel(selectedModel)) return { type: 'continue' };
+  return {
+    type: 'return',
+    result: { type: 'regenerate', modelName: String(selectedModel), userHint: undefined },
+  };
 }
 
 function createRunnerServices(opts: RunnerOptions, logger: Logger, apiKey: string): RunnerServices {
@@ -429,6 +494,333 @@ async function maybeHandleListModels(parsedArgs: ParsedOptions): Promise<number 
   return 0;
 }
 
+function buildLoggerConfig(parsedArgs: ParsedOptions): LoggerConfig {
+  const loggerConfig: LoggerConfig = {
+    LOG_LEVEL: CONFIG.LOG_LEVEL,
+    TELEMETRY_FILE: CONFIG.TELEMETRY_FILE,
+  };
+  if (parsedArgs.verbose) loggerConfig.LOG_LEVEL = 'debug';
+  if (parsedArgs.debug) CONFIG.DEBUG_API = true;
+  return loggerConfig;
+}
+
+async function buildGenerationState(parsedArgs: ParsedOptions): Promise<{
+  targetCommit: string | null;
+  state: GenerationState;
+}> {
+  const targetCommit = parsedArgs.commit || null;
+  const session = await loadSession();
+  return {
+    targetCommit,
+    state: {
+      modelName: parsedArgs.model || session.modelName || CONFIG.MODEL_NAME,
+      outputMode: parsedArgs.mode || session.outputMode || 'commit-only',
+      userHint: undefined,
+    },
+  };
+}
+
+async function runGenerationSafely(params: {
+  opts: RunnerOptions;
+  parsedArgs: ParsedOptions;
+  logger: Logger;
+  apiKey: string;
+  targetCommit: string | null;
+  state: GenerationState;
+  s: ReturnType<typeof spinner>;
+}): Promise<void> {
+  const { opts, parsedArgs, logger, apiKey, targetCommit, state, s } = params;
+  try {
+    const services = createRunnerServices(opts, logger, apiKey);
+    await runGenerationWorkflow({ services, parsedArgs, logger, apiKey, targetCommit, state, s });
+  } catch (error: unknown) {
+    s.stop('An error occurred');
+    const errStr = String(error);
+    if (/Not a git repository/i.test(errStr)) cancel('Error: Not inside a git repository.');
+    else if (/unknown revision/i.test(errStr)) cancel(`Error: Invalid commit SHA: ${targetCommit}`);
+    else {
+      logger.log('error', `Gemini commit helper failed: ${error}`, { error: errStr });
+      cancel(`An unexpected error occurred: ${errStr}`);
+    }
+    throw error;
+  }
+}
+
+async function runGenerationWorkflow(params: {
+  services: RunnerServices;
+  parsedArgs: ParsedOptions;
+  logger: Logger;
+  apiKey: string;
+  targetCommit: string | null;
+  state: GenerationState;
+  s: ReturnType<typeof spinner>;
+}): Promise<void> {
+  const { services, parsedArgs, logger, apiKey, targetCommit, state, s } = params;
+  if (targetCommit)
+    logger.log('info', `${C.dim}Using commit ${targetCommit} for analysis${C.reset}`);
+  const preflight = await runPreflightIfNeeded({
+    parsedArgs,
+    state,
+    apiKey,
+    logger,
+    listModelsFn: services.listModelsFn,
+  });
+  if (preflight === 'exit') return;
+  const staged = await loadStagedChanges({ services, parsedArgs, targetCommit, logger, s });
+  if (!staged) return;
+  const meta = buildLogMetadata(staged, targetCommit);
+  const scopeSuggestions = await resolveScopeSuggestions(staged.stagedFiles, logger);
+  await runGenerationCycle({
+    services,
+    parsedArgs,
+    logger,
+    apiKey,
+    state,
+    s,
+    staged,
+    meta,
+    scopeSuggestions,
+    targetCommit,
+  });
+}
+
+function buildLogMetadata(
+  staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>,
+  targetCommit: string | null,
+): LogMetadata {
+  return {
+    targetCommit: targetCommit || null,
+    numFiles: staged.stagedFiles.length,
+    origLen: staged.stagedDiff.length,
+    truncated: staged.truncated,
+  };
+}
+
+async function loadStagedChanges(params: {
+  services: RunnerServices;
+  parsedArgs: ParsedOptions;
+  targetCommit: string | null;
+  logger: Logger;
+  s: ReturnType<typeof spinner>;
+}): Promise<NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>> | null> {
+  const { services, parsedArgs, targetCommit, logger, s } = params;
+  s.start('Analyzing repository changes...');
+  const staged = await services.gitService.retrieveStagedChanges(
+    targetCommit,
+    logger,
+    parsedArgs.exclude,
+  );
+  if (!staged) {
+    s.stop('No changes found');
+    cancel('No staged changes found. Use "git add" to stage files.');
+    return null;
+  }
+  s.stop(`Found ${staged.stagedFiles.length} file(s) changed`);
+  return staged;
+}
+
+async function resolveScopeSuggestions(stagedFiles: string[], logger: Logger): Promise<string[]> {
+  try {
+    return await getScopeSuggestions(stagedFiles);
+  } catch (error) {
+    logger.log('debug', 'Failed to get scope suggestions', { error: String(error) });
+    return [];
+  }
+}
+
+async function runGenerationCycle(params: {
+  services: RunnerServices;
+  parsedArgs: ParsedOptions;
+  logger: Logger;
+  apiKey: string;
+  state: GenerationState;
+  s: ReturnType<typeof spinner>;
+  staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>;
+  meta: LogMetadata;
+  scopeSuggestions: string[];
+  targetCommit: string | null;
+}): Promise<void> {
+  const { services, logger, apiKey, state, s, staged, meta, scopeSuggestions, targetCommit } =
+    params;
+  for (;;) {
+    const outcome = await runSingleGenerationAttempt({
+      services,
+      logger,
+      apiKey,
+      state,
+      s,
+      staged,
+      meta,
+      scopeSuggestions,
+      targetCommit,
+    });
+    if (outcome === 'regenerate') continue;
+    return;
+  }
+}
+
+async function runSingleGenerationAttempt(params: {
+  services: RunnerServices;
+  logger: Logger;
+  apiKey: string;
+  state: GenerationState;
+  s: ReturnType<typeof spinner>;
+  staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>;
+  meta: LogMetadata;
+  scopeSuggestions: string[];
+  targetCommit: string | null;
+}): Promise<'done' | 'regenerate'> {
+  const { services, logger, apiKey, state, s, staged, meta, scopeSuggestions, targetCommit } =
+    params;
+  const modelSpec = getModelSpec(state.modelName);
+  const safeMaxTokens = modelSpec.maxInputTokens - CONFIG.MAX_OUTPUT_TOKENS - 1000;
+  const customHeader =
+    state.outputMode === 'full'
+      ? 'Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following'
+      : 'Generate a professional conventional commit message based on the following';
+  const contextResult = await services.contextService.constructLLMPromptContext({
+    diffContent: staged.stagedDiff,
+    promptSuffix: staged.truncated ? 'truncated diff' : 'diff',
+    maxAvailableTokens: safeMaxTokens,
+    tokenBytesRatio: CONFIG.TOKEN_BYTES_RATIO,
+    stagedFiles: staged.stagedFiles,
+    scopeSuggestions,
+    logger,
+    customHeader,
+    userHint: state.userHint,
+  });
+  logTokenInfo({
+    modelName: state.modelName,
+    tokens: contextResult.tokens,
+    inputLength: contextResult.processedDiffContent.length,
+    enableThinking: CONFIG.ENABLE_THINKING,
+    logger,
+  });
+  logger.log('debug', 'Run started', {
+    targetCommit: targetCommit ?? null,
+    runtime: detectRuntime(),
+  });
+  s.start(`Generating commit message with ${state.modelName}...`);
+  const systemPrompt =
+    state.outputMode === 'full' ? SYSTEM_INSTRUCTIONS_FULL : SYSTEM_INSTRUCTIONS_COMMIT_ONLY;
+  const response = await services.geminiService.callGeminiAPI({
+    promptContext: contextResult.promptContext,
+    systemPrompt,
+    stagedFiles: staged.stagedFiles,
+    meta,
+    opts: {
+      modelOverride: state.modelName,
+      retryIfTruncated: true,
+      retryIfTruncatedMaxRetries: 1,
+      retryIfTruncatedIncreaseTokens: CONFIG.MAX_OUTPUT_TOKENS,
+    },
+  });
+  s.stop('Gemini response received');
+  if (!response) {
+    logger.log('warn', 'Gemini did not return text after retries; using deterministic fallback');
+    displayResultStructured(logger, generateFallbackCommitDetails(staged.stagedFiles));
+    return 'done';
+  }
+  const action = await handleSuccessfulGeneration({
+    response,
+    state,
+    logger,
+    apiKey,
+    services,
+    meta,
+    s,
+  });
+  return action;
+}
+
+async function handleSuccessfulGeneration(params: {
+  response: NonNullable<Awaited<ReturnType<GeminiService['callGeminiAPI']>>>;
+  state: GenerationState;
+  logger: Logger;
+  apiKey: string;
+  services: RunnerServices;
+  meta: LogMetadata;
+  s: ReturnType<typeof spinner>;
+}): Promise<'done' | 'regenerate'> {
+  const { response, state, logger, apiKey, services, meta, s } = params;
+  logger.log('debug', 'LLM response received', {
+    promptTokens: response.usage.promptTokens,
+    outputTokens: response.usage.outputTokens,
+    ...meta,
+  });
+  const parsedOut = parseAndSanitizeResponse(response.text, state.outputMode, logger);
+  if (!parsedOut) {
+    logger.log('info', response.text);
+    outro('Failed to parse structured output.');
+    return 'done';
+  }
+  const warningIcon = response.truncated ? ` ${C.yellow}[⚠ ZKRACENO]${C.reset}` : '';
+  note(
+    buildNoteContent(state.outputMode, parsedOut),
+    (state.outputMode === 'full' ? 'Generated Report' : 'Generated Commit Message') + warningIcon,
+  );
+  reportStats(logger, state.modelName, response.usage, response.text.length);
+  const actionResult = await runActionMenu({
+    state,
+    parsedOut,
+    apiKey,
+    logger,
+    listModelsFn: services.listModelsFn,
+  });
+  if (actionResult.type === 'cancel') return 'done';
+  state.modelName = actionResult.modelName;
+  state.userHint = actionResult.userHint;
+  if (actionResult.type === 'regenerate') return 'regenerate';
+  return commitGeneratedMessage({
+    commitMessage: parsedOut.COMMIT_MESSAGE,
+    services,
+    state,
+    logger,
+    s,
+  });
+}
+
+async function commitGeneratedMessage(params: {
+  commitMessage: string;
+  services: RunnerServices;
+  state: GenerationState;
+  logger: Logger;
+  s: ReturnType<typeof spinner>;
+}): Promise<'done'> {
+  const { commitMessage, services, state, logger, s } = params;
+  s.start('Committing changes...');
+  try {
+    await services.gitService.commitChanges(commitMessage, logger);
+    await saveSession({ modelName: state.modelName, outputMode: state.outputMode });
+    s.stop('Changes committed successfully');
+    outro(`${C.cyan}Commit successfully created!${C.reset}`);
+  } catch (error) {
+    s.stop('Commit failed');
+    cancel(`Failed to commit changes: ${error}`);
+    logger.log('error', `Commit failed: ${error}`);
+  }
+  return 'done';
+}
+
+async function handleCliEarlyExit(
+  parsedArgs: ParsedOptions,
+  packageInfo: PackageInfo,
+): Promise<boolean> {
+  if (parsedArgs.version) {
+    process.stdout.write(`${packageInfo.name} ${packageInfo.version}\n`);
+    return true;
+  }
+  intro(`${C.bright}Gemini Commit Message Helper v${packageInfo.version}${C.reset}`);
+  if (parsedArgs.help) {
+    showHelp();
+    return true;
+  }
+  const listModelsExitCode = await maybeHandleListModels(parsedArgs);
+  if (listModelsExitCode === null) return false;
+  process.exitCode = listModelsExitCode;
+  return true;
+}
+
 export async function executeCommitMessageGeneration(
   argv?: string[],
   dependencies?: RunnerOptions,
@@ -436,32 +828,9 @@ export async function executeCommitMessageGeneration(
   const opts = dependencies || {};
   const parsedArgs: ParsedOptions = parseArgs(argv || process.argv.slice(2));
   const packageInfo = getPackageInfo();
+  if (await handleCliEarlyExit(parsedArgs, packageInfo)) return;
 
-  if (parsedArgs.version) {
-    console.log(`${packageInfo.name} ${packageInfo.version}`);
-    return;
-  }
-
-  intro(`${C.bright}Gemini Commit Message Helper v${packageInfo.version}${C.reset}`);
-
-  if (parsedArgs.help) {
-    showHelp();
-    return;
-  }
-
-  const listModelsExitCode = await maybeHandleListModels(parsedArgs);
-  if (listModelsExitCode !== null) {
-    process.exitCode = listModelsExitCode;
-    return;
-  }
-
-  const loggerConfig: LoggerConfig = {
-    LOG_LEVEL: CONFIG.LOG_LEVEL,
-    TELEMETRY_FILE: CONFIG.TELEMETRY_FILE,
-  };
-  if (parsedArgs.verbose) loggerConfig.LOG_LEVEL = 'debug';
-  if (parsedArgs.debug) CONFIG.DEBUG_API = true;
-
+  const loggerConfig = buildLoggerConfig(parsedArgs);
   const logger = opts.logger || createLogger(loggerConfig);
   const s = spinner();
 
@@ -471,176 +840,8 @@ export async function executeCommitMessageGeneration(
     return;
   }
 
-  const targetCommit = parsedArgs.commit || null;
-  const session = await loadSession();
-  const state: GenerationState = {
-    modelName: parsedArgs.model || session.modelName || CONFIG.MODEL_NAME,
-    outputMode: parsedArgs.mode || session.outputMode || 'commit-only',
-    userHint: undefined,
-  };
-
-  try {
-    const services = createRunnerServices(opts, logger, apiKey);
-
-    if (targetCommit) {
-      logger.log('info', `${C.dim}Using commit ${targetCommit} for analysis${C.reset}`);
-    }
-
-    if (
-      (await runPreflightIfNeeded(parsedArgs, state, apiKey, logger, services.listModelsFn)) ===
-      'exit'
-    ) {
-      return;
-    }
-
-    s.start('Analyzing repository changes...');
-    const staged = await services.gitService.retrieveStagedChanges(
-      targetCommit,
-      logger,
-      parsedArgs.exclude,
-    );
-    if (!staged) {
-      s.stop('No changes found');
-      cancel('No staged changes found. Use "git add" to stage files.');
-      return;
-    }
-    s.stop(`Found ${staged.stagedFiles.length} file(s) changed`);
-
-    const meta: LogMetadata = {
-      targetCommit: targetCommit || null,
-      numFiles: staged.stagedFiles.length,
-      origLen: staged.stagedDiff.length,
-      truncated: staged.truncated,
-    };
-
-    let scopeSuggestions: string[] = [];
-    try {
-      scopeSuggestions = await getScopeSuggestions(staged.stagedFiles);
-    } catch (error) {
-      logger.log('debug', 'Failed to get scope suggestions', { error: String(error) });
-    }
-
-    for (;;) {
-      const modelSpec = getModelSpec(state.modelName);
-      const safeMaxTokens = modelSpec.maxInputTokens - CONFIG.MAX_OUTPUT_TOKENS - 1000;
-      const customHeader =
-        state.outputMode === 'full'
-          ? 'Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following'
-          : 'Generate a professional conventional commit message based on the following';
-
-      const contextResult = await services.contextService.constructLLMPromptContext(
-        staged.stagedDiff,
-        staged.truncated ? 'truncated diff' : 'diff',
-        safeMaxTokens,
-        CONFIG.TOKEN_BYTES_RATIO,
-        staged.stagedFiles,
-        scopeSuggestions,
-        logger,
-        customHeader,
-        state.userHint,
-      );
-
-      const runtime = detectRuntime();
-      logTokenInfo(
-        state.modelName,
-        contextResult.tokens,
-        contextResult.processedDiffContent.length,
-        CONFIG.ENABLE_THINKING,
-        logger,
-      );
-      logger.log('debug', 'Run started', { targetCommit: targetCommit ?? null, runtime });
-
-      s.start(`Generating commit message with ${state.modelName}...`);
-      const systemPrompt =
-        state.outputMode === 'full' ? SYSTEM_INSTRUCTIONS_FULL : SYSTEM_INSTRUCTIONS_COMMIT_ONLY;
-
-      const response = await services.geminiService.callGeminiAPI({
-        promptContext: contextResult.promptContext,
-        systemPrompt,
-        stagedFiles: staged.stagedFiles,
-        meta,
-        opts: {
-          modelOverride: state.modelName,
-          retryIfTruncated: true,
-          retryIfTruncatedMaxRetries: 1,
-          retryIfTruncatedIncreaseTokens: CONFIG.MAX_OUTPUT_TOKENS,
-        },
-      });
-      s.stop('Gemini response received');
-
-      if (!response) {
-        logger.log(
-          'warn',
-          'Gemini did not return text after retries; using deterministic fallback',
-        );
-        displayResultStructured(logger, generateFallbackCommitDetails(staged.stagedFiles));
-        return;
-      }
-
-      logger.log('debug', 'LLM response received', {
-        promptTokens: response.usage.promptTokens,
-        outputTokens: response.usage.outputTokens,
-        ...meta,
-      });
-
-      const parsedOut = parseAndSanitizeResponse(response.text, state.outputMode, logger);
-      if (!parsedOut) {
-        logger.log('info', response.text);
-        outro('Failed to parse structured output.');
-        return;
-      }
-
-      const warningIcon = response.truncated ? ` ${C.yellow}[⚠ ZKRACENO]${C.reset}` : '';
-      const noteContent = buildNoteContent(state.outputMode, parsedOut);
-      note(
-        noteContent,
-        (state.outputMode === 'full' ? 'Generated Report' : 'Generated Commit Message') +
-          warningIcon,
-      );
-      reportStats(logger, state.modelName, response.usage, response.text.length);
-
-      const actionResult = await runActionMenu(
-        state,
-        parsedOut,
-        apiKey,
-        logger,
-        services.listModelsFn,
-      );
-      if (actionResult.type === 'cancel') return;
-
-      state.modelName = actionResult.modelName;
-      state.userHint = actionResult.userHint;
-
-      if (actionResult.type === 'regenerate') {
-        continue;
-      }
-
-      s.start('Committing changes...');
-      try {
-        await services.gitService.commitChanges(parsedOut.COMMIT_MESSAGE, logger);
-        await saveSession({ modelName: state.modelName, outputMode: state.outputMode });
-        s.stop('Changes committed successfully');
-        outro(`${C.cyan}Commit successfully created!${C.reset}`);
-      } catch (error) {
-        s.stop('Commit failed');
-        cancel(`Failed to commit changes: ${error}`);
-        logger.log('error', `Commit failed: ${error}`);
-      }
-      return;
-    }
-  } catch (error: unknown) {
-    s.stop('An error occurred');
-    const errStr = String(error);
-    if (/Not a git repository/i.test(errStr)) {
-      cancel('Error: Not inside a git repository.');
-    } else if (/unknown revision/i.test(errStr)) {
-      cancel(`Error: Invalid commit SHA: ${targetCommit}`);
-    } else {
-      logger.log('error', `Gemini commit helper failed: ${error}`, { error: errStr });
-      cancel(`An unexpected error occurred: ${errStr}`);
-    }
-    throw error;
-  }
+  const { targetCommit, state } = await buildGenerationState(parsedArgs);
+  await runGenerationSafely({ opts, parsedArgs, logger, apiKey, targetCommit, state, s });
 }
 
 export default { executeCommitMessageGeneration };

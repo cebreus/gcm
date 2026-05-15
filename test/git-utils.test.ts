@@ -20,7 +20,7 @@ const originalSpawnSync = Bun.spawnSync;
 const originalSpawn = Bun.spawn;
 
 // Patch Bun.spawnSync and Bun.spawn directly
-Bun.spawnSync = mockSpawnSync;
+Bun.spawnSync = mockSpawnSync as any;
 Bun.spawn = mockSpawn as any; // Cast to any because Bun.spawn's signature is complex
 
 afterAll(() => {

@@ -24,93 +24,109 @@ export interface GitServiceOptions {
   gitCommandRunner?: GitCommandRunner;
 }
 
+interface GitServiceDeps {
+  gitCommandRunner: GitCommandRunner;
+}
+
+function buildFileListArgs(commitHash: string | null): string[] {
+  return commitHash
+    ? ['show', '-w', '--name-only', '--pretty=format:', commitHash]
+    : ['diff', '--staged', '-w', '--name-only'];
+}
+
+function buildDiffArgs(commitHash: string | null): string[] {
+  return commitHash ? ['show', '-w', commitHash] : ['diff', '--staged', '-w'];
+}
+
+function parseFileList(text: string): string[] {
+  return text
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function logExcludedFiles(
+  logger: Logger | null,
+  excludePatterns: string[],
+  originalFileCount: number,
+  filteredFileCount: number,
+): void {
+  if (!(excludePatterns.length > 0 && filteredFileCount < originalFileCount)) return;
+  const excludedCount = originalFileCount - filteredFileCount;
+  logger?.log(
+    'info',
+    `Excluded ${excludedCount} file(s) matching patterns: ${excludePatterns.join(', ')}`,
+  );
+}
+
+function logNoChanges(logger: Logger | null, commitHash: string | null): void {
+  if (commitHash) {
+    logger?.log('info', `No changes found in commit ${commitHash}.`);
+    return;
+  }
+  logger?.log('info', 'No staged changes found. Use `git add` to stage files for commit.');
+}
+
 /**
  * Creates a GitService instance
  */
 export function createGitService(opts: GitServiceOptions = {}): GitService {
-  const gitCommandRunner = opts.gitCommandRunner || spawnGitStream;
-
-  async function retrieveStagedChanges(
-    commitHash: string | null,
-    logger: Logger | null = null,
-    excludePatterns: string[] = [],
-  ): Promise<StagedChangesResult | null> {
-    if (logger) logger.log('debug', 'Checking git status');
-
-    // 1. Get list of files
-    let fileListArgs: string[];
-    if (commitHash) {
-      fileListArgs = ['show', '-w', '--name-only', '--pretty=format:', commitHash];
-    } else {
-      fileListArgs = ['diff', '--staged', '-w', '--name-only'];
-    }
-
-    const fileListRes = await gitCommandRunner(fileListArgs);
-
-    let files = fileListRes.text
-      .split('\n')
-      .map(s => s.trim())
-      .filter(Boolean);
-
-    // Filter out excluded files
-    const originalFileCount = files.length;
-    files = filterExcludedFiles(files, excludePatterns);
-
-    if (excludePatterns.length > 0 && files.length < originalFileCount) {
-      const excludedCount = originalFileCount - files.length;
-      if (logger)
-        logger.log(
-          'info',
-          `Excluded ${excludedCount} file(s) matching patterns: ${excludePatterns.join(', ')}`,
-        );
-    }
-
-    if (files.length === 0) {
-      if (commitHash) {
-        if (logger) logger.log('info', `No changes found in commit ${commitHash}.`);
-      } else {
-        if (logger)
-          logger.log('info', 'No staged changes found. Use `git add` to stage files for commit.');
-      }
-      return null;
-    }
-
-    // 2. Get the diff
-    let diffArgs: string[];
-    if (commitHash) {
-      diffArgs = ['show', '-w', commitHash];
-    } else {
-      diffArgs = ['diff', '--staged', '-w'];
-    }
-
-    const diffRes = await gitCommandRunner(diffArgs);
-
-    // Check if truncated
-    if (diffRes.truncated) {
-      if (logger) logger.log('warn', 'Diff output was truncated due to size limits.');
-    }
-
-    const truncatedNote = diffRes.truncated
-      ? '\n\nNote: The diff was truncated while being read due to buffer limits.'
-      : undefined;
-
-    return {
-      stagedDiff: diffRes.text,
-      stagedFiles: files,
-      truncated: diffRes.truncated,
-      truncatedNote,
-    };
-  }
-
-  async function commitChanges(message: string, logger: Logger | null = null): Promise<void> {
-    if (logger) logger.log('debug', 'Executing git commit');
-    // We use 'git commit -m'
-    // Note: multiline messages work fine with array args in spawn
-    await gitCommandRunner(['commit', '-m', message]);
-  }
-
+  const deps: GitServiceDeps = { gitCommandRunner: opts.gitCommandRunner || spawnGitStream };
   return {
-    retrieveStagedChanges,
-    commitChanges,
+    retrieveStagedChanges: function (
+      commitHash: string | null,
+      logger: Logger | null = null,
+      excludePatterns: string[] = [],
+    ): Promise<StagedChangesResult | null> {
+      return retrieveStagedChangesWithDeps({
+        deps,
+        commitHash,
+        logger,
+        excludePatterns,
+      });
+    },
+    commitChanges: function (message: string, logger: Logger | null = null): Promise<void> {
+      return commitChangesWithDeps({ deps, message, logger });
+    },
   };
+}
+
+async function retrieveStagedChangesWithDeps(params: {
+  deps: GitServiceDeps;
+  commitHash: string | null;
+  logger: Logger | null;
+  excludePatterns: string[];
+}): Promise<StagedChangesResult | null> {
+  const { deps, commitHash, logger, excludePatterns } = params;
+  logger?.log('debug', 'Checking git status');
+  const fileListRes = await deps.gitCommandRunner(buildFileListArgs(commitHash));
+  let files = parseFileList(fileListRes.text);
+  const originalFileCount = files.length;
+  files = filterExcludedFiles(files, excludePatterns);
+  logExcludedFiles(logger, excludePatterns, originalFileCount, files.length);
+  if (files.length === 0) {
+    logNoChanges(logger, commitHash);
+    return null;
+  }
+  const diffRes = await deps.gitCommandRunner(buildDiffArgs(commitHash));
+  if (diffRes.truncated) logger?.log('warn', 'Diff output was truncated due to size limits.');
+  const truncatedNote = diffRes.truncated
+    ? '\n\nNote: The diff was truncated while being read due to buffer limits.'
+    : undefined;
+  return {
+    stagedDiff: diffRes.text,
+    stagedFiles: files,
+    truncated: diffRes.truncated,
+    truncatedNote,
+  };
+}
+
+async function commitChangesWithDeps(params: {
+  deps: GitServiceDeps;
+  message: string;
+  logger: Logger | null;
+}): Promise<void> {
+  const { deps, message, logger } = params;
+  if (logger) logger.log('debug', 'Executing git commit');
+  await deps.gitCommandRunner(['commit', '-m', message]);
 }
