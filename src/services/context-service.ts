@@ -12,6 +12,7 @@ export interface ContextService {
     scopeSuggestions: string[],
     logger: Logger | null,
     customHeader?: string,
+    userHint?: string,
   ): Promise<{ promptContext: string; processedDiffContent: string; tokens: number }>;
 }
 
@@ -32,6 +33,7 @@ export function createContextService(): ContextService {
     scopeSuggestions: string[],
     logger: Logger | null,
     customHeader?: string,
+    userHint?: string,
   ): Promise<{ promptContext: string; processedDiffContent: string; tokens: number }> {
     // 1. Initial Prompt Construction
     const header = buildPromptHeader(promptSuffix, customHeader);
@@ -42,7 +44,12 @@ export function createContextService(): ContextService {
       scopeHint = `\n\nSuggested scopes for conventional commit: ${scopeStr}. Select the most appropriate one if applicable.`;
     }
 
-    const initialContent = header + diffContent + scopeHint;
+    let hintSection = '';
+    if (userHint) {
+      hintSection = `\n\nAdditional user instructions: ${userHint}\nPLEASE ADHERE TO THESE INSTRUCTIONS.`;
+    }
+
+    const initialContent = header + diffContent + scopeHint + hintSection;
 
     // 2. Token Estimation
     const estimatedTokens = estimateTokenCount(initialContent, tokenBytesRatio);
@@ -69,7 +76,7 @@ export function createContextService(): ContextService {
     // Attempt summarization
     const summaryResult = await summarizeLargeDiff(stagedFiles);
     const summaryText = summaryResult.text;
-    const summaryContent = header + summaryText + scopeHint;
+    const summaryContent = header + summaryText + scopeHint + hintSection;
 
     // Check if summary is small enough
     const summaryTokens = estimateTokenCount(summaryContent, tokenBytesRatio);
@@ -109,7 +116,7 @@ export function createContextService(): ContextService {
       logger.log('warn', 'Summary was still too large, performing hard truncation.');
     }
 
-    const finalContent = header + truncatedInput + scopeHint;
+    const finalContent = header + truncatedInput + scopeHint + hintSection;
     const finalTokens = estimateTokenCount(finalContent, tokenBytesRatio);
 
     return {

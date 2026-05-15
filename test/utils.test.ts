@@ -283,21 +283,21 @@ test('utils: filterExcludedFiles - should return empty array when all excluded',
 
 // --- Tests for sanitizeForDisplay ---
 test('utils: sanitizeForDisplay - should remove <<START>> marker', () => {
-  const input = 'prefix <<START>> content';
+  const input = '<<START>> content';
   const result = sanitizeForDisplay(input);
-  expect(result).toBe('prefix  content');
+  expect(result).toBe('content');
 });
 
 test('utils: sanitizeForDisplay - should remove <<END>> marker', () => {
-  const input = 'content <<END>> suffix';
+  const input = 'content <<END>>';
   const result = sanitizeForDisplay(input);
-  expect(result).toBe('content  suffix');
+  expect(result).toBe('content');
 });
 
 test('utils: sanitizeForDisplay - should remove backticked .<<END>> marker', () => {
   const input = 'feat: add feature\n\nDescription text`.<<END>>`';
   const result = sanitizeForDisplay(input);
-  expect(result).toBe('feat: add feature\n\nDescription text``');
+  expect(result).toBe('feat: add feature\n\nDescription text');
 });
 
 test('utils: sanitizeForDisplay - should remove .<<END>> marker without backticks', () => {
@@ -309,13 +309,19 @@ test('utils: sanitizeForDisplay - should remove .<<END>> marker without backtick
 test('utils: sanitizeForDisplay - should remove <<END_TRUNCATED>> marker', () => {
   const input = 'content <<END_TRUNCATED>>';
   const result = sanitizeForDisplay(input);
-  expect(result).toBe('content ');
+  expect(result).toBe('content');
 });
 
 test('utils: sanitizeForDisplay - should remove all markers in single text', () => {
-  const input = '<<START>>content with markers<<END>> and more.<<END_TRUNCATED>>';
+  const input = '<<START>> content with markers and more.<<END_TRUNCATED>>';
   const result = sanitizeForDisplay(input);
   expect(result).toBe('content with markers and more');
+});
+
+test('utils: sanitizeForDisplay - should preserve marker-like literals inside text', () => {
+  const input = 'Docs: explain what <<END>> marker means for parser behavior';
+  const result = sanitizeForDisplay(input);
+  expect(result).toBe(input);
 });
 
 test('utils: sanitizeForDisplay - should preserve regular content', () => {
