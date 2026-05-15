@@ -1,5 +1,5 @@
 ---
-"gcm": minor
+'gcm': minor
 ---
 
 Initialised the core foundation with a modular TypeScript architecture.

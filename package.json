@@ -7,7 +7,7 @@
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit",
     "lint": "eslint",
-    "format": "eslint --fix . && prettier -l -w .",
+    "format": "eslint --fix . --ignore-pattern dist && prettier -l -w .",
     "build": "bun build ./gcm.ts --outfile ./dist/gcm --target=bun --minify"
   },
   "devDependencies": {

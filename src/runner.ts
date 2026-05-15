@@ -399,14 +399,14 @@ export async function executeCommitMessageGeneration(
       // If the response appears truncated, offer the user an interactive retry with higher tokens
       if (response?.truncated) {
         const retryChoice = await select({
-          message: 'Výstup vypadá oříznutý. Chcete zkusit znovu s vyšším limitem tokenů?',
+          message: 'Output looks truncated. Do you want to retry with more tokens?',
           options: [
-            { value: 'retry', label: 'Ano, zopakovat' },
-            { value: 'continue', label: 'Ne, pokračovat s oříznutým výstupem' },
+            { value: 'retry', label: 'Yes, retry' },
+            { value: 'continue', label: 'No, continue anyway' },
           ],
         });
         if (!isCancel(retryChoice) && retryChoice === 'retry') {
-          s.start('Opakuji volání s vyšším limitem tokenů...');
+          s.start('Retrying with higher token limit...');
           const retryRes = await geminiService.callGeminiAPI(
             promptContext,
             systemPrompt,
@@ -419,7 +419,7 @@ export async function executeCommitMessageGeneration(
               timeoutMs: 60000,
             },
           );
-          s.stop('Retry dokončen');
+          s.stop('Retry finished');
           if (retryRes) response = retryRes;
         }
       }
