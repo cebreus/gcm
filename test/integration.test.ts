@@ -238,6 +238,45 @@ test('integration: should handle concurrent execution safety', async () => {
   expect(mockCallGemini).toHaveBeenCalledTimes(2);
 });
 
+test('integration: should not send whitespace-only staged changes to AI', async () => {
+  async function whitespaceOnlyStagedSpawn(
+    args: string[],
+  ): Promise<{ text: string; truncated: boolean }> {
+    const cmd = args.join(' ');
+    if (cmd.includes('rev-parse --is-inside-work-tree')) {
+      return { text: '', truncated: false };
+    }
+    if (cmd.includes('diff --staged --name-only')) {
+      return { text: 'docs/README.md\ndocs/guide.md', truncated: false };
+    }
+    if (cmd.includes('diff --staged -w')) {
+      return { text: '', truncated: false };
+    }
+    return { text: '', truncated: false };
+  }
+
+  const gitService = createGitService({ gitCommandRunner: whitespaceOnlyStagedSpawn as any });
+  const geminiService = createGeminiService({
+    client: mockGeminiClient as any,
+    logger: mockLoggerInstance as any,
+    apiKey: 'test-key',
+  });
+  const contextService = createContextService();
+
+  await runnerRun([], {
+    logger: mockLoggerInstance as any,
+    gitService,
+    geminiService,
+    contextService,
+  });
+
+  expect(mockGetCommitContextHints).not.toHaveBeenCalled();
+  expect(mockCallGemini).not.toHaveBeenCalled();
+  expect(mockCancel).toHaveBeenCalledWith(
+    'Only whitespace-only staged changes detected in 2 file(s). Nothing to send to AI.',
+  );
+});
+
 test('integration: should handle real git repository state', async () => {
   // This test would require a real git repo, but we can mock it
   async function realGitSpawnStreamImpl(

@@ -198,119 +198,30 @@ export function sanitizeForDisplay(text: string): string {
 }
 
 /**
- * Formats a commit message to enforce line length constraints:
- * - First line (subject): max 60 characters
- * - Body lines: max 80 characters
- *
- * Preserves:
- * - Bullet points with dashes ("- ")
- * - Backticks and code formatting
- * - Empty lines
- * - Line breaks
+ * Cleans up a generated commit message by trimming it.
+ * (Hard-wrapping has been removed to prevent broken markdown/bullet points)
  */
 export function formatCommitMessage(message: string): string {
   if (!message || typeof message !== 'string') {
     return message;
   }
-
-  const lines = message.split('\n');
-  if (lines.length === 0) {
-    return message;
+  
+  const trimmed = message.trim();
+  const lines = trimmed.split('\n');
+  if (lines.length <= 1) {
+    return trimmed;
   }
-
-  // Format first line: max 60 chars
-  const firstLine = wrapLine(lines[0], 60);
-
-  // Format remaining lines: max 80 chars, preserve structure
-  const bodyLines = lines.slice(1).map(line => {
-    if (line.trim().length === 0) {
-      return ''; // Preserve empty lines
-    }
-    return wrapLine(line, 80);
-  });
-
-  return [firstLine, ...bodyLines].join('\n');
+  
+  // Ensure an empty line between subject (line 0) and body.
+  const subject = lines[0].trim();
+  const body = lines.slice(1).map(l => l.trim()).filter(l => l.length > 0).join('\n');
+  
+  if (body) {
+    return `${subject}\n\n${body}`;
+  }
+  
+  return subject;
 }
-
-/**
- * Wraps a single line to maxLen, respecting word boundaries and preserving bullets
- */
-function wrapLine(line: string, maxLen: number): string {
-  if (line.length <= maxLen) {
-    return line;
-  }
-
-  // Detect bullet point prefix ("- " or "-\t" etc)
-  const bulletMatch = line.match(/^(\s*[-*+]\s+)/);
-  const bulletPrefix = bulletMatch ? bulletMatch[1] : '';
-  const bulletIndent = bulletPrefix.length;
-
-  // Content after bullet
-  const content = bulletPrefix ? line.slice(bulletPrefix.length) : line;
-
-  // Split on whitespace while preserving backtick-enclosed spans
-  const words = smartSplit(content);
-
-  const wrappedLines: string[] = [];
-  pushWrappedWords(words, wrappedLines, bulletIndent, maxLen);
-
-  // Rejoin with bullet prefix on first line, indent on continuations
-  return wrappedLines.map(wrappedLine => bulletPrefix + wrappedLine).join('\n');
-}
-
-function pushWrappedWords(
-  words: string[],
-  wrappedLines: string[],
-  bulletIndent: number,
-  maxLen: number,
-): void {
-  let currentLine = '';
-  for (const word of words) {
-    const testLine = currentLine ? currentLine + ' ' + word : word;
-    if (testLine.length + bulletIndent <= maxLen) {
-      currentLine = testLine;
-      continue;
-    }
-    if (currentLine) wrappedLines.push(currentLine);
-    currentLine = word;
-  }
-  if (currentLine) wrappedLines.push(currentLine);
-}
-
-/**
- * Splits text on whitespace but preserves content within backticks as single tokens
- */
-function smartSplit(text: string): string[] {
-  const tokens: string[] = [];
-  let current = '';
-  let inBackticks = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-
-    if (char === '`') {
-      inBackticks = !inBackticks;
-      current += char;
-    } else if (/\s/.test(char) && !inBackticks) {
-      // Whitespace outside backticks = token boundary
-      if (current) {
-        tokens.push(current);
-        current = '';
-      }
-    } else {
-      current += char;
-    }
-  }
-
-  if (current) {
-    tokens.push(current);
-  }
-
-  return tokens;
-}
-
-// Remove the old custom implementation functions
-// wrapLine, splitPreservingMarkdown...
 
 /**
  * Detects the repository type based on common monorepo indicators.

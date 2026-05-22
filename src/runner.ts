@@ -149,9 +149,10 @@ function detectRuntime(): string {
 const COMMIT_MESSAGE_RULES = `Commit message rules:
 - Subject format: type(scope): summary
 - Allowed types: feat, fix, refactor, perf, style, docs, test, build, ci, chore
-- Subject must start lowercase after the colon, use imperative mood, have no trailing period, and be at most 60 characters.
+- Subject must start lowercase after the colon, use imperative mood, have no trailing period, and be extremely concise (max 60 characters).
 - Body is optional. Use it only for non-trivial changes.
-- Body bullets must start with "- " and each line must be at most 80 characters.
+- Body bullets must start with "- " and each bullet must be extremely concise (max 80 characters total per bullet point).
+- CRITICAL: Never add manual line breaks (\\n) inside the subject or inside a single bullet point. Keep each bullet as a single continuous line.
 
 Body semantics:
 - Describe observable behaviour, business rules, or technical invariants changed by the diff.
@@ -616,6 +617,12 @@ async function runGenerationWorkflow(params: {
   });
   if (!readyState) return;
   const { repositoryState, staged } = readyState;
+  if (!targetCommit && isWhitespaceOnlyStagedChanges(staged)) {
+    cancel(
+      `Only whitespace-only staged changes detected in ${staged.stagedFiles.length} file(s). Nothing to send to AI.`,
+    );
+    return;
+  }
 
   const initialCommitCapability = evaluateCommitCapability(repositoryState, targetCommit);
   showRepositoryWarnings(repositoryState, targetCommit, initialCommitCapability);
@@ -849,8 +856,20 @@ async function loadStagedChanges(params: {
     }
     return null;
   }
+  if (!targetCommit && isWhitespaceOnlyStagedChanges(staged)) {
+    s.stop(
+      `${C.yellow}Found ${staged.stagedFiles.length} staged file(s), but only whitespace changes${C.reset}`,
+    );
+    return staged;
+  }
   s.stop(`Found ${staged.stagedFiles.length} file(s) changed`);
   return staged;
+}
+
+function isWhitespaceOnlyStagedChanges(
+  staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>,
+): boolean {
+  return staged.stagedFiles.length > 0 && staged.stagedDiff.trim().length === 0;
 }
 
 async function resolveCommitContextHints(
