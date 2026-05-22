@@ -86,3 +86,9 @@ All key tasks are managed via `bun` scripts defined in `package.json`.
 - **Configuration via Environment:** All configuration is managed through the `CONFIG` object in `gcm.config.ts` and can be overridden with `GCM_` prefixed environment variables.
 - **Error Handling:** Functions are expected to handle errors gracefully, often wrapping logic in `try...catch` blocks to prevent the application from crashing unexpectedly (e.g., `scope-detector` and `gemini-client`).
 - **Modularity:** New functionality should be placed in its own module to maintain separation of concerns.
+
+## Memories (Lazy Load)
+
+- For logic/correctness gotchas, read `memories/logic-gotchas.md`.
+- For build/typecheck gotchas, read `memories/build-gotchas.md`.
+- For dependency gotchas, read `memories/dependency-gotchas.md`.

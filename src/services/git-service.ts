@@ -42,7 +42,7 @@ export interface RepositoryState {
 function buildFileListArgs(commitHash: string | null): string[] {
   return commitHash
     ? ['show', '-w', '--name-only', '--pretty=format:', commitHash]
-    : ['diff', '--staged', '-w', '--name-only'];
+    : ['diff', '--staged', '--name-only'];
 }
 
 function buildDiffArgs(commitHash: string | null): string[] {
