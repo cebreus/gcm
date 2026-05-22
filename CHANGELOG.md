@@ -1,5 +1,14 @@
 # gcm
 
+## 0.7.1
+
+> GCM no longer wraps a long subject at 60 characters or a long body line at 80 characters. This avoids unwanted breaks in Markdown lists.
+
+### Patch Changes
+
+- **Less message rewriting:** GCM no longer adds manual line breaks to long lines. It still trims the subject and body lines, removes empty lines inside the body, and adds one blank line between subject and body. The AI prompt asks for a subject of at most 60 characters and bullets of at most 80 characters.
+- **Whitespace-only changes:** Staged file discovery now keeps files changed only by whitespace. If the staged diff still contains only whitespace, GCM stops before it calls Gemini and reports how many files it found.
+
 ## 0.7.0
 
 > GCM can now find staged files that may belong in separate commits. It can show a split plan and uses recent related commit subjects as writing examples. It also stops Git writes when the repository is not safe.
