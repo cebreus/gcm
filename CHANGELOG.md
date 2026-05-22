@@ -1,5 +1,13 @@
 # gcm
 
+## 0.7.1
+
+### Patch Changes
+
+- f8bf965: Removed manual line wrapping from `formatCommitMessage` to prevent broken markdown and bullet points.
+  Restored length constraints in AI prompt but with strict instructions against manual line breaking.
+  Ensured there is an empty line between the subject and body in `formatCommitMessage`.
+
 ## 0.7.0
 
 ### Minor Changes
