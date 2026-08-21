@@ -19,7 +19,7 @@ This project was created to streamline the commit process, enforce a consistent 
 - **AI-Powered Generation:** Uses Google's Gemini models to generate high-quality commit artifacts.
 - **Full Artifact Suite:** Creates not just a commit message, but also a conventional branch name, PR title, and PR description.
 - **Conventional Commits:** Enforces the Conventional Commits specification for a clean and readable git history.
-- **Automatic Formatting:** Automatically wraps commit messages to standard limits (60 chars for subject, 80 chars for body) while preserving Markdown structure.
+- **Conventional Formatting:** Enforces a blank line between subject and body and keeps bullets on single lines. Hard-wrapping is deliberately not applied: it used to break Markdown lists.
 - **Context-Aware Analysis:** Analyzes staged `git diff` output or a specific commit hash.
 - **Handles Large Diffs:** Intelligently summarizes large changes to fit within the model's context window.
 
@@ -112,34 +112,57 @@ This refactors the logging mechanism for the Gemini API client.
 
 `gcm` offers several command-line flags to customize its behavior.
 
-| Flag              | Alias | Description                                                         |
-| ----------------- | ----- | ------------------------------------------------------------------- |
-| `--help`          | `-h`  | Show the help message.                                              |
-| `--commit <hash>` | `-c`  | Analyze a specific commit instead of staged changes.                |
-| `--verbose`       | `-v`  | Show detailed logs (debug level) in the console.                    |
-| `--debug`         | `-d`  | Save raw API request/response logs to `.debug.log`.                 |
-| `--model <name>`  |       | Specify an alternative Gemini model to use.                         |
-| `--list-models`   |       | List available Gemini text-generation models from the API and exit. |
+| Flag                  | Alias | Description                                                         |
+| --------------------- | ----- | ------------------------------------------------------------------- |
+| `--help`              | `-h`  | Show the help message.                                              |
+| `--version`           |       | Show the package version and exit.                                  |
+| `--commit <hash>`     | `-c`  | Target a specific commit instead of staged changes.                 |
+| `--verbose`           | `-v`  | Show detailed logs (debug level) in the console.                    |
+| `--debug`             | `-d`  | Save raw API request/response logs to `.debug.log`.                 |
+| `--exclude <pattern>` | `-e`  | Exclude matching files. Comma-separated or repeated.                |
+| `--mode <mode>`       | `-m`  | Output mode: `full` or `commit-only`.                               |
+| `--model <name>`      |       | Specify an alternative Gemini model to use.                         |
+| `--list-models`       |       | List available Gemini text-generation models from the API and exit. |
 
 `--list-models` queries the live Gemini API, so the output reflects the models currently available to your API key instead of a hard-coded list.
 
 ### Interactive Menu
 
-After generating a commit message, you'll be presented with an interactive menu with the following options:
+After generating a commit message, you'll be presented with an interactive menu. The first entry depends on what you targeted:
 
-- **Commit**: Directly commit the generated message to your repository
+- **Commit**: Commit the staged changes with the generated message.
+- **Amend HEAD**: Shown instead when `--commit` targets the current HEAD and that commit has not been published. Replaces its message.
+- **Reword via amend! commit**: Shown for any other `--commit` target. Adds an `amend!` commit carrying the new message.
 - **Copy to clipboard**: Copy the commit message to your system clipboard for later use
 - **Edit message**: Manually edit the commit message before committing
 - **Switch Model & Regenerate**: Choose a different AI model and regenerate the message. The menu prefers the live Gemini API model list and falls back to a built-in shortlist if the API list is unavailable.
 - **Cancel**: Exit without committing
 
-### Analyze a Past Commit
+### Commit Safety
 
-To generate a message for a commit that has already been made:
+- Amend is offered only for a HEAD that no remote branch contains, so published history is never rewritten behind your back. When that cannot be determined, the additive path is taken instead.
+- That answer comes from the remote-tracking refs in your clone, and no fetch is made. A commit that reached the remote another way, or whose remote-tracking ref was pruned or deleted, reads as unpublished and can be amended. Run `git fetch` first when the branch may have moved elsewhere.
+- Every other target gets an `amend!` commit. That is an ordinary commit: nothing is rewritten until you fold it in yourself.
+
+  ```bash
+  git rebase --autosquash <target>~1
+  ```
+
+- Nothing is offered when the index has staged changes. Both amend and `amend!` would carry them into the target commit, which the generated message does not describe.
+- Nothing is offered for a commit that HEAD cannot reach, or while HEAD is detached. The `amend!` commit is created where HEAD points, so it would never reach a target on another branch, and a commit made on a detached HEAD is orphaned by the next checkout.
+- The reword result prints the exact rebase base to use. When an older commit shares the target's subject, that base is mandatory: `--autosquash` folds into the first subject match in its range, so a wider base hands the new message to the wrong commit.
+- The decision is taken again immediately before the action, so a repository that moved during regeneration stops the run instead of writing into the wrong commit.
+- All actions are disabled when the index has unresolved conflicts, or while a merge, rebase, cherry-pick, revert or bisect is in progress.
+
+### Target a Past Commit
+
+To regenerate the message of a commit that has already been made:
 
 ```bash
 bun run ./gcm.ts -c a1b2c3d
 ```
+
+When the hash is the current HEAD, the menu offers a direct amend. Otherwise it offers an `amend!` commit that a later `git rebase --autosquash` folds in.
 
 ### Debugging
 
@@ -153,14 +176,26 @@ bun run ./gcm.ts -v -d
 
 The tool can be configured using environment variables. These are defined in `gcm.config.ts`.
 
-| Variable                      | Description                                        | Default            |
-| ----------------------------- | -------------------------------------------------- | ------------------ |
-| `GCM_MODEL` or `GEMINI_MODEL` | The Gemini model to use for generation.            | `gemini-2.5-flash` |
-| `GCM_TEMPERATURE`             | The creativity of the model (0.0 to 1.0).          | `0.5`              |
-| `GCM_MAX_HUNKS`               | The maximum number of git diff "hunks" to analyze. | `16`               |
-| `GCM_LOG_LEVEL`               | The default logging level for the console.         | `info`             |
-| `GCM_DEBUG_API`               | Set to `true` to enable API logging to a file.     | `false`            |
-| `GCM_DEBUG_FILE`              | The file path for debug logs.                      | `.debug.log`       |
+| Variable                                | Description                                                                 | Default            |
+| --------------------------------------- | --------------------------------------------------------------------------- | ------------------ |
+| `GCM_MODEL` or `GEMINI_MODEL`           | The Gemini model used to generate messages; change it to use another model. | `gemini-3.7-flash` |
+| `GCM_TEMPERATURE` or `GEMINI_TEMP`      | The model creativity from 0.0 to 1.0; lower it for more consistent messages. | `1`                |
+| `GCM_MAX_BUFFER`                        | Maximum memory for git output; raise it only for very large changes.        | `50 MiB`           |
+| `GCM_PER_FILE_BUFFER`                   | Maximum diff size read from one file; raise it when large files are cut off. | `1 MiB`            |
+| `GCM_MAX_HUNKS`                         | Maximum number of git diff hunks to analyse; raise it for broader coverage. | `16`               |
+| `GCM_ENABLE_THINKING`                   | Set to `true` to enable Gemini thinking; use it only with a supporting model. | `false`            |
+| `GCM_TOKEN_BYTES_RATIO`                 | Bytes assumed per input token; adjust it only if context sizing is inaccurate. | `3.5`              |
+| `GCM_MAX_OUTPUT_TOKENS`                 | Maximum tokens for Gemini's response; raise it if responses are cut off.    | `2048`             |
+| `GCM_ENABLE_HUNK_WEIGHTS`               | Set to `true` to favour important files when choosing diff hunks.           | `false`            |
+| `GCM_LOG_LEVEL`                         | Default console logging level; set `debug` when investigating a problem.    | `info`             |
+| `GCM_TELEMETRY_FILE`                    | Path to append telemetry lines; leave empty to keep telemetry off.          | empty              |
+| `GCM_DEBUG_API`                         | Set to `true` to save API logs to a file while debugging.                   | `false`            |
+| `GCM_DEBUG_FILE`                        | File path for API debug logs; change it to store logs elsewhere.            | `.debug.log`       |
+| `GCM_DEBUG_MAX_BODY_LOG_BYTES`          | Maximum API body bytes written to debug logs; lower it for smaller logs.    | `32768`            |
+| `GCM_GEMINI_MAX_RETRIES`                | Maximum Gemini retry attempts after failures; raise it for transient errors. | `3`                |
+| `GCM_GEMINI_RETRY_BASE_MS`              | Initial wait before a Gemini retry; raise it to slow retry attempts.        | `1000`             |
+| `GCM_GEMINI_RETRY_MAX_MS`               | Longest wait between Gemini retries; raise it for a higher backoff ceiling. | `60000`            |
+| `GCM_ADD_RESPONSE_MARKERS`              | Set to `false` to omit response markers; keep enabled for reliable extraction. | `true`             |
 
 ## Development
 
@@ -202,8 +237,6 @@ Follow these steps to set up a local development environment.
 ## Roadmap
 
 - [ ] Add more CLI flags for runtime configuration (e.g., `--temperature`, `--max-hunks`).
-- [ ] Support for automatically committing the generated message with an `--apply` flag.
-- [ ] Interactive mode to review and edit the generated message before applying.
 - [ ] Improved handling of binary files in diffs.
 
 ## Contributing

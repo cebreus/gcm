@@ -46,6 +46,12 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
         };
       },
       commitChanges: async (message: string, logger: any) => {},
+      amendCommit: async (message: string, logger: any) => {},
+      rewordCommit: async (target: any, message: string, logger: any) => {},
+      inspectCommitTarget: async (hash: string, logger: any) => {
+        throw new Error('not used in this test');
+      },
+      getIndexTree: async (logger: any) => '',
     };
   }
 
@@ -72,7 +78,7 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
   const origApiKey = process.env.GOOGLE_GEMINI_API_KEY;
   process.env.GOOGLE_GEMINI_API_KEY = 'fake-key';
   try {
-    await runner.executeCommitMessageGeneration(['--model', 'gemini-2.5-flash'], {
+    await runner.executeCommitMessageGeneration(['--model', 'gemini-3.7-flash'], {
       gitService: createGitServiceFake(),
       geminiService: createGeminiServiceFake(),
       logger: createLogger({ LOG_LEVEL: 'info' }),

@@ -86,6 +86,12 @@ test('utils: pushHunkToTop - should handle empty array', () => {
   expect(array.length).toBe(1);
 });
 
+test('utils: pushHunkToTop - ignores zero capacity', () => {
+  const array: Hunk[] = [];
+  pushHunkToTop(array, createHunk('f1', 10), 0);
+  expect(array).toEqual([]);
+});
+
 // --- Tests for unescapeNewlinesInText ---
 test('utils: unescapeNewlinesInText - should unescape newlines in text fields', () => {
   const obj = { a: 1, data: { text: 'hello\nworld' } };
@@ -141,36 +147,23 @@ test('utils: formatCommitMessage - should preserve short messages', () => {
   expect(formatCommitMessage(msg)).toBe(msg);
 });
 
-test('utils: formatCommitMessage - should wrap first line to 60 chars', () => {
+test('utils: formatCommitMessage - should preserve long single-line messages without wrapping', () => {
   const msg =
     'feat: this is a very long commit message that exceeds the maximum allowed first line length';
   const result = formatCommitMessage(msg);
-  const firstLine = result.split('\n')[0];
-  expect(firstLine.length).toBeLessThanOrEqual(60);
-  expect(result).toContain('feat:');
+  expect(result).toBe(msg);
 });
 
-test('utils: formatCommitMessage - should wrap body lines to 80 chars', () => {
-  const msg = `feat: add feature\n\nThis is a very long body line that definitely exceeds the maximum allowed length of eighty characters for body lines`;
+test('utils: formatCommitMessage - should ensure empty line between subject and body', () => {
+  const msg = `feat: add feature\nThis is the body line`;
   const result = formatCommitMessage(msg);
-  const lines = result.split('\n');
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i].trim().length > 0) {
-      expect(lines[i].length).toBeLessThanOrEqual(80);
-    }
-  }
+  expect(result).toBe('feat: add feature\n\nThis is the body line');
 });
 
-test('utils: formatCommitMessage - should preserve bullet points', () => {
-  const msg = `feat: add feature\n\n- This is a long bullet point item that might exceed the eighty character limit and should be wrapped`;
+test('utils: formatCommitMessage - should preserve bullet points without wrapping', () => {
+  const msg = `feat: add feature\n\n- This is a long bullet point item that might exceed the eighty character limit and should be preserved`;
   const result = formatCommitMessage(msg);
-  expect(result).toContain('- ');
-  const lines = result.split('\n');
-  for (const line of lines) {
-    if (line.startsWith('-') || line.includes('- ')) {
-      expect(line.length).toBeLessThanOrEqual(80);
-    }
-  }
+  expect(result).toBe(msg);
 });
 
 test('utils: formatCommitMessage - should preserve backticks', () => {
@@ -180,13 +173,10 @@ test('utils: formatCommitMessage - should preserve backticks', () => {
   expect(result).toContain('`backtick-enclosed`');
 });
 
-test('utils: formatCommitMessage - should preserve empty lines', () => {
-  const msg = `feat: add feature\n\nBody paragraph one\n\nBody paragraph two`;
+test('utils: formatCommitMessage - should ensure double newline separating subject and body', () => {
+  const msg = `feat: add feature\n\nBody paragraph one\nBody paragraph two`;
   const result = formatCommitMessage(msg);
-  const lines = result.split('\n');
-  expect(lines.length).toBe(5); // subject, blank, para1, blank, para2
-  expect(lines[1]).toBe('');
-  expect(lines[3]).toBe('');
+  expect(result).toBe('feat: add feature\n\nBody paragraph one\nBody paragraph two');
 });
 
 test('utils: formatCommitMessage - should handle multiple short bullet points', () => {
@@ -197,15 +187,10 @@ test('utils: formatCommitMessage - should handle multiple short bullet points', 
   expect(result).toContain('- Item 3');
 });
 
-test('utils: formatCommitMessage - should wrap long bullet continuation', () => {
-  const msg = `fix: resolve issues\n\n- This is an extremely long bullet point that definitely exceeds eighty characters and must be wrapped to multiple lines`;
+test('utils: formatCommitMessage - should preserve long bullet continuation without wrapping', () => {
+  const msg = `fix: resolve issues\n\n- This is an extremely long bullet point that definitely exceeds eighty characters and must be preserved without manual wrapping`;
   const result = formatCommitMessage(msg);
-  const lines = result.split('\n');
-  for (const line of lines) {
-    if (line.trim().length > 0) {
-      expect(line.length).toBeLessThanOrEqual(80);
-    }
-  }
+  expect(result).toBe(msg);
 });
 
 test('utils: formatCommitMessage - should handle empty string', () => {

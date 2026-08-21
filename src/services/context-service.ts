@@ -4,6 +4,30 @@ import { summarizeLargeDiff } from '../summarizer.js';
 
 export interface ContextService {
   constructLLMPromptContext(params: ContextParams): Promise<ContextResult>;
+  reduceForRetry(params: {
+    promptParts: PromptContextParts;
+    stagedFiles?: string[];
+    summaryAttempted: boolean;
+  }): Promise<RetryReductionResult>;
+}
+
+export interface PromptContextParts {
+  prefix: string;
+  diffHeading: string;
+  diffBody: string;
+  suffix: string;
+}
+
+export interface RetryReductionResult {
+  promptContext: string;
+  promptParts: PromptContextParts;
+  mode: 'summary' | 'truncation' | 'unreducible';
+  summaryAttempted: boolean;
+  summaryUsed: boolean;
+}
+
+interface ContextServiceDeps {
+  summarizeLargeDiff?: typeof summarizeLargeDiff;
 }
 
 interface ContextParams {
@@ -19,10 +43,27 @@ interface ContextParams {
   userHint?: string;
 }
 
-interface ContextResult {
+export interface ContextResult {
   promptContext: string;
+  promptParts: PromptContextParts;
   processedDiffContent: string;
   tokens: number;
+  summaryAttempted?: boolean;
+}
+
+const PARTIAL_SUMMARY_NOTICE =
+  'This summary is partial; use conservative wording when intent is ambiguous.';
+const PER_FILE_BUFFER_NOTICE =
+  'Note: The diff was truncated while being read due to per-file buffer limits.';
+const RETRY_TRUNCATION_HEADING = 'Diff (input truncated to fit model context):\n';
+
+export function renderPromptContext({
+  prefix,
+  diffHeading,
+  diffBody,
+  suffix,
+}: PromptContextParts): string {
+  return prefix + diffHeading + diffBody + suffix;
 }
 
 function buildPromptHeader(promptSuffix: string, customHeader?: string): string {
@@ -58,15 +99,27 @@ function buildHints(
 }
 
 function buildContextResult(
-  promptContext: string,
+  promptParts: PromptContextParts,
   processedDiffContent: string,
   tokenBytesRatio: number,
+  summaryAttempted = false,
 ): ContextResult {
+  const promptContext = renderPromptContext(promptParts);
   return {
     promptContext,
+    promptParts,
     processedDiffContent,
     tokens: estimateTokenCount(promptContext, tokenBytesRatio),
+    summaryAttempted,
   };
+}
+
+function truncateToTokenBudget(
+  content: string,
+  maxTokens: number,
+  tokenBytesRatio: number,
+): string {
+  return content.slice(0, Math.max(0, Math.floor(maxTokens * tokenBytesRatio)));
 }
 
 function buildHardTruncatedContext(params: {
@@ -74,32 +127,46 @@ function buildHardTruncatedContext(params: {
   scopeHint: string;
   hintSection: string;
   summaryText: string;
-  diffContent: string;
   maxAvailableTokens: number;
   tokenBytesRatio: number;
 }): ContextResult {
-  const {
-    header,
-    scopeHint,
-    hintSection,
-    summaryText,
-    diffContent,
-    maxAvailableTokens,
-    tokenBytesRatio,
-  } = params;
-  const headerTokens = estimateTokenCount(header + scopeHint, tokenBytesRatio);
-  const remainingTokens = maxAvailableTokens - headerTokens;
-  if (remainingTokens < 0) {
-    const fallbackInput = diffContent.slice(0, 100);
-    const fallbackContent = header + fallbackInput + '... (Truncated)';
-    return buildContextResult(fallbackContent, fallbackInput, tokenBytesRatio);
+  const { header, scopeHint, hintSection, summaryText, maxAvailableTokens, tokenBytesRatio } =
+    params;
+  const fixedContent = header + scopeHint + hintSection;
+  const fixedTokens = estimateTokenCount(fixedContent, tokenBytesRatio);
+  if (fixedTokens >= maxAvailableTokens) {
+    const promptParts = {
+      prefix: '',
+      diffHeading: '',
+      diffBody: truncateToTokenBudget(fixedContent, maxAvailableTokens, tokenBytesRatio),
+      suffix: '',
+    };
+    return buildContextResult(
+      promptParts,
+      '',
+      tokenBytesRatio,
+      true,
+    );
   }
-  const maxChars = Math.floor(remainingTokens * tokenBytesRatio);
-  const truncatedInput = summaryText.slice(0, maxChars) + '\n...(Truncated to fit context)';
+  const remainingTokens = maxAvailableTokens - fixedTokens;
+  const truncatedInput = truncateToTokenBudget(
+    'Diff summary:\n' +
+      summaryText +
+      '\n\n' +
+      PARTIAL_SUMMARY_NOTICE,
+    remainingTokens,
+    tokenBytesRatio,
+  );
   return buildContextResult(
-    header + truncatedInput + scopeHint + hintSection,
+    {
+      prefix: header,
+      diffHeading: '',
+      diffBody: truncatedInput,
+      suffix: scopeHint + hintSection,
+    },
     truncatedInput,
     tokenBytesRatio,
+    true,
   );
 }
 
@@ -114,7 +181,7 @@ async function constructLLMPromptContext({
   logger,
   customHeader,
   userHint,
-}: ContextParams): Promise<ContextResult> {
+}: ContextParams, summarize = summarizeLargeDiff): Promise<ContextResult> {
   const header = buildPromptHeader(promptSuffix, customHeader);
   const changedFilesSection = buildListSection('Changed files', stagedFiles);
   const { contextHeader, hintSection } = buildHints(
@@ -122,27 +189,31 @@ async function constructLLMPromptContext({
     recentCommitSubjects,
     userHint,
   );
-  const diffSection = `Diff:\n${diffContent}`;
-  const initialContent = header + changedFilesSection + contextHeader + diffSection + hintSection;
+  const initialParts = {
+    prefix: header + changedFilesSection + contextHeader,
+    diffHeading: 'Diff:\n',
+    diffBody: diffContent,
+    suffix: hintSection,
+  };
+  const initialContent = renderPromptContext(initialParts);
   const estimatedTokens = estimateTokenCount(initialContent, tokenBytesRatio);
   if (estimatedTokens <= maxAvailableTokens) {
-    return buildContextResult(initialContent, diffContent, tokenBytesRatio);
+    return buildContextResult(initialParts, diffContent, tokenBytesRatio);
   }
   logger?.log(
     'info',
     `Input token count (${estimatedTokens}) exceeds limit (${maxAvailableTokens}). Summarizing diff...`,
   );
-  const summaryText = (await summarizeLargeDiff(stagedFiles)).text;
-  const summaryContent =
-    header +
-    changedFilesSection +
-    contextHeader +
-    'Diff summary:\n' +
-    summaryText +
-    '\n\nThis summary is partial; use conservative wording when intent is ambiguous.' +
-    hintSection;
+  const summaryText = (await summarize(stagedFiles)).text;
+  const summaryParts = {
+    prefix: header + changedFilesSection + contextHeader,
+    diffHeading: 'Diff summary:\n',
+    diffBody: summaryText + '\n\n' + PARTIAL_SUMMARY_NOTICE,
+    suffix: hintSection,
+  };
+  const summaryContent = renderPromptContext(summaryParts);
   if (estimateTokenCount(summaryContent, tokenBytesRatio) <= maxAvailableTokens) {
-    return buildContextResult(summaryContent, summaryText, tokenBytesRatio);
+    return buildContextResult(summaryParts, summaryText, tokenBytesRatio, true);
   }
   logger?.log('warn', 'Summary was still too large, performing hard truncation.');
   return buildHardTruncatedContext({
@@ -150,12 +221,97 @@ async function constructLLMPromptContext({
     scopeHint: changedFilesSection + contextHeader,
     hintSection,
     summaryText,
-    diffContent,
     maxAvailableTokens,
     tokenBytesRatio,
   });
 }
 
-export function createContextService(): ContextService {
-  return { constructLLMPromptContext };
+function buildRetrySummaryBody(summary: Awaited<ReturnType<typeof summarizeLargeDiff>>): string {
+  return (
+    summary.text +
+    '\n\n' +
+    PARTIAL_SUMMARY_NOTICE +
+    (summary.totalTruncated ? `\n\n${PER_FILE_BUFFER_NOTICE}` : '')
+  );
+}
+
+function hardTruncateForRetry(promptParts: PromptContextParts): PromptContextParts | null {
+  const currentPrompt = renderPromptContext(promptParts);
+  const proportionalMaximumLength = Math.ceil(currentPrompt.length * 0.7);
+  const maximumLength =
+    proportionalMaximumLength < currentPrompt.length
+      ? proportionalMaximumLength
+      : Math.max(0, currentPrompt.length - 1);
+  const fixedContent = promptParts.prefix + RETRY_TRUNCATION_HEADING + promptParts.suffix;
+  const truncatedParts = {
+    prefix: promptParts.prefix,
+    diffHeading: RETRY_TRUNCATION_HEADING,
+    diffBody: promptParts.diffBody.slice(0, Math.max(0, maximumLength - fixedContent.length)),
+    suffix: promptParts.suffix,
+  };
+  if (renderPromptContext(truncatedParts).length < currentPrompt.length) {
+    return truncatedParts;
+  }
+  const emptiedParts = {
+    prefix: promptParts.prefix,
+    diffHeading: promptParts.diffHeading,
+    diffBody: '',
+    suffix: promptParts.suffix,
+  };
+  return renderPromptContext(emptiedParts).length < currentPrompt.length ? emptiedParts : null;
+}
+
+function truncateRetryPrompt(
+  promptParts: PromptContextParts,
+  summaryAttempted: boolean,
+): RetryReductionResult {
+  const truncatedParts = hardTruncateForRetry(promptParts);
+  if (!truncatedParts) return Object.create(null, { mode: { value: 'unreducible', enumerable: true } });
+  return {
+    promptContext: renderPromptContext(truncatedParts),
+    promptParts: truncatedParts,
+    mode: 'truncation',
+    summaryAttempted,
+    summaryUsed: false,
+  };
+}
+
+async function reduceForRetry({
+  promptParts,
+  stagedFiles,
+  summaryAttempted,
+}: {
+  promptParts: PromptContextParts;
+  stagedFiles?: string[];
+  summaryAttempted: boolean;
+}, summarize = summarizeLargeDiff): Promise<RetryReductionResult> {
+  const currentPrompt = renderPromptContext(promptParts);
+  if (!summaryAttempted && Array.isArray(stagedFiles) && stagedFiles.length > 0) {
+    const summary = await summarize(stagedFiles);
+    const summaryParts = {
+      prefix: promptParts.prefix,
+      diffHeading: 'Diff summary:\n',
+      diffBody: buildRetrySummaryBody(summary),
+      suffix: promptParts.suffix,
+    };
+    const summaryPrompt = renderPromptContext(summaryParts);
+    if (summaryPrompt.length < currentPrompt.length) {
+      return {
+        promptContext: summaryPrompt,
+        promptParts: summaryParts,
+        mode: 'summary',
+        summaryAttempted: true,
+        summaryUsed: true,
+      };
+    }
+    return truncateRetryPrompt(promptParts, true);
+  }
+  return truncateRetryPrompt(promptParts, summaryAttempted);
+}
+
+export function createContextService({ summarizeLargeDiff: summarize = summarizeLargeDiff }: ContextServiceDeps = {}): ContextService {
+  return {
+    constructLLMPromptContext: params => constructLLMPromptContext(params, summarize),
+    reduceForRetry: params => reduceForRetry(params, summarize),
+  };
 }

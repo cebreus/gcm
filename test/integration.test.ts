@@ -40,7 +40,6 @@ const mockLoggerInstance = {
 };
 const mockCreateLogger = mock(() => mockLoggerInstance);
 
-const mockGetScopeSuggestions = mock(async () => ['feat', 'fix']);
 const mockGetCommitContextHints = mock(async () => ({
   scopeSuggestions: ['feat'],
   recentCommitSubjects: ['feat(test): align existing style'],
@@ -48,7 +47,6 @@ const mockGetCommitContextHints = mock(async () => ({
 
 // Mock only the scope-detector to avoid polluting other tests
 mock.module('../src/scope-detector', () => ({
-  getScopeSuggestions: mockGetScopeSuggestions,
   getCommitContextHints: mockGetCommitContextHints,
 }));
 
@@ -66,7 +64,6 @@ afterEach(() => {
   mockCallGemini.mockClear();
   mockCreateGeminiClient.mockClear();
   mockLoggerInstance.log.mockClear();
-  mockGetScopeSuggestions.mockClear();
   mockGetCommitContextHints.mockClear();
 
   mockIntro.mockClear();

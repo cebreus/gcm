@@ -1,4 +1,4 @@
-import { test, expect, mock, afterEach } from 'bun:test';
+import { test, expect, mock } from 'bun:test';
 
 // DO NOT mock modules globally - this causes issues in other tests.
 // Create mock functions that will be used through dependency injection if possible,
@@ -7,22 +7,16 @@ import { test, expect, mock, afterEach } from 'bun:test';
 // For scope-detector, we can just test it with real git-utils since the tests
 // are focused on the logic, not the git integration.
 
-import { getScopeSuggestions } from '../src/scope-detector';
-
-afterEach(() => {
-  // No mocks to clear since we're using real implementations
-});
+import { getCommitContextHints } from '../src/scope-detector';
 
 test('scope-detector: should return empty array for empty file list', async () => {
-  const result = await getScopeSuggestions([]);
+  const { scopeSuggestions: result } = await getCommitContextHints([]);
   expect(result).toEqual([]);
 });
 
-// Since we're using the real implementations, we just test that
-// getScopeSuggestions returns an array and doesn't crash
 test('scope-detector: should return scopes for given files', async () => {
   const files = ['src/some/file1.ts', 'src/another/file2.ts'];
-  const result = await getScopeSuggestions(files);
+  const { scopeSuggestions: result } = await getCommitContextHints(files);
 
   // Result should be an array (may be empty or populated depending on git history)
   expect(Array.isArray(result)).toBe(true);
@@ -33,7 +27,7 @@ test('scope-detector: should return scopes for given files', async () => {
 // Test that filenames are extracted correctly as fallback
 test('scope-detector: should extract directory names as fallback scopes', async () => {
   const files = ['apps/app-one/src/index.ts', 'packages/lib-two/src/main.ts'];
-  const result = await getScopeSuggestions(files);
+  const { scopeSuggestions: result } = await getCommitContextHints(files);
 
   // Result should include detected scopes or fallback scopes
   expect(Array.isArray(result)).toBe(true);
@@ -42,7 +36,7 @@ test('scope-detector: should extract directory names as fallback scopes', async 
 // Test with simple files in src/ directory
 test('scope-detector: should work with src directory structure', async () => {
   const files = ['src/feature-a/file.ts', 'src/feature-b/file.ts'];
-  const result = await getScopeSuggestions(files);
+  const { scopeSuggestions: result } = await getCommitContextHints(files);
 
   // Result should be an array
   expect(Array.isArray(result)).toBe(true);
@@ -52,6 +46,6 @@ test('scope-detector: should work with src directory structure', async () => {
 test('scope-detector: should handle errors gracefully', async () => {
   const files = ['some/file.ts'];
   // Even if there are errors, should return an array
-  const result = await getScopeSuggestions(files);
+  const { scopeSuggestions: result } = await getCommitContextHints(files);
   expect(Array.isArray(result)).toBe(true);
 });

@@ -1,4 +1,4 @@
-import { parseArgs } from './cli.js';
+import { ArgumentValidationError, parseArgs } from './cli.js';
 import type { ParsedOptions } from './cli.js';
 import { CONFIG } from '../gcm.config.js';
 import { createLogger } from './logger.js';
@@ -11,12 +11,13 @@ import type { CommitContextHints } from './scope-detector.js';
 import { listGeminiModels } from './gemini-client/listModels.js';
 import { createGitService } from './services/git-service.js';
 import type { GitService } from './services/git-service.js';
-import type { RepositoryState } from './services/git-service.js';
+import type { CommitTarget, RepositoryState } from './services/git-service.js';
 import { createContextService } from './services/context-service.js';
 import type { ContextService } from './services/context-service.js';
 import { createGeminiService } from './services/gemini-service.js';
 import type { GeminiService } from './services/gemini-service.js';
 import { generateFallbackCommitDetails } from './runner-utils.js';
+import { buildAtomicSplitProposal, detectAtomicGroup } from './atomic-commit-planner.js';
 import { loadSession, saveSession } from './session.js';
 import { intro, outro, spinner, note, select, text, isCancel, cancel } from '@clack/prompts';
 import { KNOWN_MODELS, getModelSpec } from './model-registry.js';
@@ -39,7 +40,6 @@ interface PackageInfo {
 }
 
 interface RunnerServices {
-  logger: Logger;
   gitService: GitService;
   contextService: ContextService;
   geminiService: GeminiService;
@@ -61,7 +61,10 @@ interface ActionMenuResult {
 
 interface CommitCapability {
   allowed: boolean;
+  mode: 'commit' | 'amend' | 'reword';
   reason?: string;
+  target?: CommitTarget;
+  initialIndexTree?: string;
 }
 
 type ActionChoice =
@@ -87,7 +90,7 @@ function getPackageInfo(): PackageInfo {
   }
 }
 
-export function showHelp() {
+function showHelp() {
   const packageInfo = getPackageInfo();
   const helpText = `
     ${C.bright}Gemini Commit Message Helper${C.reset}
@@ -106,19 +109,26 @@ export function showHelp() {
       ${C.cyan}-d, --debug${C.reset}               Save complete logs to a '.debug.log' file for debugging.
       ${C.cyan}-e, --exclude <pattern>${C.reset}   Exclude files matching pattern (e.g., *manifest*).
                                 Can be comma-separated or used multiple times.
+      ${C.cyan}-m, --mode <mode>${C.reset}         Output mode: 'full' or 'commit-only'.
       ${C.cyan}--model <name>${C.reset}            Specify an alternative Gemini model to use.
       ${C.cyan}--list-models${C.reset}             List available Gemini models and exit.
 
     ${C.bright}Commit Safety:${C.reset}
-      - Commit action is disabled in ${C.cyan}--commit${C.reset} analysis mode (read-only).
-      - Commit action is disabled when git has unresolved conflicts.
-      - Commit action is disabled while merge/rebase/cherry-pick/revert/bisect is in progress.
+      - Without ${C.cyan}--commit${C.reset} the action commits the staged changes.
+      - With ${C.cyan}--commit${C.reset} on an unpublished HEAD the action amends that commit.
+      - With ${C.cyan}--commit${C.reset} on any other commit the action adds an 'amend!' commit.
+        History stays intact until you run 'git rebase --autosquash' yourself.
+      - Amend is never offered for a commit already reachable from a remote branch.
+      - Nothing is offered for a commit unreachable from HEAD, on a detached HEAD,
+        or while the index has staged changes.
+      - All actions are disabled when git has unresolved conflicts.
+      - All actions are disabled while merge/rebase/cherry-pick/revert/bisect is in progress.
 
     `;
   process.stdout.write(helpText.trim() + '\n');
 }
 
-export function displayResultStructured(logger: Logger, res: Labels): void {
+function displayResultStructured(logger: Logger, res: Labels): void {
   const branchText = `\n${C.cyan}${C.bright}BRANCH:${C.reset}\n${res.BRANCH || ''}\n`;
   const commitText = `\n${C.cyan}${C.bright}COMMIT_MESSAGE:${C.reset}\n${res.COMMIT_MESSAGE || ''}\n`;
   const titleText = `\n${C.magenta}${C.bright}PR_TITLE:${C.reset}\n${res.PR_TITLE || ''}\n`;
@@ -140,10 +150,6 @@ function reportStats(
       usage.outputTokens || 0
     } tokens (${outputLength.toLocaleString()} chars)${thinking}${C.reset}\n`,
   );
-}
-
-function detectRuntime(): string {
-  return 'bun';
 }
 
 const COMMIT_MESSAGE_RULES = `Commit message rules:
@@ -423,9 +429,18 @@ async function runActionMenu(params: {
   }
 }
 
+function commitActionLabel(commitCapability: CommitCapability): string {
+  const subject = commitCapability.target?.subject ?? '';
+  if (commitCapability.mode === 'amend') return `Amend HEAD (${subject})`;
+  if (commitCapability.mode === 'reword') return `Reword via amend! commit (${subject})`;
+  return 'Commit';
+}
+
 async function selectAction(commitCapability: CommitCapability): Promise<ActionChoice | null> {
   const options: Array<{ value: ActionChoice; label: string }> = [];
-  if (commitCapability.allowed) options.push({ value: 'commit', label: 'Commit' });
+  if (commitCapability.allowed) {
+    options.push({ value: 'commit', label: commitActionLabel(commitCapability) });
+  }
   options.push(
     { value: 'copy', label: 'Copy to clipboard' },
     { value: 'edit', label: 'Edit message' },
@@ -514,9 +529,9 @@ function createRunnerServices(opts: RunnerOptions, logger: Logger, apiKey: strin
   const contextService = opts.contextService || createContextService();
   const geminiClient = createGeminiClient({ config: CONFIG, logger });
   const geminiService =
-    opts.geminiService || createGeminiService({ client: geminiClient, logger, apiKey });
+    opts.geminiService || createGeminiService({ client: geminiClient, logger, apiKey, contextService });
   const listModelsFn = opts.listModels || listGeminiModels;
-  return { logger, gitService, contextService, geminiService, listModelsFn };
+  return { gitService, contextService, geminiService, listModelsFn };
 }
 
 async function maybeHandleListModels(parsedArgs: ParsedOptions): Promise<number | null> {
@@ -558,7 +573,9 @@ async function buildGenerationState(parsedArgs: ParsedOptions): Promise<{
   const targetCommit = parsedArgs.commit || null;
   const session = await loadSession();
   const resolvedSessionModel =
-    session.modelName === 'gemini-2.5-pro' ? CONFIG.MODEL_NAME : session.modelName;
+    session.modelName === 'gemini-2.5-flash' || session.modelName === 'gemini-2.5-pro'
+      ? CONFIG.MODEL_NAME
+      : session.modelName;
   const initialModelName = parsedArgs.model || resolvedSessionModel || CONFIG.MODEL_NAME;
   return {
     targetCommit,
@@ -589,12 +606,48 @@ async function runGenerationSafely(params: {
     const errStr = String(error);
     if (/Not a git repository/i.test(errStr)) cancel('Error: Not inside a git repository.');
     else if (/unknown revision/i.test(errStr)) cancel(`Error: Invalid commit SHA: ${targetCommit}`);
-    else {
+    else if (isGeminiApiError(error)) {
+      const metadata = error.metadata || {};
+      let msg = `API Error (${metadata.status || 'Unknown'})`;
+      try {
+        const parsed: unknown = JSON.parse(
+          typeof metadata.snippet === 'string' ? metadata.snippet : '{}',
+        );
+        const responseError = isRecord(parsed) ? parsed.error : undefined;
+        const responseMessage = isRecord(responseError) ? responseError.message : undefined;
+        if (responseMessage) {
+          msg += `: ${String(responseMessage)}`;
+        } else {
+          msg += `: ${error.message}`;
+        }
+      } catch {
+        msg += `: ${error.message}`;
+      }
+      logger.log('error', `Gemini commit helper failed: ${error}`, {
+        error: errStr,
+        snippet: metadata.snippet,
+      });
+      cancel(msg);
+    } else {
       logger.log('error', `Gemini commit helper failed: ${error}`, { error: errStr });
       cancel(`An unexpected error occurred: ${errStr}`);
     }
     throw error;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isGeminiApiError(
+  error: unknown,
+): error is Error & { name: 'GeminiApiError'; metadata?: Record<string, unknown> } {
+  return (
+    error instanceof Error &&
+    error.name === 'GeminiApiError' &&
+    (!('metadata' in error) || isRecord(error.metadata))
+  );
 }
 
 async function runGenerationWorkflow(params: {
@@ -617,6 +670,7 @@ async function runGenerationWorkflow(params: {
   });
   if (!readyState) return;
   const { repositoryState, staged } = readyState;
+  const initialIndexTree = await getIndexTreeSafe(services.gitService, repositoryState, logger);
   if (!targetCommit && isWhitespaceOnlyStagedChanges(staged)) {
     cancel(
       `Only whitespace-only staged changes detected in ${staged.stagedFiles.length} file(s). Nothing to send to AI.`,
@@ -624,7 +678,12 @@ async function runGenerationWorkflow(params: {
     return;
   }
 
-  const initialCommitCapability = evaluateCommitCapability(repositoryState, targetCommit);
+  const commitTarget = await inspectCommitTargetSafe(services.gitService, targetCommit, logger);
+  const initialCommitCapability = evaluateCommitCapability(
+    repositoryState,
+    targetCommit,
+    commitTarget,
+  );
   showRepositoryWarnings(repositoryState, targetCommit, initialCommitCapability);
   const preflight = await runPreflightIfNeeded({
     parsedArgs,
@@ -640,18 +699,16 @@ async function runGenerationWorkflow(params: {
     );
     return;
   }
-  const commitCapability = evaluateCommitCapability(repositoryState, targetCommit);
+  const commitCapability = {
+    ...evaluateCommitCapability(repositoryState, targetCommit, commitTarget),
+    initialIndexTree,
+  };
   const meta = buildLogMetadata(staged, targetCommit);
   const commitContextHints = await resolveCommitContextHints(staged.stagedFiles, logger);
-  const shouldContinue = await confirmAtomicityIfNeeded(
-    commitContextHints.scopeSuggestions,
-    staged.stagedFiles,
-    targetCommit,
-  );
+  const shouldContinue = await confirmAtomicityIfNeeded(staged.stagedFiles, targetCommit);
   if (!shouldContinue) return;
   await runGenerationCycle({
     services,
-    parsedArgs,
     logger,
     apiKey,
     state,
@@ -711,23 +768,75 @@ async function resolveReadyRepositoryState(params: {
   return { repositoryState, staged };
 }
 
-function evaluateCommitCapability(
+async function inspectCommitTargetSafe(
+  gitService: GitService,
+  targetCommit: string | null,
+  logger: Logger,
+): Promise<CommitTarget | null> {
+  if (!targetCommit) return null;
+  try {
+    return await gitService.inspectCommitTarget(targetCommit, logger);
+  } catch (error) {
+    logger.log('debug', `Could not inspect commit target: ${error}`);
+    return null;
+  }
+}
+
+// Analysing a past commit is not read-only by nature; it just needs a different
+// verb. Amending rewrites the tip, so it is offered only for an unpublished
+// HEAD. Every other target gets an `amend!` commit, which adds to history
+// instead of rewriting it.
+export function evaluateCommitCapability(
   repositoryState: RepositoryState,
   targetCommit: string | null,
+  commitTarget: CommitTarget | null,
 ): CommitCapability {
-  if (targetCommit) {
-    return {
-      allowed: false,
-      reason: 'Commit is disabled in analyze-commit mode. This mode is read-only.',
-    };
-  }
   if (repositoryState.inProgressOperation) {
     return {
       allowed: false,
+      mode: 'commit',
       reason: `Commit is disabled while a git ${repositoryState.inProgressOperation} is in progress. Finish or abort the operation first.`,
     };
   }
-  return { allowed: true };
+  if (!targetCommit) return { allowed: true, mode: 'commit' };
+  // Both amend and an `amend!` commit take whatever sits in the index. The
+  // message was generated from the target commit's diff, so staged work would
+  // travel into that commit undescribed.
+  if (repositoryState.hasStagedChanges) {
+    return {
+      allowed: false,
+      mode: 'commit',
+      reason:
+        'Staged changes are present. Amend and reword would carry them into the target commit, which the generated message does not describe. Unstage them first.',
+    };
+  }
+  if (!commitTarget) {
+    return {
+      allowed: false,
+      mode: 'commit',
+      reason: 'Commit target could not be resolved. Analysis stays read-only.',
+    };
+  }
+  if (commitTarget.isHeadDetached) {
+    return {
+      allowed: false,
+      mode: 'commit',
+      reason:
+        'HEAD is detached. A commit made here is orphaned as soon as another branch is checked out. Check out a branch first.',
+    };
+  }
+  if (commitTarget.isHead && !commitTarget.isPublished) {
+    return { allowed: true, mode: 'amend', target: commitTarget };
+  }
+  if (!commitTarget.isAncestorOfHead) {
+    return {
+      allowed: false,
+      mode: 'commit',
+      reason:
+        'The target commit is not reachable from HEAD. An amend! commit would land on this branch and never reach it. Check out a branch that contains the commit.',
+    };
+  }
+  return { allowed: true, mode: 'reword', target: commitTarget };
 }
 
 function showRepositoryWarnings(
@@ -736,9 +845,14 @@ function showRepositoryWarnings(
   commitCapability: CommitCapability,
 ): void {
   const warnings: string[] = [];
-  if (targetCommit) {
+  if (targetCommit && commitCapability.mode === 'amend') {
     warnings.push(
-      'Read-only analysis mode is active (`--commit`): commit action will be disabled.',
+      'Target is the unpublished HEAD: the commit action will amend it and rewrite that commit.',
+    );
+  }
+  if (targetCommit && commitCapability.mode === 'reword') {
+    warnings.push(
+      'Target is not an amendable HEAD: the commit action will add an `amend!` commit instead of rewriting history.',
     );
   }
   if (repositoryState.hasUnmergedPaths) {
@@ -822,6 +936,15 @@ async function getRepositoryStateSafe(
   };
 }
 
+async function getIndexTreeSafe(
+  gitService: GitService,
+  repositoryState: RepositoryState,
+  logger: Logger,
+): Promise<string | undefined> {
+  if (repositoryState.inProgressOperation || repositoryState.hasUnmergedPaths) return undefined;
+  return gitService.getIndexTree(logger);
+}
+
 function buildLogMetadata(
   staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>,
   targetCommit: string | null,
@@ -885,18 +1008,16 @@ async function resolveCommitContextHints(
 }
 
 async function confirmAtomicityIfNeeded(
-  scopeSuggestions: string[],
   stagedFiles: string[],
   targetCommit: string | null,
 ): Promise<boolean> {
   if (targetCommit) return true;
   const stagedGroups = Array.from(new Set(stagedFiles.map(detectAtomicGroup)));
   if (stagedGroups.length <= 1) return true;
-  const displayScopes = stagedGroups.length > 0 ? stagedGroups : scopeSuggestions;
   for (;;) {
     const action = await select({
       message: [
-        `Staged files suggest multiple possible scopes: ${displayScopes.join(', ')}.`,
+        `Staged files suggest multiple possible scopes: ${stagedGroups.join(', ')}.`,
         'Atomic commits are preferred; split unrelated changes unless this is one functional unit.',
       ].join('\n'),
       options: [
@@ -914,135 +1035,8 @@ async function confirmAtomicityIfNeeded(
   }
 }
 
-function buildAtomicSplitProposal(stagedFiles: string[]): string {
-  const groups = new Map<string, string[]>();
-  for (const file of stagedFiles) {
-    const scope = detectAtomicGroup(file);
-    const list = groups.get(scope) || [];
-    list.push(file);
-    groups.set(scope, list);
-  }
-
-  const orderedGroups = orderAtomicGroups(groups);
-  const sections: string[] = [];
-  let index = 0;
-  for (const [scope, files] of orderedGroups) {
-    index += 1;
-    const escapedFiles = files.map(escapeShellArg).join(' ');
-    const commitSubject = buildSuggestedSplitCommitSubject(scope, files);
-    const commitBodyBullet = buildSuggestedSplitCommitBody(scope, files);
-    sections.push(
-      [
-        `Commit ${index}: ${scope}`,
-        ...files.map(file => `- ${file}`),
-        '',
-        'Suggested commands:',
-        `git reset`,
-        `git add ${escapedFiles}`,
-        `git commit -m $'${escapeForAnsiCString(commitSubject)}' \\`,
-        `  -m $'- ${escapeForAnsiCString(commitBodyBullet)}'`,
-      ].join('\n'),
-    );
-  }
-
-  return [
-    `Found ${stagedFiles.length} staged file(s), proposed ${groups.size} atomic group(s).`,
-    'Rules applied: lockfiles grouped with dependency manifests; docs/formatting split from functional changes.',
-    '',
-    ...sections,
-  ].join('\n\n');
-}
-
-function detectAtomicGroup(file: string): string {
-  if (isDependencyMetadataFile(file)) return 'deps';
-  if (isDocsOrFormattingFile(file)) return 'docs-formatting';
-
-  const workspaceMatch = /^(apps|packages|sites|tools)\/([^/]+)/.exec(file);
-  if (workspaceMatch?.[2]) return workspaceMatch[2];
-  if (file.startsWith('.github/')) return 'ci';
-  if (/^(infra|scripts)\//.test(file)) return 'tooling';
-  if (/^test\//.test(file) || /\.test\./.test(file)) return 'tests';
-  if (/^src\/services\//.test(file)) return 'services';
-  if (/^src\/models\//.test(file)) return 'models';
-  if (/^src\/.*runner/.test(file) || file.includes('runner.ts')) return 'runner';
-  if (/^src\/.*scope-detector/.test(file) || file.includes('scope-detector.ts')) return 'scope';
-  const topLevel = file.split('/')[0];
-  if (topLevel && topLevel !== file) return topLevel;
-  return 'core';
-}
-
-function isDependencyMetadataFile(file: string): boolean {
-  const base = file.split('/').pop() || '';
-  if (base === 'package.json') return true;
-  if (/^(pnpm-lock\.yaml|bun\.lockb?|package-lock\.json|yarn\.lock)$/.test(base)) return true;
-  if (base === 'pnpm-workspace.yaml') return true;
-  return false;
-}
-
-function isDocsOrFormattingFile(file: string): boolean {
-  if (/\.(md|mdx|rst|txt)$/i.test(file)) return true;
-  const base = file.split('/').pop() || '';
-  if (/^(\.prettierrc(\..+)?|\.editorconfig|prettier\.config\.(js|ts|cjs|mjs))$/i.test(base)) {
-    return true;
-  }
-  if (/^(\.eslintrc(\..+)?|eslint\.config\.(js|ts|cjs|mjs))$/i.test(base)) return true;
-  return false;
-}
-
-function orderAtomicGroups(groups: Map<string, string[]>): Array<[string, string[]]> {
-  const priority: Record<string, number> = {
-    deps: 10,
-    ci: 20,
-    tooling: 30,
-    core: 40,
-    services: 50,
-    models: 60,
-    runner: 70,
-    scope: 80,
-    tests: 90,
-    'docs-formatting': 100,
-  };
-  return Array.from(groups.entries()).sort((a, b) => {
-    const aPriority = priority[a[0]] ?? 50;
-    const bPriority = priority[b[0]] ?? 50;
-    if (aPriority !== bPriority) return aPriority - bPriority;
-    return a[0].localeCompare(b[0]);
-  });
-}
-
-function buildSuggestedSplitCommitSubject(scope: string, files: string[]): string {
-  const typeByScope: Record<string, string> = {
-    tests: 'test',
-    'docs-formatting': 'docs',
-    deps: 'build',
-    ci: 'ci',
-    tooling: 'chore',
-  };
-  const type = typeByScope[scope] || 'refactor';
-  const normalizedScope = scope === 'docs-formatting' ? 'docs' : scope;
-  const fileHint = files.length === 1 ? files[0].split('/').pop() || 'changes' : 'changes';
-  return `${type}(${normalizedScope}): split ${fileHint} updates`;
-}
-
-function buildSuggestedSplitCommitBody(scope: string, files: string[]): string {
-  if (scope === 'deps') return 'align dependency metadata and lockfile state';
-  if (scope === 'docs-formatting') return 'separate documentation and formatting-only changes';
-  if (scope === 'tests') return 'keep test coverage aligned with related code updates';
-  if (files.length === 1) return `isolate ${files[0]} changes into one atomic unit`;
-  return `group ${scope} changes into one atomic unit`;
-}
-
-function escapeForAnsiCString(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/'/g, `\\'`);
-}
-
-function escapeShellArg(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
 async function runGenerationCycle(params: {
   services: RunnerServices;
-  parsedArgs: ParsedOptions;
   logger: Logger;
   apiKey: string;
   state: GenerationState;
@@ -1134,13 +1128,14 @@ async function runSingleGenerationAttempt(params: {
   });
   logger.log('debug', 'Run started', {
     targetCommit: targetCommit ?? null,
-    runtime: detectRuntime(),
   });
   s.start(`Generating commit message with ${state.modelName}...`);
   const systemPrompt =
     state.outputMode === 'full' ? SYSTEM_INSTRUCTIONS_FULL : SYSTEM_INSTRUCTIONS_COMMIT_ONLY;
   const response = await services.geminiService.callGeminiAPI({
     promptContext: contextResult.promptContext,
+    promptParts: contextResult.promptParts,
+    summaryAttempted: contextResult.summaryAttempted,
     systemPrompt,
     stagedFiles: staged.stagedFiles,
     meta,
@@ -1213,6 +1208,7 @@ async function handleSuccessfulGeneration(params: {
   if (actionResult.type === 'regenerate') return 'regenerate';
   return commitGeneratedMessage({
     commitMessage: parsedOut.COMMIT_MESSAGE,
+    commitCapability,
     services,
     state,
     logger,
@@ -1220,24 +1216,125 @@ async function handleSuccessfulGeneration(params: {
   });
 }
 
+// The capability was decided before generation, and the repository can move
+// while the user regenerates: work gets staged, or a new commit lands and the
+// target stops being HEAD. Amend and reword both write into an existing commit,
+// so the decision is taken again here, immediately before the side effect.
+async function revalidateCommitCapability(
+  commitCapability: CommitCapability,
+  services: RunnerServices,
+  logger: Logger,
+  repositoryState?: RepositoryState,
+): Promise<CommitCapability> {
+  if (commitCapability.mode === 'commit') return commitCapability;
+  const hash = commitCapability.target?.hash ?? null;
+  const currentRepositoryState =
+    repositoryState ?? (await getRepositoryStateSafe(services.gitService, logger));
+  const target = await inspectCommitTargetSafe(services.gitService, hash, logger);
+  const fresh = evaluateCommitCapability(currentRepositoryState, hash, target);
+
+  if (!fresh.allowed) {
+    throw new Error(
+      fresh.reason ?? 'The repository changed and the action is no longer available.',
+    );
+  }
+  if (fresh.mode !== commitCapability.mode) {
+    throw new Error(
+      `The repository changed since generation: the action would now be a ${fresh.mode}, not a ${commitCapability.mode}. Run again.`,
+    );
+  }
+  return fresh;
+}
+
+// autosquash folds into the first subject match in its range, so the base is
+// not a suggestion when an older commit shares the subject: widening it hands
+// the rewrite to the wrong commit.
+function describeRewordResult(target: CommitTarget): string {
+  const short = target.hash.slice(0, 7);
+  const base = target.hasParent ? `${short}~1` : '--root';
+  const lines = [
+    `amend! commit created for ${short}. History is untouched until you fold it in:`,
+    `  git rebase --autosquash ${base}`,
+  ];
+  if (target.hasAmbiguousSubject) {
+    lines.push(
+      `An older commit shares the subject "${target.subject}". Use exactly this base: a wider one folds the message into that commit instead.`,
+    );
+  }
+  if (target.isPublished) {
+    lines.push(
+      'This commit is already on a remote branch. Folding the amend! commit in rewrites published history.',
+    );
+  }
+  return lines.join('\n');
+}
+
+async function applyCommitAction(params: {
+  commitCapability: CommitCapability;
+  commitMessage: string;
+  services: RunnerServices;
+  logger: Logger;
+}): Promise<string> {
+  const { commitMessage, services, logger } = params;
+  const { gitService } = services;
+
+  let repositoryState: RepositoryState | undefined;
+  if (params.commitCapability.initialIndexTree !== undefined) {
+    repositoryState = await getRepositoryStateSafe(gitService, logger);
+    const currentIndexTree = await getIndexTreeSafe(
+      gitService,
+      repositoryState,
+      logger,
+    );
+    if (
+      currentIndexTree !== undefined &&
+      currentIndexTree !== params.commitCapability.initialIndexTree
+    ) {
+      throw new Error('Staged changes changed. Regenerate the message before committing.');
+    }
+  }
+
+  const capability = await revalidateCommitCapability(
+    params.commitCapability,
+    services,
+    logger,
+    repositoryState,
+  );
+
+  if (capability.mode === 'amend') {
+    await gitService.amendCommit(commitMessage, logger);
+    return 'HEAD amended.';
+  }
+  if (capability.mode === 'reword' && capability.target) {
+    await gitService.rewordCommit(capability.target, commitMessage, logger);
+    return describeRewordResult(capability.target);
+  }
+  await gitService.commitChanges(commitMessage, logger);
+  return 'Commit successfully created!';
+}
+
 async function commitGeneratedMessage(params: {
   commitMessage: string;
+  commitCapability: CommitCapability;
   services: RunnerServices;
   state: GenerationState;
   logger: Logger;
   s: ReturnType<typeof spinner>;
 }): Promise<'done'> {
-  const { commitMessage, services, state, logger, s } = params;
-  s.start('Committing changes...');
+  const { commitMessage, commitCapability, services, state, logger, s } = params;
+  const verb = commitCapability.mode === 'commit' ? 'Committing changes' : commitCapability.mode;
+  s.start(`${verb}...`);
   try {
-    await services.gitService.commitChanges(commitMessage, logger);
+    const summary = await applyCommitAction({ commitCapability, commitMessage, services, logger });
     await saveSession({ modelName: state.baselineModelName, outputMode: state.outputMode });
-    s.stop('Changes committed successfully');
-    outro(`${C.cyan}Commit successfully created!${C.reset}`);
+    s.stop('Done');
+    outro(`${C.cyan}${summary}${C.reset}`);
   } catch (error) {
-    s.stop('Commit failed');
-    cancel(`Failed to commit changes: ${error}`);
-    logger.log('error', `Commit failed: ${error}`);
+    s.stop('Failed');
+    cancel(
+      `Failed to apply commit action: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    logger.log('error', `Commit action failed: ${error}`);
   }
   return 'done';
 }
@@ -1261,14 +1358,25 @@ async function handleCliEarlyExit(
   return true;
 }
 
+function parseArgsOrReport(argv: string[]): ParsedOptions | null {
+  try {
+    return parseArgs(argv);
+  } catch (error) {
+    if (!(error instanceof ArgumentValidationError)) throw error;
+    cancel(`Error: ${error.message}. Run gcm --help for usage.`);
+    process.exitCode = 1;
+    return null;
+  }
+}
+
 export async function executeCommitMessageGeneration(
   argv?: string[],
   dependencies?: RunnerOptions,
 ): Promise<void> {
   const opts = dependencies || {};
-  const parsedArgs: ParsedOptions = parseArgs(argv || process.argv.slice(2));
+  const parsedArgs = parseArgsOrReport(argv || process.argv.slice(2));
   const packageInfo = getPackageInfo();
-  if (await handleCliEarlyExit(parsedArgs, packageInfo)) return;
+  if (!parsedArgs || (await handleCliEarlyExit(parsedArgs, packageInfo))) return;
 
   const loggerConfig = buildLoggerConfig(parsedArgs);
   const logger = opts.logger || createLogger(loggerConfig);

@@ -1,13 +1,15 @@
 import minimist, { type ParsedArgs } from 'minimist';
 
+const outputModes = ['full', 'commit-only'] as const;
+
+type OutputMode = (typeof outputModes)[number];
+
 interface Args extends ParsedArgs {
   commit?: string | null;
-  'dry-run'?: boolean;
-  dryRun?: boolean;
   help?: boolean;
   version?: boolean;
   model?: string | null;
-  mode?: 'full' | 'commit-only' | null;
+  mode?: OutputMode | null;
   verbose?: boolean;
   debug?: boolean;
   'list-models'?: boolean;
@@ -17,21 +19,121 @@ interface Args extends ParsedArgs {
 
 export interface ParsedOptions {
   commit: string | null;
-  dryRun: boolean;
   help: boolean;
   version: boolean;
   model: string | null;
-  mode: 'full' | 'commit-only' | null;
+  mode: OutputMode | null;
   verbose: boolean;
   debug: boolean;
   listModels: boolean;
   exclude: string[];
 }
 
+export class ArgumentValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ArgumentValidationError';
+  }
+}
+
+function isOutputMode(value: string): value is OutputMode {
+  return (outputModes as readonly string[]).includes(value);
+}
+
+function validateOutputMode(value: string): void {
+  if (!isOutputMode(value)) {
+    throw new ArgumentValidationError(
+      `Invalid value for --mode: ${value}. Expected one of: ${outputModes.join(', ')}`,
+    );
+  }
+}
+
+interface FlagDefinition {
+  name: string;
+  aliases: string[];
+  takesValue: boolean;
+  allowsRepeat?: boolean;
+  validateValue?: (value: string) => void;
+}
+
+const flagDefinitions = [
+  { name: 'commit', aliases: ['--commit', '-c'], takesValue: true },
+  { name: 'help', aliases: ['--help', '-h'], takesValue: false },
+  { name: 'version', aliases: ['--version'], takesValue: false },
+  { name: 'model', aliases: ['--model'], takesValue: true },
+  {
+    name: 'mode',
+    aliases: ['--mode', '-m'],
+    takesValue: true,
+    validateValue: validateOutputMode,
+  },
+  { name: 'verbose', aliases: ['--verbose', '-v'], takesValue: false },
+  { name: 'debug', aliases: ['--debug', '-d'], takesValue: false },
+  { name: 'listModels', aliases: ['--list-models', '--listModels'], takesValue: false },
+  { name: 'exclude', aliases: ['--exclude', '-e'], takesValue: true, allowsRepeat: true },
+] satisfies FlagDefinition[];
+
+const flagsByAlias = new Map<string, FlagDefinition>(
+  flagDefinitions.flatMap(definition =>
+    definition.aliases.map(alias => [alias, definition] as const),
+  ),
+);
+
+function aliasesForFlag(flag: string): string[] {
+  return flag.startsWith('--') ? [flag] : [...flag.slice(1)].map(letter => `-${letter}`);
+}
+
+function findUnknownFlag(aliases: string[]): string | undefined {
+  return aliases.find(alias => !flagsByAlias.has(alias));
+}
+
+function findValueFlag(aliases: string[]): string | undefined {
+  return aliases.find(alias => flagsByAlias.get(alias)?.takesValue);
+}
+
+function validateValueFlag(flag: string, aliases: string[], valueFlag: string, value: string | undefined): void {
+  if (aliases.at(-1) !== valueFlag) {
+    throw new ArgumentValidationError(`Value-taking flag must be last in cluster: ${flag}`);
+  }
+  if (!value || value.startsWith('-')) throw new ArgumentValidationError(`Missing value for flag: ${valueFlag}`);
+}
+
+function validateValueDefinition(valueFlag: string, value: string, seenValueFlags: Set<string>): void {
+  const definition = flagsByAlias.get(valueFlag);
+  if (!definition) return;
+  definition.validateValue?.(value);
+  if (!definition.allowsRepeat && seenValueFlags.has(definition.name)) {
+    throw new ArgumentValidationError(`Flag may only be specified once: --${definition.name}`);
+  }
+  seenValueFlags.add(definition.name);
+}
+
+function validateArgs(argv: string[]): void {
+  const seenValueFlags = new Set<string>();
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === '--') return;
+    if (argument === '-' || !argument.startsWith('-')) continue;
+    const equalsIndex = argument.indexOf('=');
+    const flag = equalsIndex === -1 ? argument : argument.slice(0, equalsIndex);
+    if (flag === '-') throw new ArgumentValidationError('Unknown flag: -');
+    const aliases = aliasesForFlag(flag);
+    const unknownFlag = findUnknownFlag(aliases);
+    if (unknownFlag) throw new ArgumentValidationError(`Unknown flag: ${unknownFlag}`);
+    const valueFlag = findValueFlag(aliases);
+    if (!valueFlag) continue;
+    const value = equalsIndex === -1 ? argv[index + 1] : argument.slice(equalsIndex + 1);
+    validateValueFlag(flag, aliases, valueFlag, value);
+    validateValueDefinition(valueFlag, value, seenValueFlags);
+    index += Number(equalsIndex === -1);
+  }
+}
+
 export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions {
+  validateArgs(argv);
   const parsed: Args = minimist(argv, {
     alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug', e: 'exclude', m: 'mode' },
-    boolean: ['help', 'version', 'dry-run', 'verbose', 'debug', 'list-models'],
+    boolean: ['help', 'version', 'verbose', 'debug', 'list-models'],
     string: ['commit', 'model', 'mode', 'exclude'],
   });
 
@@ -50,15 +152,10 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     }
   }
 
-  // Validate mode
-  let finalMode: 'full' | 'commit-only' | null = null;
-  if (parsed.mode === 'full' || parsed.mode === 'commit-only') {
-    finalMode = parsed.mode;
-  }
+  const finalMode = parsed.mode && isOutputMode(parsed.mode) ? parsed.mode : null;
 
   return {
     commit: parsed.commit || null,
-    dryRun: Boolean(parsed['dry-run']) || Boolean(parsed.dryRun) || false,
     help: Boolean(parsed.help),
     version: Boolean(parsed.version),
     model: parsed.model || null,

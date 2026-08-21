@@ -1,3 +1,5 @@
+import { appendFileSync } from 'node:fs';
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LoggerConfig {
@@ -27,7 +29,7 @@ interface LoggerState {
 
 const DEFAULT_LEVEL = 'info';
 
-export const levels: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+const levels: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
 let globalExitHandlersInstalled = false;
 
@@ -127,10 +129,7 @@ function flushQueueSync(state: LoggerState): void {
   if (!state.TELEMETRY_FILE || state.queue.length === 0) return;
   const payload = resetQueue(state);
   try {
-    Bun.spawnSync({
-      cmd: ['bash', '-c', `cat >> "${state.TELEMETRY_FILE}"`],
-      stdin: new TextEncoder().encode(payload),
-    });
+    appendFileSync(state.TELEMETRY_FILE, payload);
   } catch (err) {
     writeErrorFallback('Failed to write telemetry sync: ', err);
   }

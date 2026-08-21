@@ -7,7 +7,17 @@ export interface StagedChangesResult {
   stagedDiff: string;
   stagedFiles: string[];
   truncated: boolean;
-  truncatedNote?: string;
+}
+
+export interface CommitTarget {
+  hash: string;
+  subject: string;
+  isHead: boolean;
+  isPublished: boolean;
+  isAncestorOfHead: boolean;
+  isHeadDetached: boolean;
+  hasParent: boolean;
+  hasAmbiguousSubject: boolean;
 }
 
 export interface GitService {
@@ -17,6 +27,10 @@ export interface GitService {
     excludePatterns?: string[],
   ): Promise<StagedChangesResult | null>;
   commitChanges(message: string, logger: Logger | null): Promise<void>;
+  amendCommit(message: string, logger: Logger | null): Promise<void>;
+  rewordCommit(target: CommitTarget, message: string, logger: Logger | null): Promise<void>;
+  inspectCommitTarget(hash: string, logger: Logger | null): Promise<CommitTarget>;
+  getIndexTree(logger: Logger | null): Promise<string>;
   getRepositoryState?(logger: Logger | null): Promise<RepositoryState>;
 }
 
@@ -96,6 +110,25 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
     commitChanges: function (message: string, logger: Logger | null = null): Promise<void> {
       return commitChangesWithDeps({ deps, message, logger });
     },
+    amendCommit: function (message: string, logger: Logger | null = null): Promise<void> {
+      return amendCommitWithDeps({ deps, message, logger });
+    },
+    rewordCommit: function (
+      target: CommitTarget,
+      message: string,
+      logger: Logger | null = null,
+    ): Promise<void> {
+      return rewordCommitWithDeps({ deps, target, message, logger });
+    },
+    inspectCommitTarget: function (
+      hash: string,
+      logger: Logger | null = null,
+    ): Promise<CommitTarget> {
+      return inspectCommitTargetWithDeps({ deps, hash, logger });
+    },
+    getIndexTree: function (logger: Logger | null = null): Promise<string> {
+      return getIndexTreeWithDeps({ deps, logger });
+    },
     getRepositoryState: function (logger: Logger | null = null): Promise<RepositoryState> {
       return getRepositoryStateWithDeps({ deps, logger });
     },
@@ -119,16 +152,12 @@ async function retrieveStagedChangesWithDeps(params: {
     logNoChanges(logger, commitHash);
     return null;
   }
-  const diffRes = await deps.gitCommandRunner(buildDiffArgs(commitHash));
+  const diffRes = await deps.gitCommandRunner([...buildDiffArgs(commitHash), '--', ...files]);
   if (diffRes.truncated) logger?.log('warn', 'Diff output was truncated due to size limits.');
-  const truncatedNote = diffRes.truncated
-    ? '\n\nNote: The diff was truncated while being read due to buffer limits.'
-    : undefined;
   return {
     stagedDiff: diffRes.text,
     stagedFiles: files,
     truncated: diffRes.truncated,
-    truncatedNote,
   };
 }
 
@@ -140,6 +169,133 @@ async function commitChangesWithDeps(params: {
   const { deps, message, logger } = params;
   if (logger) logger.log('debug', 'Executing git commit');
   await deps.gitCommandRunner(['commit', '-m', message]);
+}
+
+async function getIndexTreeWithDeps(params: {
+  deps: GitServiceDeps;
+  logger: Logger | null;
+}): Promise<string> {
+  const { deps, logger } = params;
+  logger?.log('debug', 'Capturing git index tree');
+  const result = await deps.gitCommandRunner(['write-tree']);
+  return result.text.trim();
+}
+
+async function amendCommitWithDeps(params: {
+  deps: GitServiceDeps;
+  message: string;
+  logger: Logger | null;
+}): Promise<void> {
+  const { deps, message, logger } = params;
+  logger?.log('debug', 'Executing git commit --amend');
+  await deps.gitCommandRunner(['commit', '--amend', '-m', message]);
+}
+
+// An `amend!` commit carries the replacement message as an ordinary commit, so
+// nothing is rewritten here. `git rebase --autosquash` folds it into the target
+// later, when the user asks for it.
+async function rewordCommitWithDeps(params: {
+  deps: GitServiceDeps;
+  target: CommitTarget;
+  message: string;
+  logger: Logger | null;
+}): Promise<void> {
+  const { deps, target, message, logger } = params;
+  logger?.log('debug', `Creating amend! commit for ${target.hash}`);
+  await deps.gitCommandRunner([
+    'commit',
+    '--allow-empty',
+    '-m',
+    `amend! ${target.subject}`,
+    '-m',
+    message,
+  ]);
+}
+
+// `branch --remotes --contains` answers with output rather than an exit code:
+// empty means no remote branch holds the commit. `merge-base --is-ancestor`
+// would answer through exit 1, which the git runner turns into a throw
+// indistinguishable from a real failure. This also covers every remote, not
+// just the tracked upstream. An unanswerable question resolves to published,
+// so the additive path is taken.
+async function isPublishedCommit(deps: GitServiceDeps, hash: string): Promise<boolean> {
+  try {
+    const remotes = await deps.gitCommandRunner(['branch', '--remotes', '--contains', hash]);
+    return remotes.text.trim().length > 0;
+  } catch {
+    return true;
+  }
+}
+
+// An `amend!` commit is created on the current branch. When the target is not
+// reachable from HEAD the rebase that would fold it never sees it, so the
+// commit stays behind as litter and the target keeps its old message. Compared
+// through merge-base, whose answer arrives as output rather than an exit code.
+async function isAncestorOfHead(deps: GitServiceDeps, hash: string): Promise<boolean> {
+  try {
+    const base = await deps.gitCommandRunner(['merge-base', 'HEAD', hash]);
+    return base.text.trim() === hash;
+  } catch {
+    return false;
+  }
+}
+
+// A commit made on a detached HEAD is orphaned the moment another branch is
+// checked out. Both amend and an `amend!` commit would be lost that way, while
+// the tool reports success.
+async function isHeadDetached(deps: GitServiceDeps): Promise<boolean> {
+  try {
+    await deps.gitCommandRunner(['symbolic-ref', '--quiet', 'HEAD']);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+// `rebase --autosquash` folds an `amend!` into the FIRST commit in its range
+// whose subject matches, so an older twin of the subject silently steals the
+// rewrite when the user widens the base. A missing parent means the target is
+// the root commit, which changes the rebase command it needs.
+async function readSubjectAmbiguity(
+  deps: GitServiceDeps,
+  hash: string,
+  subject: string,
+): Promise<{ hasParent: boolean; hasAmbiguousSubject: boolean }> {
+  try {
+    const ancestors = await deps.gitCommandRunner(['log', '--format=%s', `${hash}^`]);
+    const twins = ancestors.text.split('\n').filter(line => line.trimEnd() === subject);
+    return { hasParent: true, hasAmbiguousSubject: twins.length > 0 };
+  } catch {
+    return { hasParent: false, hasAmbiguousSubject: false };
+  }
+}
+
+async function inspectCommitTargetWithDeps(params: {
+  deps: GitServiceDeps;
+  hash: string;
+  logger: Logger | null;
+}): Promise<CommitTarget> {
+  const { deps, hash, logger } = params;
+  const resolved = (
+    await deps.gitCommandRunner(['rev-parse', '--verify', `${hash}^{commit}`])
+  ).text.trim();
+  const head = (
+    await deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^{commit}'])
+  ).text.trim();
+  const subject = (await deps.gitCommandRunner(['log', '-1', '--format=%s', resolved])).text.trim();
+  const ambiguity = await readSubjectAmbiguity(deps, resolved, subject);
+  const isHead = resolved === head;
+  const target: CommitTarget = {
+    hash: resolved,
+    subject,
+    isHead,
+    isPublished: await isPublishedCommit(deps, resolved),
+    isAncestorOfHead: isHead || (await isAncestorOfHead(deps, resolved)),
+    isHeadDetached: await isHeadDetached(deps),
+    ...ambiguity,
+  };
+  logger?.log('debug', 'Commit target', { ...target });
+  return target;
 }
 
 async function fileExists(path: string): Promise<boolean> {

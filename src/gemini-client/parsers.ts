@@ -22,7 +22,7 @@ export function tryParseJSON(logger: Logger, text: string): unknown {
   }
 }
 
-export function extractText(candidate: unknown): string {
+function extractText(candidate: unknown): string {
   const parts = (candidate as { content?: { parts?: unknown[] } })?.content?.parts;
   if (!Array.isArray(parts)) return '';
   let text = '';
@@ -73,6 +73,11 @@ function extractBetweenMarkers(
   return { text, truncated: hasEndTrunc };
 }
 
+function hasMaxTokensFinishReason(candidate: unknown): boolean {
+  if (!candidate || typeof candidate !== 'object') return false;
+  return (candidate as { finishReason?: unknown }).finishReason === 'MAX_TOKENS';
+}
+
 export function parseCandidates(
   json: unknown,
   logger?: Logger,
@@ -84,11 +89,11 @@ export function parseCandidates(
     let text = extractText(candidate);
     if (text) {
       // Normalize / clean up common artifacts: markers and code fences
-      let truncated = false;
+      let truncated = hasMaxTokensFinishReason(candidate);
       try {
         const extracted = extractBetweenMarkers(text, logger);
         text = extracted.text;
-        truncated = !!extracted.truncated;
+        truncated = !!extracted.truncated || truncated;
         text = stripCodeFences(text);
       } catch {
         // be conservative: fall back to original text on any failure

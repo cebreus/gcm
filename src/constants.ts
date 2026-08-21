@@ -1,17 +1,10 @@
 // HTTP status codes
-export const HTTP_STATUS = {
+const HTTP_STATUS = {
   TOO_MANY_REQUESTS: 429,
   BAD_GATEWAY: 502,
   SERVICE_UNAVAILABLE: 503,
   GATEWAY_TIMEOUT: 504,
 } as const;
-
-export const RETRYABLE_HTTP_CODES = [
-  HTTP_STATUS.TOO_MANY_REQUESTS,
-  HTTP_STATUS.BAD_GATEWAY,
-  HTTP_STATUS.SERVICE_UNAVAILABLE,
-  HTTP_STATUS.GATEWAY_TIMEOUT,
-] as const;
 
 // File extensions
 export const CODE_EXTENSIONS = ['js', 'ts', 'jsx', 'tsx', 'svelte'] as const;
