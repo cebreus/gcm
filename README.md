@@ -124,6 +124,9 @@ This refactors the logging mechanism for the Gemini API client.
 | `--model <name>`      |       | Specify an alternative Gemini model to use.                         |
 | `--list-models`       |       | List available Gemini text-generation models from the API and exit. |
 
+`--exclude` supports `*` (any number of characters, including `/`) and `?` (exactly one character).
+Patterns are case-sensitive and match the complete file path.
+
 `--list-models` queries the live Gemini API, so the output reflects the models currently available to your API key instead of a hard-coded list.
 
 ### Interactive Menu

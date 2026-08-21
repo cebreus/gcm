@@ -215,6 +215,31 @@ test('utils: shouldExcludeFile - should match wildcard patterns', () => {
   expect(shouldExcludeFile('package.json', ['*manifest*'])).toBe(false);
 });
 
+test('utils: shouldExcludeFile - asterisk crosses directory separators', () => {
+  expect(shouldExcludeFile('a/b/c.env', ['*.env'])).toBe(true);
+});
+
+test('utils: shouldExcludeFile - asterisk alone matches every path', () => {
+  expect(shouldExcludeFile('a/b/c.env', ['*'])).toBe(true);
+});
+
+test('utils: shouldExcludeFile - question mark matches exactly one character', () => {
+  expect(shouldExcludeFile('file1.env', ['file?.env'])).toBe(true);
+  expect(shouldExcludeFile('file12.env', ['file?.env'])).toBe(false);
+});
+
+test('utils: shouldExcludeFile - patterns are case-sensitive', () => {
+  expect(shouldExcludeFile('UPPER.ENV', ['*.env'])).toBe(false);
+});
+
+test('utils: shouldExcludeFile - patterns are anchored at both ends', () => {
+  expect(shouldExcludeFile('config/.env', ['.env'])).toBe(false);
+});
+
+test('utils: shouldExcludeFile - a question mark filename character matches question mark', () => {
+  expect(shouldExcludeFile('file?.env', ['file?.env'])).toBe(true);
+});
+
 test('utils: shouldExcludeFile - should match multiple patterns', () => {
   expect(shouldExcludeFile('manifest.json', ['*manifest*', '*lock*'])).toBe(true);
   expect(shouldExcludeFile('package-lock.json', ['*manifest*', '*lock*'])).toBe(true);
