@@ -1,3 +1,5 @@
+import { DEFAULT_MAX_DEBUG_LOG_BYTES } from './src/constants.js';
+
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -17,7 +19,7 @@ export const CONFIG = {
   TELEMETRY_FILE: process.env.GCM_TELEMETRY_FILE || '',
   DEBUG_API: (process.env.GCM_DEBUG_API || 'false') === 'true',
   DEBUG_FILE: process.env.GCM_DEBUG_FILE || '.debug.log',
-  DEBUG_MAX_BODY_LOG_BYTES: Number(process.env.GCM_DEBUG_MAX_BODY_LOG_BYTES || 32768),
+  DEBUG_MAX_BODY_LOG_BYTES: Number(process.env.GCM_DEBUG_MAX_BODY_LOG_BYTES || DEFAULT_MAX_DEBUG_LOG_BYTES),
   GEMINI_MAX_RETRIES: Number(process.env.GCM_GEMINI_MAX_RETRIES || 3),
   GEMINI_RETRY_BASE_MS: Number(process.env.GCM_GEMINI_RETRY_BASE_MS || 1000),
   GEMINI_RETRY_MAX_MS: Number(process.env.GCM_GEMINI_RETRY_MAX_MS || 60000),
