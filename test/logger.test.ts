@@ -4,6 +4,7 @@ import { createLogger } from '../src/logger';
 import type { Logger, LoggerConfig } from '../src/logger';
 
 const TEST_LOG_FILE = './.telemetry_test.log';
+const UNSAFE_TELEMETRY_FILE = './.telemetry_"; echo injected; #.log';
 
 // --- Mocks Setup ---
 const mockWriter = {
@@ -45,6 +46,9 @@ afterEach(async () => {
   stderrWriteMock.mockClear();
   try {
     await fs.unlink(TEST_LOG_FILE);
+  } catch {}
+  try {
+    await fs.unlink(UNSAFE_TELEMETRY_FILE);
   } catch {}
 });
 
@@ -138,4 +142,13 @@ test('logger: timer-based flush', async () => {
   await new Promise(resolve => setTimeout(resolve, 60));
 
   expect(mockWriter.write).toHaveBeenCalled();
+});
+
+test('logger: flushSync writes telemetry to a literal shell-like path', async () => {
+  const logger = createLogger({ LOG_LEVEL: 'info', TELEMETRY_FILE: UNSAFE_TELEMETRY_FILE });
+
+  logger.log('info', 'sync payload');
+  logger.flushSync();
+
+  expect(await fs.readFile(UNSAFE_TELEMETRY_FILE, 'utf8')).toContain('sync payload');
 });

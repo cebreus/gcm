@@ -1,9 +1,8 @@
 {
   "name": "gcm",
   "version": "0.7.1",
-  "main": "gcm.js",
   "scripts": {
-    "start": "bun run ./gcm.js",
+    "start": "bun run ./gcm.ts",
     "test": "bun test",
     "check": "bunx tsc --noEmit",
     "lint": "eslint",

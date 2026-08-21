@@ -5,7 +5,6 @@ test('cli: should parse default arguments with empty argv', () => {
   const result = parseArgs([]);
   expect(result).toEqual({
     commit: null,
-    dryRun: false,
     help: false,
     version: false,
     model: null,
@@ -61,6 +60,26 @@ test('cli: should handle --model flag with a model name', () => {
   expect(result.model).toBe(model);
 });
 
+test('cli: accepts supported --mode values and rejects unsupported ones', () => {
+  expect(parseArgs(['--mode', 'full']).mode).toBe('full');
+  expect(parseArgs(['--mode', 'commit-only']).mode).toBe('commit-only');
+  expect(() => parseArgs(['--mode', 'garbage'])).toThrow(
+    'Invalid value for --mode: garbage. Expected one of: full, commit-only',
+  );
+});
+
+test('cli: rejects repeated single-value flags', () => {
+  expect(() => parseArgs(['--commit', 'abc', '--commit', 'def'])).toThrow(
+    'Flag may only be specified once: --commit',
+  );
+  expect(() => parseArgs(['--model', 'gemini-pro', '--model', 'gemini-flash'])).toThrow(
+    'Flag may only be specified once: --model',
+  );
+  expect(() => parseArgs(['--mode', 'full', '--mode', 'commit-only'])).toThrow(
+    'Flag may only be specified once: --mode',
+  );
+});
+
 test('cli: should handle combined flags', () => {
   const result = parseArgs(['-v', '-d', '--commit', 'HEAD']);
   expect(result.verbose).toBe(true);
@@ -69,39 +88,37 @@ test('cli: should handle combined flags', () => {
   expect(result.help).toBe(false);
 });
 
+test('cli: should handle clustered boolean flags', () => {
+  const result = parseArgs(['-vd']);
+  expect(result.verbose).toBe(true);
+  expect(result.debug).toBe(true);
+});
+
 test('cli: gives precedence to flags over string arguments', () => {
-  // When a string argument for `--commit` looks like another flag (e.g., `-h`),
-  // minimist gives precedence to parsing the flag.
-  // `parseArgs(['-c', '-h'])` results in `commit: null` and `help: true`.
   const fakeSha = '-h';
-  const result = parseArgs(['-c', fakeSha]);
-  expect(result.commit).toBe(null);
-  expect(result.help).toBe(true);
+  expect(() => parseArgs(['-c', fakeSha])).toThrow('Missing value for flag: -c');
 });
 
-test('cli: should ignore unknown flags', () => {
-  const result = parseArgs(['--unknown-flag', 'value', '-x']);
-  expect(result).toEqual({
-    commit: null,
-    dryRun: false,
-    help: false,
-    version: false,
-    model: null,
-    mode: null,
-    verbose: false,
-    debug: false,
-    listModels: false,
-    exclude: [],
-  });
+test('cli: rejects unknown flags', () => {
+  expect(() => parseArgs(['--commmit', 'abc123'])).toThrow('Unknown flag: --commmit');
 });
 
-test('cli: should handle boolean flag variations for dry-run', () => {
-  let result = parseArgs(['--dry-run']);
-  expect(result.dryRun).toBe(true);
+test('cli: rejects unknown clustered flags', () => {
+  expect(() => parseArgs(['-vx'])).toThrow('Unknown flag: -x');
+});
 
-  //This is how minimist handles camelCase args
-  result = parseArgs(['--dryRun']);
-  expect(result.dryRun).toBe(true);
+test('cli: rejects clusters with a non-final value-taking flag', () => {
+  expect(() => parseArgs(['-cv', 'sha'])).toThrow('Value-taking flag must be last in cluster: -cv');
+});
+
+test('cli: rejects malformed short flags but allows a bare dash', () => {
+  expect(() => parseArgs(['-='])).toThrow('Unknown flag: -');
+  expect(() => parseArgs(['-=x'])).toThrow('Unknown flag: -');
+  expect(parseArgs(['-'])).toEqual(parseArgs([]));
+});
+
+test('cli: rejects string flags without a value', () => {
+  expect(() => parseArgs(['--commit'])).toThrow('Missing value for flag: --commit');
 });
 
 test('cli: should handle -e/--exclude flag with a single pattern', () => {
@@ -118,8 +135,15 @@ test('cli: should handle --exclude flag with comma-separated patterns', () => {
 });
 
 test('cli: should handle multiple --exclude flags', () => {
-  const result = parseArgs(['--exclude', '*manifest*', '--exclude', '*.lock']);
-  expect(result.exclude).toEqual(['*manifest*', '*.lock']);
+  const result = parseArgs([
+    '--exclude',
+    '*manifest*',
+    '--exclude',
+    '*.lock',
+    '--exclude',
+    'dist/*',
+  ]);
+  expect(result.exclude).toEqual(['*manifest*', '*.lock', 'dist/*']);
 });
 
 test('cli: should handle --exclude with mixed comma-separated and multiple flags', () => {
@@ -131,3 +155,22 @@ test('cli: should handle --exclude with spaces around patterns', () => {
   const result = parseArgs(['--exclude', ' *manifest* , *.lock ']);
   expect(result.exclude).toEqual(['*manifest*', '*.lock']);
 });
+
+const valueTakingFlagCases = [
+  { aliases: ['--commit', '-c'], longAlias: '--commit', option: 'commit', value: 'a1b2c3d4', expected: 'a1b2c3d4' },
+  { aliases: ['--exclude', '-e'], longAlias: '--exclude', option: 'exclude', value: '*.lock', expected: Array.of('*.lock') },
+  { aliases: ['--model'], longAlias: '--model', option: 'model', value: 'gemini-pro', expected: 'gemini-pro' },
+  { aliases: ['--mode', '-m'], longAlias: '--mode', option: 'mode', value: 'commit-only', expected: 'commit-only' },
+] as const;
+
+for (const flagCase of valueTakingFlagCases) {
+  test(`cli: validates missing values for ${flagCase.longAlias}`, () => {
+    for (const alias of flagCase.aliases) {
+      expect(() => parseArgs([alias])).toThrow(`Missing value for flag: ${alias}`);
+      expect(() => parseArgs([alias, '--help'])).toThrow(`Missing value for flag: ${alias}`);
+      expect(parseArgs([alias, flagCase.value])[flagCase.option]).toEqual(flagCase.expected);
+    }
+
+    expect(() => parseArgs([`${flagCase.longAlias}=`])).toThrow(`Missing value for flag: ${flagCase.longAlias}`);
+  });
+}

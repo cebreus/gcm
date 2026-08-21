@@ -1,4 +1,3 @@
-import type { Logger } from './logger.js';
 import {
   CODE_EXTENSIONS,
   MARKUP_EXTENSIONS,
@@ -76,56 +75,8 @@ export function fileImportanceWeight(file: string): number {
   return FILE_IMPORTANCE_WEIGHTS.DEFAULT;
 }
 
-/**
- * Logs a message using logger if available, otherwise writes to stdout
- */
-export function logOrWrite(
-  logger: Logger | null | undefined,
-  level: 'info' | 'warn' | 'error',
-  message: string,
-): void {
-  if (logger) {
-    logger.log(level, message);
-  } else {
-    process.stdout.write(message + '\n');
-  }
-}
-
-/**
- * Safely logs an error to stderr, catching any failures
- */
-export function safeLogError(message: string, error?: unknown): void {
-  try {
-    if (error) {
-      process.stderr.write(message + ' ' + String(error) + '\n');
-    } else {
-      process.stderr.write(message + '\n');
-    }
-  } catch {
-    // Ignore logging errors
-  }
-}
-
-/**
- * Builds a truncation note message based on truncation flags
- */
-export function buildTruncationNote(
-  wasBufferTruncated: boolean,
-  wasPromptTruncated: boolean,
-): string {
-  if (wasBufferTruncated && wasPromptTruncated) {
-    return '\n\nNote: Original diff was truncated by buffer limit, and prompt truncated to fit model context.';
-  }
-  if (wasBufferTruncated) {
-    return '\n\nNote: The diff was truncated while being read due to buffer limits.';
-  }
-  if (wasPromptTruncated) {
-    return '\n\nNote: The prompt was truncated to fit within model context limits.';
-  }
-  return '';
-}
-
 export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void {
+  if (!Number.isFinite(maxSize) || maxSize <= 0) return;
   if (array.length < maxSize) {
     array.push(hunk);
     return;
@@ -205,21 +156,20 @@ export function formatCommitMessage(message: string): string {
   if (!message || typeof message !== 'string') {
     return message;
   }
-  
+
   const trimmed = message.trim();
-  const lines = trimmed.split('\n');
-  if (lines.length <= 1) {
+  const firstNewlineIndex = trimmed.indexOf('\n');
+  if (firstNewlineIndex === -1) {
     return trimmed;
   }
-  
-  // Ensure an empty line between subject (line 0) and body.
-  const subject = lines[0].trim();
-  const body = lines.slice(1).map(l => l.trim()).filter(l => l.length > 0).join('\n');
-  
+
+  const subject = trimmed.substring(0, firstNewlineIndex).trim();
+  const body = trimmed.substring(firstNewlineIndex + 1).replace(/^[\r\n]+/, '');
+
   if (body) {
     return `${subject}\n\n${body}`;
   }
-  
+
   return subject;
 }
 

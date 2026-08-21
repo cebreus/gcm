@@ -331,7 +331,7 @@ function buildCallSetup(
   modelOverride?: string,
 ): CallSetup {
   const opts = callOptions || {};
-  const activeModel = modelOverride || config.MODEL_NAME || 'gemini-2.5-flash';
+  const activeModel = modelOverride || config.MODEL_NAME || 'gemini-3.7-flash';
   const urlBase =
     'https://generativelanguage.googleapis.com/v1beta/models/' + activeModel + ':generateContent';
   const truncMaxRetries =
@@ -462,8 +462,4 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
   return { callGemini };
 }
 
-const defaultClient = createGeminiClient({ config: CONFIG, logger: createDefaultLogger() });
-export const { callGemini } = defaultClient;
-
 export { tryParseJSON, parseCandidates, getRetryMsFromResponse };
-export default createGeminiClient;

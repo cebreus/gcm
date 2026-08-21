@@ -95,7 +95,3 @@ export async function getCommitContextHints(changedFiles: string[]): Promise<Com
     recentCommitSubjects: await getRecentCommitSubjects(changedFiles),
   };
 }
-
-export async function getScopeSuggestions(changedFiles: string[]): Promise<string[]> {
-  return (await getCommitContextHints(changedFiles)).scopeSuggestions;
-}

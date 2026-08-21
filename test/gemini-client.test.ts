@@ -1,6 +1,8 @@
 import { test, expect } from 'bun:test';
 import { createGeminiClient } from '../src/gemini-client';
 import type { GeminiClient, GeminiResponse } from '../src/gemini-client';
+import { parseCandidates } from '../src/gemini-client/parsers';
+import type { Logger } from '../src/logger';
 
 async function geminiClientSuccessTest(): Promise<void> {
   let called = false;
@@ -347,3 +349,71 @@ async function geminiClientRetryOnTruncatedTest(): Promise<void> {
   }
 }
 test('gemini-client: retry on truncated response when enabled', geminiClientRetryOnTruncatedTest);
+
+async function geminiClientRetriesMaxTokensWithoutMarkersTest(): Promise<void> {
+  let callCount = 0;
+  async function fetchStub(_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
+    void _input;
+    void _init;
+    callCount += 1;
+    return {
+      ok: true,
+      status: 200,
+      text: async function (): Promise<string> {
+        return JSON.stringify({
+          candidates: [
+            {
+              finishReason: callCount === 1 ? 'MAX_TOKENS' : 'STOP',
+              content: { parts: [{ text: callCount === 1 ? 'partial result' : 'full result' }] },
+            },
+          ],
+        });
+      },
+    } as unknown as Response;
+  }
+
+  const client = createGeminiClient({ fetchImpl: fetchStub as typeof fetch });
+  const result = await client.callGemini({
+    apiKey: 'fake-key',
+    userContent: 'hello',
+    enableThinking: false,
+    telemetryMeta: {},
+    callOptions: {
+      maxOutputTokens: 256,
+      retryIfTruncated: true,
+      retryIfTruncatedMaxRetries: 1,
+    },
+  });
+
+  expect(callCount).toBe(2);
+  expect(result?.text).toBe('full result');
+  expect(result?.truncated).toBe(false);
+}
+test(
+  'gemini-client: retries MAX_TOKENS responses without response markers',
+  geminiClientRetriesMaxTokensWithoutMarkersTest,
+);
+
+test('gemini-client: preserves MAX_TOKENS when marker parsing fails', () => {
+  const logger: Logger = {
+    log: function (): void {
+      throw new Error('logger unavailable');
+    },
+    flush: async function (): Promise<void> {},
+    flushSync: function (): void {},
+  };
+
+  const result = parseCandidates(
+    {
+      candidates: [
+        {
+          finishReason: 'MAX_TOKENS',
+          content: { parts: [{ text: '<<START>>partial result' }] },
+        },
+      ],
+    },
+    logger,
+  );
+
+  expect(result?.truncated).toBe(true);
+});

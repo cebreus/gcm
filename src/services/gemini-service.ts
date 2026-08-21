@@ -1,6 +1,8 @@
 import type { GeminiClient, GeminiResponse } from '../gemini-client.js';
 import type { Logger, LogMetadata } from '../logger.js';
-import { summarizeLargeDiff } from '../summarizer.js';
+import { createContextService } from './context-service.js';
+import { renderPromptContext } from './context-service.js';
+import type { ContextService, PromptContextParts } from './context-service.js';
 import { CONFIG } from '../../gcm.config.js';
 
 export interface GeminiService {
@@ -11,6 +13,8 @@ export interface GeminiServiceDeps {
   client: GeminiClient;
   logger: Logger;
   apiKey: string;
+  contextService?: ContextService;
+  sleep?: (milliseconds: number) => Promise<unknown>;
 }
 
 type CallGeminiOptions = {
@@ -23,63 +27,69 @@ type CallGeminiOptions = {
 
 interface CallGeminiApiParams {
   promptContext: string;
+  promptParts?: PromptContextParts;
+  summaryAttempted?: boolean;
   systemPrompt: string;
   stagedFiles: string[];
   meta: LogMetadata;
   opts?: CallGeminiOptions;
 }
 
-interface OverflowParams {
-  stagedFiles: string[];
-  input: string;
-  maxOutputTokens: number;
-  attempt: number;
-  summaryUsed: boolean;
-}
-
 interface CallLoopState {
   input: string;
+  promptParts: PromptContextParts;
   maxOutputOverride: number;
-  summaryUsed: boolean;
+  summaryAttempted: boolean;
 }
 
 interface GeminiServiceRuntimeDeps extends GeminiServiceDeps {
-  inputShrinkFactor: number;
+  contextService: ContextService;
+  sleep: (milliseconds: number) => Promise<unknown>;
 }
 
 async function handleContextOverflow(
   params: {
     deps: GeminiServiceRuntimeDeps;
-  } & OverflowParams,
-): Promise<{ input: string; maxOutputTokens: number; summaryUsed: boolean }> {
-  const { deps, stagedFiles, input, maxOutputTokens, attempt, summaryUsed } = params;
-  if (!summaryUsed && Array.isArray(stagedFiles) && stagedFiles.length) {
+    stagedFiles: string[];
+    promptParts: PromptContextParts;
+    maxOutputTokens: number;
+    attempt: number;
+    summaryAttempted: boolean;
+  },
+): Promise<{
+  input: string;
+  promptParts: PromptContextParts;
+  maxOutputTokens: number;
+  summaryAttempted: boolean;
+} | null> {
+  const { deps, stagedFiles, promptParts, maxOutputTokens, attempt, summaryAttempted } = params;
+  const result = await deps.contextService.reduceForRetry({
+    promptParts,
+    stagedFiles,
+    summaryAttempted,
+  });
+  if (result.mode === 'unreducible') return null;
+  const newMaxOutput = maxOutputTokens + 1024;
+  if (result.mode === 'summary') {
     deps.logger.log(
       'warn',
       'Gemini returned MAX_TOKENS or no text; switching to top-hunks summary and retrying',
       { attempt },
     );
-    const summary = await summarizeLargeDiff(stagedFiles);
-    let newInput = `Analyse the following summary and truncated diff to generate the requested commit information:\n\n${summary.text}`;
-    if (summary.totalTruncated) {
-      newInput +=
-        '\n\nNote: The diff was truncated while being read due to per-file buffer limits.';
-    }
-    const newMaxOutput = maxOutputTokens + 1024;
-    await Bun.sleep(200 * attempt);
-    return { input: newInput, maxOutputTokens: newMaxOutput, summaryUsed: true };
+  } else {
+    deps.logger.log(
+      'warn',
+      'Gemini returned MAX_TOKENS or no text; retrying with smaller input and lower maxOutputTokens',
+      { attempt, newInputLength: result.promptContext.length, maxOutputOverride: newMaxOutput },
+    );
   }
-  const allowedBytesNow = Math.max(0, Math.floor(input.length * deps.inputShrinkFactor));
-  let newInput = input.substring(0, allowedBytesNow);
-  newInput = `Analyse the following (input truncated to fit model context) to generate the requested commit information:\n\n${newInput}`;
-  const newMaxOutput = maxOutputTokens + 1024;
-  deps.logger.log(
-    'warn',
-    'Gemini returned MAX_TOKENS or no text; retrying with smaller input and lower maxOutputTokens',
-    { attempt, newInputLength: newInput.length, maxOutputOverride: newMaxOutput },
-  );
-  await Bun.sleep(500 * attempt);
-  return { input: newInput, maxOutputTokens: newMaxOutput, summaryUsed };
+  await deps.sleep((result.mode === 'summary' ? 200 : 500) * attempt);
+  return {
+    input: result.promptContext,
+    promptParts: result.promptParts,
+    maxOutputTokens: newMaxOutput,
+    summaryAttempted: result.summaryAttempted,
+  };
 }
 
 async function callOnce(params: {
@@ -124,34 +134,40 @@ async function maybeHandleOverflow(params: {
   const result = await handleContextOverflow({
     deps,
     stagedFiles,
-    input: loopState.input,
+    promptParts: loopState.promptParts,
     maxOutputTokens: loopState.maxOutputOverride,
     attempt,
-    summaryUsed: loopState.summaryUsed,
+    summaryAttempted: loopState.summaryAttempted,
   });
+  if (!result) return false;
   loopState.input = result.input;
+  loopState.promptParts = result.promptParts;
   loopState.maxOutputOverride = result.maxOutputTokens;
-  loopState.summaryUsed = result.summaryUsed;
+  loopState.summaryAttempted = result.summaryAttempted;
   return true;
 }
 
 async function callGeminiAPIWithDeps(params: {
   deps: GeminiServiceRuntimeDeps;
   promptContext: string;
+  promptParts?: PromptContextParts;
+  summaryAttempted?: boolean;
   systemPrompt: string;
   stagedFiles: string[];
   meta: LogMetadata;
   opts?: CallGeminiOptions;
 }): Promise<GeminiResponse | null> {
-  const { deps, promptContext, systemPrompt, stagedFiles, meta, opts } = params;
+  const { deps, promptContext, promptParts, summaryAttempted, systemPrompt, stagedFiles, meta, opts } = params;
   const maxAttempts = Math.max(1, CONFIG.GEMINI_MAX_RETRIES || 3);
   const enableThinking = CONFIG.ENABLE_THINKING;
   let attempt = 0;
   const loopState: CallLoopState = {
+    promptParts: promptParts || { prefix: '', diffHeading: '', diffBody: promptContext, suffix: '' },
     input: promptContext,
     maxOutputOverride: CONFIG.MAX_OUTPUT_TOKENS,
-    summaryUsed: false,
+    summaryAttempted: summaryAttempted ?? false,
   };
+  loopState.input = renderPromptContext(loopState.promptParts);
   for (;;) {
     attempt += 1;
     try {
@@ -179,12 +195,19 @@ async function callGeminiAPIWithDeps(params: {
   }
 }
 
-export function createGeminiService({ client, logger, apiKey }: GeminiServiceDeps): GeminiService {
+export function createGeminiService({
+  client,
+  logger,
+  apiKey,
+  contextService = createContextService(),
+  sleep = Bun.sleep,
+}: GeminiServiceDeps): GeminiService {
   const deps: GeminiServiceRuntimeDeps = {
     client,
     logger,
     apiKey,
-    inputShrinkFactor: 0.7,
+    contextService,
+    sleep,
   };
   return {
     callGeminiAPI: function (params: CallGeminiApiParams): Promise<GeminiResponse | null> {

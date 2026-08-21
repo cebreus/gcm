@@ -72,3 +72,23 @@ async function summarizerLargeSkipGroupTest(): Promise<void> {
   console.log('  summarizerLargeSkipGroupTest -> passed');
 }
 test('summarizer: large skip groups are limited per-folder', summarizerLargeSkipGroupTest);
+
+test('summarizer: accepts GCM_MAX_HUNKS=0', async () => {
+  const script = `
+    import { summarizeLargeDiff } from './src/summarizer.ts';
+    const result = await summarizeLargeDiff(['src/example.ts'], {
+      spawnStreamImpl: async () => ({ text: ' 1 file changed\\n', truncated: false }),
+      spawnLinesImpl: async () => ({
+        lines: ['@@ -1 +1 @@\\n', '+const example = true;\\n'],
+        truncated: false,
+      }),
+    });
+    if (result.numHunks !== 1) process.exit(1);
+  `;
+  const child = Bun.spawn([process.execPath, '--eval', script], {
+    cwd: process.cwd(),
+    env: { ...process.env, GCM_MAX_HUNKS: '0' },
+  });
+
+  expect(await child.exited).toBe(0);
+});

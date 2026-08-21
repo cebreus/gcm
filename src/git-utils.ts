@@ -1,11 +1,3 @@
-interface BunSpawnOptions {
-  cmd?: string[];
-  stdout?: 'pipe' | 'inherit' | 'ignore';
-  stderr?: 'pipe' | 'inherit' | 'ignore';
-  // Add other properties as needed based on Bun.spawnSync documentation
-  // For now, keeping it minimal
-}
-
 interface SpawnGitOptions {
   maxBytes?: number;
   execName?: string;
@@ -36,15 +28,6 @@ function killSpawnedChild(child: ReturnType<typeof Bun.spawn>, state: { killed: 
       /* ignore */
     }
   }, 2000);
-}
-
-export function runGitCmdSync(args: string[], opts: BunSpawnOptions = {}): string {
-  const proc = Bun.spawnSync({ cmd: ['git', ...args], stdout: 'pipe', stderr: 'pipe', ...opts });
-  if (!proc.success) {
-    const stderr = proc.stderr ? proc.stderr.toString() : '';
-    throw new Error('git ' + args.join(' ') + ' failed: ' + stderr);
-  }
-  return proc.stdout ? proc.stdout.toString() : '';
 }
 
 async function spawnCore(
@@ -139,18 +122,4 @@ export async function spawnGitStream(
     options,
   );
   return { text, truncated };
-}
-
-export function ensureGitRepo(): boolean {
-  try {
-    const res = Bun.spawnSync({
-      cmd: ['git', 'rev-parse', '--is-inside-work-tree'],
-      stdout: 'inherit',
-      stderr: 'inherit',
-    });
-    if (!res.success) throw new Error('not git');
-    return true;
-  } catch {
-    return false;
-  }
 }
