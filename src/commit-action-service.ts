@@ -17,6 +17,8 @@ export interface CommitCapability {
   reason?: string;
   target?: CommitTarget;
   snapshot?: IndexSnapshot;
+  excludedPaths?: string[];
+  exclusionsAcknowledged?: boolean;
 }
 
 export interface CommitActionInspection {
@@ -77,6 +79,16 @@ function describeIndexDrift(before: IndexEntry[], after: IndexEntry[]): string {
   const changedPaths = describeChangedIndexPaths(before, after);
   if (!changedPaths) return indexIndeterminateReason('the changed staged paths could not be identified');
   return `Staged changes were modified while this message was on screen, so the message no longer describes what would be committed. ${changedPaths} Regenerate the message, review it, then commit.`;
+}
+
+export function describeExcludedPaths(paths: string[]): string {
+  const shown = paths.slice(0, 4).map(function (path) {
+    return JSON.stringify(path);
+  });
+  const more = paths.length - shown.length;
+  const suffix = more > 0 ? `; ${more} more` : '';
+  const noun = paths.length === 1 ? 'path was' : 'paths were';
+  return `${paths.length} staged ${noun} excluded from analysis and WILL still be committed:\n${shown.join(', ')}${suffix}.`;
 }
 
 export function evaluateCommitCapability(
@@ -250,6 +262,11 @@ export function createCommitActionService(params: {
   async function apply(capability: CommitCapability, message: string): Promise<{ summary: string }> {
     if (!capability.allowed) throw refusal(capability.reason ?? 'Commit action is unavailable.');
     if (!capability.snapshot) throw refusal(indexIndeterminateReason('the original staged snapshot is missing'));
+    if (capability.excludedPaths?.length && !capability.exclusionsAcknowledged) {
+      throw refusal(
+        `Explicit confirmation is required before committing excluded staged paths. ${describeExcludedPaths(capability.excludedPaths)}`,
+      );
+    }
 
     const revalidated = await inspect(capability.target?.hash ?? null);
     if (!revalidated.repositoryState || !revalidated.capability.snapshot) {

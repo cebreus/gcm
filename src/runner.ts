@@ -421,7 +421,10 @@ async function runGenerationWorkflow(params: {
     );
     return 'failure';
   }
-  const commitCapability = inspection.capability;
+  const commitCapability = {
+    ...inspection.capability,
+    excludedPaths: targetCommit ? [] : (staged.excludedPaths ?? []),
+  };
   const meta = buildLogMetadata(staged, targetCommit);
   const commitContextHints = await resolveCommitContextHints(staged.stagedFiles, logger);
   const shouldContinue = await services.dialogue.confirmAtomicity(staged.stagedFiles, targetCommit);
@@ -808,7 +811,7 @@ async function handleSuccessfulGeneration(params: {
   if (actionResult.type === 'regenerate') return 'regenerate';
   return commitGeneratedMessage({
     commitMessage: parsedOut.COMMIT_MESSAGE,
-    commitCapability,
+    commitCapability: { ...commitCapability, exclusionsAcknowledged: actionResult.exclusionsAcknowledged },
     services,
     state,
     logger,

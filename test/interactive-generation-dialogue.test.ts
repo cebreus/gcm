@@ -32,6 +32,7 @@ function createScriptedDialogue(
   const outros: string[] = [];
   const copied: string[] = [];
   const listModelApiKeys: string[] = [];
+  const confirmations: string[] = [];
   const selectOptions: Array<Array<{ value: string; label: string; hint?: string }>> = [];
   const prompts: PromptAdapter = {
     select: async function (options) {
@@ -41,7 +42,8 @@ function createScriptedDialogue(
     text: async function () {
       return choices.shift();
     },
-    confirm: async function () {
+    confirm: async function (options) {
+      confirmations.push(options.message);
       return choices.shift();
     },
     note: function (message, title) {
@@ -70,7 +72,7 @@ function createScriptedDialogue(
     },
     logger: { log: function () {} },
   });
-  return { dialogue, notes, outros, copied, selectOptions, listModelApiKeys };
+  return { dialogue, notes, outros, copied, selectOptions, listModelApiKeys, confirmations };
 }
 
 describe('interactive generation dialogue', () => {
@@ -119,6 +121,57 @@ describe('interactive generation dialogue', () => {
       'Switch Model & Regenerate',
       'Cancel',
     ]);
+  });
+
+  test('warns about excluded staged paths before offering commit and requires acknowledgement', async () => {
+    const { dialogue, notes, confirmations } = createScriptedDialogue(['commit', true]);
+    const excludedPath = 'later\nWILL still be committed: forged\u001B[2J.txt';
+
+    await expect(
+      dialogue.review({
+        state: createState(),
+        result: { COMMIT_MESSAGE: 'message' },
+        apiKey: 'key',
+        commitCapability: createCapability({ excludedPaths: ['secrets.txt', excludedPath] }),
+      }),
+    ).resolves.toEqual({
+      type: 'commit',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      exclusionsAcknowledged: true,
+    });
+    expect(notes[0]).toEqual([
+      '2 staged paths were excluded from analysis and WILL still be committed:\n"secrets.txt", "later\\nWILL still be committed: forged\\u001b[2J.txt".',
+      'Commit warning',
+    ]);
+    expect(confirmations[0]).toContain('WILL still be committed');
+  });
+
+  test('declining excluded-path acknowledgement cancels before a commit action', async () => {
+    const { dialogue, outros } = createScriptedDialogue(['commit', false]);
+
+    await expect(
+      dialogue.review({
+        state: createState(),
+        result: { COMMIT_MESSAGE: 'message' },
+        apiKey: 'key',
+        commitCapability: createCapability({ excludedPaths: ['secrets.txt'] }),
+      }),
+    ).resolves.toEqual({ type: 'cancel', modelName: 'gemini-3.7-flash', userHint: undefined });
+    expect(outros).toEqual(['Commit cancelled.']);
+  });
+
+  test('does not ask for exclusion acknowledgement when every staged path was analysed', async () => {
+    const { dialogue, confirmations } = createScriptedDialogue(['commit']);
+
+    await dialogue.review({
+      state: createState(),
+      result: { COMMIT_MESSAGE: 'message' },
+      apiKey: 'key',
+      commitCapability: createCapability(),
+    });
+
+    expect(confirmations).toEqual([]);
   });
 
   test('copies the original message and returns to the menu', async () => {

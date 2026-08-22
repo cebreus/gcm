@@ -63,6 +63,6 @@ export function getRetryMsFromResponse(
   } catch {
     // ignore
   }
-  if (retryMs) return retryMs;
+  if (retryMs) return Math.max(0, Math.min(retryMaxMs, retryMs));
   return getExponentialBackoffMs(retryBaseMs, retryMaxMs, attempt);
 }
