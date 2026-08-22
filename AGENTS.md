@@ -1,71 +1,45 @@
-# Agent working rules
+## Project
+`gcm` generates conventional commits, PR titles, and branch names from `git diff` using Google Gemini.
+Start every reply with `cebreus+gcm`.
 
-Applies to any AI agent working in this repository.
-
-Start every reply with my name: cebreus+gcm
-
-## Scope discipline
-
-- Do exactly what the task states. No refactoring, renaming, reformatting, or dead-code removal that the task did not ask for.
-- Use sub-agents only when the task explicitly asks for them.
-- Never run a state-mutating git command: no `add`, `commit`, `checkout`, `stash`, `reset`, `rebase`, `push`, `worktree`. Leave changes in the working tree. Git commands inside a throwaway temporary repository you created yourself are fine.
-
-## Test-driven development
-
-Per item, in this order:
-
-1. Write the failing test first. Run it. Confirm it fails for the right reason.
-2. Write the minimum production code that makes it pass.
-3. Run `bun test`. Everything passes.
-
-Never write the production change before its failing test exists. Refactors of already-covered code are the exception: keep the existing tests green instead of adding new ones.
-
-A green test is not proof of correctness. Before claiming a fix works, break the production change on purpose and confirm the test goes red. Report both observations.
-
-## Code style
-
-- Self-documenting code. No comments explaining *what* the code does. A comment is allowed only for a non-obvious *why* — a git or API quirk — and should be rare.
-- YAGNI: no new config knobs, no speculative options, no defensive generality for cases nobody has. Deleting code beats adding it.
-- Fix at the shared function every caller routes through, never per call site.
-- DRY only where versions actually diverge. Two-line similarities are not duplication.
-- Match the surrounding code's existing idiom and naming.
-- Never widen a public API purely to make something testable. If a test cannot reach the behaviour, that usually means the seam is in the wrong place — say so rather than adding an export.
-
-## Types
-
-`any` is not acceptable in new code. Narrow `unknown` with a type guard instead. The existing `any` findings in `src/runner.ts` are known technical debt; do not add more.
-
-## Verification before reporting done
-
-Run and report the actual output of:
-
-```
-bun test
-bunx tsc --noEmit
-bun run lint
-```
-
-Lint currently reports pre-existing errors in `src/runner.ts`. Confirm you introduced no new ones.
-
-Report per item: the test added (file:line), the production change (file:line), and red-then-green confirmation.
+## Stack
+- Bun (v1.0+), TypeScript, `minimist`, ESLint, Prettier.
+- Use Bun APIs (`Bun.file`, `Bun.spawn`); never use Node core modules (`fs`, `child_process`).
 
 ## Commands
+- Dev: `bun run ./gcm.ts`
+- Build: `bun run build` (outputs `dist/gcm`)
+- Test: `bun test`
+- Typecheck: `bunx tsc --noEmit`
+- Lint: `bun run lint`
+- Dead-code check: `fallow`
 
-- `bun test` — test suite
-- `bun run check` — `tsc --noEmit`
-- `bun run lint` — eslint
-- `bun run build` — build `dist/gcm`
-- `fallow` — dead code, duplication, complexity. Deterministic; use it to check a claim about unused code before acting on it.
+## Architecture
+- `gcm.ts` is argv/exit-code entry point; `src/runner.ts` orchestrates sessions.
+- `src/interactive-generation-dialogue.ts` owns prompts; `src/commit-action-service.ts` authorizes actions.
+- `src/services/` isolates Git, Gemini, and context I/O; `src/gemini-client/` handles requests, retries, and parsing.
+- Core modules include summarization, scope detection, atomic planning, model limits, CLI parsing, Git process boundaries, and log redaction.
+- `gcm.config.ts` exports `CONFIG`, overridable by `GCM_` environment variables. Tests mirror `src/`; binary tests require fresh build.
 
-## What tests do not catch
+## Rules
+- IMPORTANT: Code must be strictly testable. Isolate I/O and APIs at boundaries; core logic must be pure and deterministic.
+- IMPORTANT: Never guess. If context is missing, say `I don't know`.
+- Write failing test first, confirm reason, implement minimum, then run full test suite. Refactors of covered code may preserve existing tests. Break fix to prove test fails; report red/green results.
+- Handle errors at risk-prone boundaries. Use `unknown` with type guards; Never add `any`.
+- IMPORTANT: Before destructive Git operations, validate inputs and repository state; stop rather than risk data loss.
+- Match local style, avoid speculative abstractions, and fix shared functions rather than call sites.
+- Prefer standard library and existing dependencies; add code or dependencies only when they remove real complexity.
+- Every non-trivial change needs runnable validation. Prefer deletion and smallest correct solution.
+- Project history uses Conventional Commits.
+- Commits are forbidden by default. Exception: commit only fully verified atomic chunk to safeguard it before risky change, and never commit this repository's work.
 
-Four checks have each caught real defects that a green suite missed. Apply them:
+## Workflow
+1. Read relevant files in `memories/` and owning implementation before editing.
+2. Use `apply_patch` for edits. Keep scope minimal; use sub-agents only when requested.
+3. For each item: failing test, minimal implementation, focused check, then `bun test`, `bunx tsc --noEmit`, and `bun run lint`. Report actual output and pre-existing lint errors.
+4. Read diff, grep before deleting, run built binary, and test error paths. Run CLI experiments only in temporary repository.
 
-- **Read the diff, not the summary.** A truncation signal was placed inside a `try` whose `catch` swallowed it. Tests passed because the happy path worked.
-- **Grep before deleting.** An automated report called `callGemini` unused; it had five live references. Only its re-export was dead.
-- **Break the fix, prove the test fails.** Otherwise the test may assert nothing.
-- **Run the built binary.** Unit tests called `parseArgs` directly and asserted it throws; in the real binary that throw was uncaught and dumped the minified bundle to the user.
-
-## Running the CLI
-
-`gcm` creates and amends commits. Never run it against this repository. Create a throwaway git repository in a temporary directory and run it there.
+## Out of scope
+- Node API migrations/polyfills; changes to `package.json`, config, or linter settings unless explicitly requested.
+- Refactoring multiple files or changing architecture without user approval.
+- State-mutating Git commands (`add`, `checkout`, `stash`, `reset`, `rebase`, `push`, `worktree`) in this repository.
