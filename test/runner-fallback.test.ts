@@ -52,6 +52,15 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
         throw new Error('not used in this test');
       },
       getIndexTree: async (logger: any) => '',
+      getIndexEntries: async (logger: any) => [],
+      getRepositoryState: async (logger: any) => ({
+        hasStagedChanges: true,
+        hasUnstagedChanges: false,
+        hasUntrackedFiles: false,
+        hasUnmergedPaths: false,
+        inProgressOperation: null,
+        changedFiles: ['src/index.js', 'README.md'],
+      }),
     };
   }
 

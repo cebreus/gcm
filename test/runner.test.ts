@@ -55,6 +55,8 @@ const mockGitService = {
   rewordCommit: mock(),
   inspectCommitTarget: mock(),
   getIndexTree: mock(),
+  getIndexEntries: mock(),
+  getRepositoryState: mock(),
 };
 const mockContextService = {
   constructLLMPromptContext: mock(),
@@ -88,6 +90,17 @@ describe('Refactored Runner', () => {
     mockGitService.commitChanges.mockClear();
     mockGitService.getIndexTree.mockClear();
     mockGitService.getIndexTree.mockResolvedValue('index-tree');
+    mockGitService.getIndexEntries.mockClear();
+    mockGitService.getIndexEntries.mockResolvedValue([]);
+    mockGitService.getRepositoryState.mockClear();
+    mockGitService.getRepositoryState.mockResolvedValue({
+      hasStagedChanges: true,
+      hasUnstagedChanges: false,
+      hasUntrackedFiles: false,
+      hasUnmergedPaths: false,
+      inProgressOperation: null,
+      changedFiles: ['file.ts'],
+    });
     mockContextService.constructLLMPromptContext.mockClear();
     mockGeminiService.callGeminiAPI.mockClear();
     mockListModels.mockClear();
@@ -335,7 +348,11 @@ describe('Refactored Runner', () => {
     // Verify text prompt called with initial value
     expect(mockText).toHaveBeenCalled();
     // Verify commit called with edited message
-    expect(mockGitService.commitChanges).toHaveBeenCalledWith('edited message', expect.any(Object));
+    expect(mockGitService.commitChanges).toHaveBeenCalledWith(
+      'edited message',
+      expect.any(Object),
+      expect.any(Object),
+    );
   });
 
   test('Should reject a stale index through the commit workflow', async () => {
@@ -343,10 +360,23 @@ describe('Refactored Runner', () => {
       stagedDiff: 'diff',
       stagedFiles: ['file.ts'],
       truncated: false,
+      snapshot: {
+        tree: 'original-tree',
+        entries: [{ path: 'file.ts', mode: '100644', objectId: '1'.repeat(40) }],
+      },
     });
     mockGitService.getIndexTree
-      .mockResolvedValueOnce('original-tree')
+      .mockResolvedValueOnce('changed-tree')
       .mockResolvedValueOnce('changed-tree');
+    mockGitService.getIndexEntries
+      .mockResolvedValueOnce([
+        { path: 'file.ts', mode: '100644', objectId: '1'.repeat(40) },
+        { path: 'later.ts', mode: '100644', objectId: '2'.repeat(40) },
+      ])
+      .mockResolvedValueOnce([
+        { path: 'file.ts', mode: '100644', objectId: '1'.repeat(40) },
+        { path: 'later.ts', mode: '100644', objectId: '2'.repeat(40) },
+      ]);
     mockContextService.constructLLMPromptContext.mockResolvedValue({
       promptContext: 'ctx',
       processedDiffContent: 'diff',
@@ -368,7 +398,7 @@ describe('Refactored Runner', () => {
 
     expect(mockGitService.commitChanges).not.toHaveBeenCalled();
     expect(mockCancel).toHaveBeenCalledWith(
-      'Failed to apply commit action: Staged changes changed. Regenerate the message before committing.',
+      'Staged changes were modified while this message was on screen, so the message no longer describes what would be committed. Added: "later.ts". Regenerate the message, review it, then commit.',
     );
   });
 

@@ -105,7 +105,7 @@ test('exclude-files: diff requests only include non-excluded paths', async () =>
 
   await service.retrieveStagedChanges(null, null, ['.env*']);
 
-  expect(calls[1]).toEqual(['diff', '--staged', '-w', '--', 'src/app.ts']);
+  expect(calls).toContainEqual(['diff', '--staged', '-w', '--', 'src/app.ts']);
 });
 
 test('exclude-files: real GitService hides excluded staged and commit diff content', async () => {
