@@ -1,5 +1,6 @@
 import { expect, test, mock, describe, beforeEach, afterEach } from 'bun:test';
 import { executeCommitMessageGeneration } from '../src/runner.js';
+import packageJson from '../package.json';
 
 // Mock @clack/prompts
 const mockIntro = mock();
@@ -193,7 +194,7 @@ describe('Refactored Runner', () => {
 
       const output = stdoutChunks.join('');
       expect(output).toContain('gcm');
-      expect(output).toContain('0.7.1');
+      expect(output).toContain(packageJson.version);
       expect(mockIntro).not.toHaveBeenCalled();
     } finally {
       process.stdout.write = originalStdoutWrite;
@@ -336,7 +337,7 @@ describe('Refactored Runner', () => {
 
       const output = stdoutChunks.join('');
       expect(output).toContain('Version:');
-      expect(output).toContain('0.7.1');
+      expect(output).toContain(packageJson.version);
       expect(output).toContain('--version');
     } finally {
       process.stdout.write = originalStdoutWrite;

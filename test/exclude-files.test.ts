@@ -8,15 +8,20 @@ import { spawnGitStream } from '../src/git-utils';
 import { createGitService } from '../src/services/git-service';
 import { shouldExcludeFile, filterExcludedFiles } from '../src/utils';
 
-function runGitInRepository(repository: string, args: string[]): string {
-  const result = Bun.spawnSync({
+async function runGitInRepository(repository: string, args: string[]): Promise<string> {
+  const child = Bun.spawn({
     cmd: ['git', ...args],
     cwd: repository,
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  if (!result.success) throw new Error(result.stderr.toString());
-  return result.stdout.toString();
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0) throw new Error(stderr);
+  return stdout;
 }
 
 // Integration test for exclude patterns
@@ -209,12 +214,12 @@ test('exclude-files: real GitService excludes Unicode paths and keeps newline pa
   const excludedPath = 'žluťoučký.txt';
   const includedPath = 'notes\nnext.txt';
   try {
-    runGitInRepository(repository, ['init', '-q']);
-    runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
-    runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
+    await runGitInRepository(repository, ['init', '-q']);
+    await runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
+    await runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
     await writeFile(join(repository, excludedPath), 'secret\n');
     await writeFile(join(repository, includedPath), 'included\n');
-    runGitInRepository(repository, ['add', '--', excludedPath, includedPath]);
+    await runGitInRepository(repository, ['add', '--', excludedPath, includedPath]);
 
     const service = createGitService({
       gitCommandRunner: args => spawnGitStream(['-C', repository, ...args]),
@@ -226,8 +231,8 @@ test('exclude-files: real GitService excludes Unicode paths and keeps newline pa
     expect(staged?.stagedDiff).toContain('included');
     expect(staged?.stagedDiff).not.toContain('secret');
 
-    runGitInRepository(repository, ['commit', '-qm', 'Add special paths']);
-    const hash = runGitInRepository(repository, ['rev-parse', 'HEAD']).trim();
+    await runGitInRepository(repository, ['commit', '-qm', 'Add special paths']);
+    const hash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
     const committed = await service.retrieveStagedChanges(hash, null, [excludedPath]);
     expect(committed?.stagedFiles).toEqual([includedPath]);
     expect(committed?.excludedPaths).toEqual([excludedPath]);
@@ -243,42 +248,42 @@ test('exclude-files: real GitService reads root, ordinary, merge, octopus, and r
   const rootPath = 'žluťoučký.txt';
   const renamedPath = 'přejmenováno.txt';
   try {
-    runGitInRepository(repository, ['init', '-q', '-b', 'main']);
-    runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
-    runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
+    await runGitInRepository(repository, ['init', '-q', '-b', 'main']);
+    await runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
+    await runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
     await writeFile(join(repository, rootPath), 'root\n');
-    runGitInRepository(repository, ['add', rootPath]);
-    runGitInRepository(repository, ['commit', '-qm', 'root']);
-    const rootHash = runGitInRepository(repository, ['rev-parse', 'HEAD']).trim();
+    await runGitInRepository(repository, ['add', rootPath]);
+    await runGitInRepository(repository, ['commit', '-qm', 'root']);
+    const rootHash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
 
-    runGitInRepository(repository, ['checkout', '-qb', 'feature']);
+    await runGitInRepository(repository, ['checkout', '-qb', 'feature']);
     await writeFile(join(repository, 'feature.txt'), 'feature\n');
-    runGitInRepository(repository, ['add', 'feature.txt']);
-    runGitInRepository(repository, ['commit', '-qm', 'feature']);
-    runGitInRepository(repository, ['checkout', 'main']);
+    await runGitInRepository(repository, ['add', 'feature.txt']);
+    await runGitInRepository(repository, ['commit', '-qm', 'feature']);
+    await runGitInRepository(repository, ['checkout', 'main']);
     await writeFile(join(repository, 'main.txt'), 'main\n');
-    runGitInRepository(repository, ['add', 'main.txt']);
-    runGitInRepository(repository, ['commit', '-qm', 'ordinary']);
-    const ordinaryHash = runGitInRepository(repository, ['rev-parse', 'HEAD']).trim();
-    runGitInRepository(repository, ['merge', '--no-ff', 'feature', '-m', 'merge']);
-    const mergeHash = runGitInRepository(repository, ['rev-parse', 'HEAD']).trim();
+    await runGitInRepository(repository, ['add', 'main.txt']);
+    await runGitInRepository(repository, ['commit', '-qm', 'ordinary']);
+    const ordinaryHash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
+    await runGitInRepository(repository, ['merge', '--no-ff', 'feature', '-m', 'merge']);
+    const mergeHash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
 
-    runGitInRepository(repository, ['checkout', '-qb', 'octopus-a']);
+    await runGitInRepository(repository, ['checkout', '-qb', 'octopus-a']);
     await writeFile(join(repository, 'a.txt'), 'a\n');
-    runGitInRepository(repository, ['add', 'a.txt']);
-    runGitInRepository(repository, ['commit', '-qm', 'a']);
-    runGitInRepository(repository, ['checkout', 'main']);
-    runGitInRepository(repository, ['checkout', '-qb', 'octopus-b']);
+    await runGitInRepository(repository, ['add', 'a.txt']);
+    await runGitInRepository(repository, ['commit', '-qm', 'a']);
+    await runGitInRepository(repository, ['checkout', 'main']);
+    await runGitInRepository(repository, ['checkout', '-qb', 'octopus-b']);
     await writeFile(join(repository, 'b.txt'), 'b\n');
-    runGitInRepository(repository, ['add', 'b.txt']);
-    runGitInRepository(repository, ['commit', '-qm', 'b']);
-    runGitInRepository(repository, ['checkout', 'main']);
-    runGitInRepository(repository, ['merge', '--no-ff', 'octopus-a', 'octopus-b', '-m', 'octopus']);
-    const octopusHash = runGitInRepository(repository, ['rev-parse', 'HEAD']).trim();
+    await runGitInRepository(repository, ['add', 'b.txt']);
+    await runGitInRepository(repository, ['commit', '-qm', 'b']);
+    await runGitInRepository(repository, ['checkout', 'main']);
+    await runGitInRepository(repository, ['merge', '--no-ff', 'octopus-a', 'octopus-b', '-m', 'octopus']);
+    const octopusHash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
 
-    runGitInRepository(repository, ['mv', rootPath, renamedPath]);
-    runGitInRepository(repository, ['commit', '-qm', 'rename']);
-    const renameHash = runGitInRepository(repository, ['rev-parse', 'HEAD']).trim();
+    await runGitInRepository(repository, ['mv', rootPath, renamedPath]);
+    await runGitInRepository(repository, ['commit', '-qm', 'rename']);
+    const renameHash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
     const service = createGitService({
       gitCommandRunner: args => spawnGitStream(['-C', repository, ...args]),
     });
@@ -311,12 +316,12 @@ test('exclude-files: real GitService reads root, ordinary, merge, octopus, and r
 test('exclude-files: real GitService hides excluded staged and commit diff content', async () => {
   const repository = await mkdtemp(join(tmpdir(), 'gcm-exclude-files-'));
   try {
-    runGitInRepository(repository, ['init', '-q']);
-    runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
-    runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
+    await runGitInRepository(repository, ['init', '-q']);
+    await runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
+    await runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
     await writeFile(join(repository, 'source.ts'), 'export const value = 1;\n');
     await writeFile(join(repository, 'secrets.txt'), 'hunter2_should_never_leak\n');
-    runGitInRepository(repository, ['add', 'source.ts', 'secrets.txt']);
+    await runGitInRepository(repository, ['add', 'source.ts', 'secrets.txt']);
 
     const service = createGitService({
       gitCommandRunner: args => spawnGitStream(['-C', repository, ...args]),
@@ -326,8 +331,8 @@ test('exclude-files: real GitService hides excluded staged and commit diff conte
     expect(staged?.stagedFiles).toEqual(['source.ts']);
     expect(staged?.stagedDiff).not.toContain('hunter2_should_never_leak');
 
-    runGitInRepository(repository, ['commit', '-qm', 'Add staged files']);
-    const hash = runGitInRepository(repository, ['rev-parse', 'HEAD']).trim();
+    await runGitInRepository(repository, ['commit', '-qm', 'Add staged files']);
+    const hash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
     const committed = await service.retrieveStagedChanges(hash, null, ['secrets.txt']);
     expect(committed?.stagedFiles).toEqual(['source.ts']);
     expect(committed?.stagedDiff).not.toContain('hunter2_should_never_leak');
@@ -339,15 +344,15 @@ test('exclude-files: real GitService hides excluded staged and commit diff conte
 test('exclude-files: a real commit includes excluded paths only after acknowledgement', async () => {
   const repository = await mkdtemp(join(tmpdir(), 'gcm-exclude-commit-'));
   try {
-    runGitInRepository(repository, ['init', '-q']);
-    runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
-    runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
+    await runGitInRepository(repository, ['init', '-q']);
+    await runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
+    await runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
     await writeFile(join(repository, 'base.ts'), 'export const base = true;\n');
-    runGitInRepository(repository, ['add', 'base.ts']);
-    runGitInRepository(repository, ['commit', '-qm', 'chore: base']);
+    await runGitInRepository(repository, ['add', 'base.ts']);
+    await runGitInRepository(repository, ['commit', '-qm', 'chore: base']);
     await writeFile(join(repository, 'source.ts'), 'export const value = 1;\n');
     await writeFile(join(repository, 'secrets.txt'), 'hunter2_should_still_commit\n');
-    runGitInRepository(repository, ['add', 'source.ts', 'secrets.txt']);
+    await runGitInRepository(repository, ['add', 'source.ts', 'secrets.txt']);
 
     const gitService = createGitService({
       gitCommandRunner: args => spawnGitStream(['-C', repository, ...args]),
@@ -361,10 +366,10 @@ test('exclude-files: a real commit includes excluded paths only after acknowledg
     await expect(actions.apply(capability, 'feat: add source')).rejects.toThrow(
       'Explicit confirmation is required before committing excluded staged paths',
     );
-    expect(runGitInRepository(repository, ['rev-list', '--count', 'HEAD']).trim()).toBe('1');
+    expect((await runGitInRepository(repository, ['rev-list', '--count', 'HEAD'])).trim()).toBe('1');
 
     await actions.apply({ ...capability, exclusionsAcknowledged: true }, 'feat: add source');
-    expect(runGitInRepository(repository, ['show', 'HEAD:secrets.txt'])).toBe(
+    expect(await runGitInRepository(repository, ['show', 'HEAD:secrets.txt'])).toBe(
       'hunter2_should_still_commit\n',
     );
   } finally {

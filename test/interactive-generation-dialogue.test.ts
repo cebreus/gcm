@@ -177,6 +177,20 @@ describe('interactive generation dialogue', () => {
     expect(outros).toEqual(['Commit cancelled.']);
   });
 
+  test('cancelling excluded-path acknowledgement cancels before a commit action', async () => {
+    const { dialogue, outros } = createScriptedDialogue(['commit', escape]);
+
+    await expect(
+      dialogue.review({
+        state: createState(),
+        result: { COMMIT_MESSAGE: 'message' },
+        apiKey: 'key',
+        commitCapability: createCapability({ excludedPaths: ['secrets.txt'] }),
+      }),
+    ).resolves.toEqual({ type: 'cancel', modelName: 'gemini-3.7-flash', userHint: undefined });
+    expect(outros).toEqual(['Commit cancelled.']);
+  });
+
   test('does not ask for exclusion acknowledgement when every staged path was analysed', async () => {
     const { dialogue, confirmations } = createScriptedDialogue(['commit']);
 
@@ -244,6 +258,32 @@ describe('interactive generation dialogue', () => {
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
     expect(result.COMMIT_MESSAGE).toBe('');
     expect(notes).toEqual([['', 'Updated Commit Message']]);
+    expect(selectOptions).toHaveLength(2);
+  });
+
+  test('keeps the original message when the edit prompt is cancelled', async () => {
+    const result = { COMMIT_MESSAGE: 'original message' };
+    const { dialogue, notes, selectOptions } = createScriptedDialogue(['edit', escape, 'commit']);
+
+    await expect(
+      dialogue.review({ state: createState(), result, apiKey: 'key', commitCapability: createCapability() }),
+    ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
+    expect(result.COMMIT_MESSAGE).toBe('original message');
+    expect(notes).toEqual([]);
+    expect(selectOptions).toHaveLength(2);
+  });
+
+  test('returns to the action menu after an unrecognised action value', async () => {
+    const { dialogue, selectOptions } = createScriptedDialogue(['unrecognised-action', 'commit']);
+
+    await expect(
+      dialogue.review({
+        state: createState(),
+        result: { COMMIT_MESSAGE: 'message' },
+        apiKey: 'key',
+        commitCapability: createCapability(),
+      }),
+    ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
     expect(selectOptions).toHaveLength(2);
   });
 
