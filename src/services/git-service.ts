@@ -6,10 +6,12 @@ export interface StagedChangesResult {
   stagedDiff: string;
   stagedFiles: string[];
   truncated: boolean;
+  snapshot?: IndexSnapshot;
 }
 
 export interface CommitTarget {
   hash: string;
+  headHash: string;
   subject: string;
   isHead: boolean;
   isPublished: boolean;
@@ -19,18 +21,40 @@ export interface CommitTarget {
   hasAmbiguousSubject: boolean;
 }
 
+export interface IndexEntry {
+  path: string;
+  mode: string;
+  objectId: string;
+}
+
+export interface IndexSnapshot {
+  tree: string;
+  entries: IndexEntry[];
+}
+
+export interface CommitWriteSafety {
+  snapshot: IndexSnapshot;
+  target?: CommitTarget;
+}
+
 export interface GitService {
   retrieveStagedChanges(
     commitHash: string | null,
     logger: Logger | null,
     excludePatterns?: string[],
   ): Promise<StagedChangesResult | null>;
-  commitChanges(message: string, logger: Logger | null): Promise<void>;
-  amendCommit(message: string, logger: Logger | null): Promise<void>;
-  rewordCommit(target: CommitTarget, message: string, logger: Logger | null): Promise<void>;
+  commitChanges(message: string, logger: Logger | null, safety?: CommitWriteSafety): Promise<void>;
+  amendCommit(message: string, logger: Logger | null, safety?: CommitWriteSafety): Promise<void>;
+  rewordCommit(
+    target: CommitTarget,
+    message: string,
+    logger: Logger | null,
+    safety?: CommitWriteSafety,
+  ): Promise<void>;
   inspectCommitTarget(hash: string, logger: Logger | null): Promise<CommitTarget>;
   getIndexTree(logger: Logger | null): Promise<string>;
-  getRepositoryState?(logger: Logger | null): Promise<RepositoryState>;
+  getIndexEntries(logger: Logger | null): Promise<IndexEntry[]>;
+  getRepositoryState(logger: Logger | null): Promise<RepositoryState>;
 }
 
 export type GitCommandRunner = typeof spawnGitStream;
@@ -106,18 +130,27 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         excludePatterns,
       });
     },
-    commitChanges: function (message: string, logger: Logger | null = null): Promise<void> {
-      return commitChangesWithDeps({ deps, message, logger });
+    commitChanges: function (
+      message: string,
+      logger: Logger | null = null,
+      safety?: CommitWriteSafety,
+    ): Promise<void> {
+      return commitChangesWithDeps({ deps, message, logger, safety });
     },
-    amendCommit: function (message: string, logger: Logger | null = null): Promise<void> {
-      return amendCommitWithDeps({ deps, message, logger });
+    amendCommit: function (
+      message: string,
+      logger: Logger | null = null,
+      safety?: CommitWriteSafety,
+    ): Promise<void> {
+      return amendCommitWithDeps({ deps, message, logger, safety });
     },
     rewordCommit: function (
       target: CommitTarget,
       message: string,
       logger: Logger | null = null,
+      safety?: CommitWriteSafety,
     ): Promise<void> {
-      return rewordCommitWithDeps({ deps, target, message, logger });
+      return rewordCommitWithDeps({ deps, target, message, logger, safety });
     },
     inspectCommitTarget: function (
       hash: string,
@@ -127,6 +160,9 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
     },
     getIndexTree: function (logger: Logger | null = null): Promise<string> {
       return getIndexTreeWithDeps({ deps, logger });
+    },
+    getIndexEntries: function (logger: Logger | null = null): Promise<IndexEntry[]> {
+      return getIndexEntriesWithDeps({ deps, logger });
     },
     getRepositoryState: function (logger: Logger | null = null): Promise<RepositoryState> {
       return getRepositoryStateWithDeps({ deps, logger });
@@ -151,21 +187,45 @@ async function retrieveStagedChangesWithDeps(params: {
     logNoChanges(logger, commitHash);
     return null;
   }
-  const diffRes = await deps.gitCommandRunner([...buildDiffArgs(commitHash), '--', ...files]);
+  const diff = commitHash
+    ? { result: await deps.gitCommandRunner([...buildDiffArgs(commitHash), '--', ...files]) }
+    : await readStableStagedDiff({ deps, files, logger });
+  const diffRes = diff.result;
   if (diffRes.truncated) logger?.log('warn', 'Diff output was truncated due to size limits.');
   return {
     stagedDiff: diffRes.text,
     stagedFiles: files,
     truncated: diffRes.truncated,
+    snapshot: 'snapshot' in diff ? diff.snapshot : undefined,
   };
+}
+
+async function readStableStagedDiff(params: {
+  deps: GitServiceDeps;
+  files: string[];
+  logger: Logger | null;
+}): Promise<{ result: Awaited<ReturnType<GitCommandRunner>>; snapshot: IndexSnapshot }> {
+  const { deps, files, logger } = params;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const beforeEntries = await getIndexTreeWithDeps({ deps, logger });
+    const entries = await getIndexEntriesWithDeps({ deps, logger });
+    const beforeDiff = await getIndexTreeWithDeps({ deps, logger });
+    if (beforeEntries !== beforeDiff) continue;
+    const result = await deps.gitCommandRunner([...buildDiffArgs(null), '--', ...files]);
+    const afterDiff = await getIndexTreeWithDeps({ deps, logger });
+    if (beforeDiff === afterDiff) return { result, snapshot: { tree: afterDiff, entries } };
+  }
+  throw new Error('Staged changes changed while their diff was being read. Regenerate the message, then try again.');
 }
 
 async function commitChangesWithDeps(params: {
   deps: GitServiceDeps;
   message: string;
   logger: Logger | null;
+  safety?: CommitWriteSafety;
 }): Promise<void> {
-  const { deps, message, logger } = params;
+  const { deps, message, logger, safety } = params;
+  await assertCommitWriteSafety({ deps, logger, safety });
   if (logger) logger.log('debug', 'Executing git commit');
   await deps.gitCommandRunner(['commit', '-m', message]);
 }
@@ -180,12 +240,38 @@ async function getIndexTreeWithDeps(params: {
   return result.text.trim();
 }
 
+function parseIndexEntries(text: string): IndexEntry[] {
+  return text
+    .split('\0')
+    .filter(Boolean)
+    .flatMap(function (line): IndexEntry[] {
+      const separator = line.indexOf('\t');
+      if (separator < 0) return [];
+      const [mode, objectId, stage] = line.slice(0, separator).split(' ');
+      const path = line.slice(separator + 1);
+      if (!mode || !objectId || stage !== '0' || !path) return [];
+      return [{ path, mode, objectId }];
+    });
+}
+
+async function getIndexEntriesWithDeps(params: {
+  deps: GitServiceDeps;
+  logger: Logger | null;
+}): Promise<IndexEntry[]> {
+  const { deps, logger } = params;
+  logger?.log('debug', 'Capturing git index entries');
+  const result = await deps.gitCommandRunner(['ls-files', '--stage', '-z']);
+  return parseIndexEntries(result.text);
+}
+
 async function amendCommitWithDeps(params: {
   deps: GitServiceDeps;
   message: string;
   logger: Logger | null;
+  safety?: CommitWriteSafety;
 }): Promise<void> {
-  const { deps, message, logger } = params;
+  const { deps, message, logger, safety } = params;
+  await assertCommitWriteSafety({ deps, logger, safety });
   logger?.log('debug', 'Executing git commit --amend');
   await deps.gitCommandRunner(['commit', '--amend', '-m', message]);
 }
@@ -198,8 +284,10 @@ async function rewordCommitWithDeps(params: {
   target: CommitTarget;
   message: string;
   logger: Logger | null;
+  safety?: CommitWriteSafety;
 }): Promise<void> {
-  const { deps, target, message, logger } = params;
+  const { deps, target, message, logger, safety } = params;
+  await assertCommitWriteSafety({ deps, logger, safety });
   logger?.log('debug', `Creating amend! commit for ${target.hash}`);
   await deps.gitCommandRunner([
     'commit',
@@ -209,6 +297,30 @@ async function rewordCommitWithDeps(params: {
     '-m',
     message,
   ]);
+}
+
+function commitSafetyRefusal(message: string): Error {
+  const error = new Error(message);
+  error.name = 'CommitActionRefusal';
+  return error;
+}
+
+async function assertCommitWriteSafety(params: {
+  deps: GitServiceDeps;
+  logger: Logger | null;
+  safety?: CommitWriteSafety;
+}): Promise<void> {
+  const { deps, logger, safety } = params;
+  if (!safety) return;
+  const tree = await getIndexTreeWithDeps({ deps, logger });
+  if (tree !== safety.snapshot.tree) {
+    throw commitSafetyRefusal('Staged changes changed before the commit could be written. Regenerate the message, then try again.');
+  }
+  if (!safety.target) return;
+  const target = await inspectCommitTargetWithDeps({ deps, hash: safety.target.hash, logger });
+  if (target.hash !== safety.target.hash || target.headHash !== safety.target.headHash) {
+    throw commitSafetyRefusal('HEAD or target commit moved before the commit could be written. Regenerate the message, then try again.');
+  }
 }
 
 // `branch --remotes --contains` answers with output rather than an exit code:
@@ -286,6 +398,7 @@ async function inspectCommitTargetWithDeps(params: {
   const isHead = resolved === head;
   const target: CommitTarget = {
     hash: resolved,
+    headHash: head,
     subject,
     isHead,
     isPublished: await isPublishedCommit(deps, resolved),

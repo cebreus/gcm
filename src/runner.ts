@@ -11,7 +11,12 @@ import type { CommitContextHints } from './scope-detector.js';
 import { listGeminiModels } from './gemini-client/listModels.js';
 import { createGitService } from './services/git-service.js';
 import type { GitService } from './services/git-service.js';
-import type { CommitTarget, RepositoryState } from './services/git-service.js';
+import type { RepositoryState } from './services/git-service.js';
+import {
+  createCommitActionService,
+  isCommitActionRefusal,
+  type CommitCapability,
+} from './commit-action-service.js';
 import { createContextService } from './services/context-service.js';
 import type { ContextService } from './services/context-service.js';
 import { createGeminiService } from './services/gemini-service.js';
@@ -50,14 +55,6 @@ interface RunnerServices {
   contextService: ContextService;
   geminiService: GeminiService;
   dialogue: InteractiveGenerationDialogue;
-}
-
-interface CommitCapability {
-  allowed: boolean;
-  mode: 'commit' | 'amend' | 'reword';
-  reason?: string;
-  target?: CommitTarget;
-  initialIndexTree?: string;
 }
 
 function getPackageInfo(): PackageInfo {
@@ -394,7 +391,8 @@ async function runGenerationWorkflow(params: {
   });
   if (!readyState) return;
   const { repositoryState, staged } = readyState;
-  const initialIndexTree = await getIndexTreeSafe(services.gitService, repositoryState, logger);
+  const commitActions = createCommitActionService({ gitService: services.gitService, logger });
+  const inspection = await commitActions.inspect(targetCommit, staged.snapshot);
   if (!targetCommit && isWhitespaceOnlyStagedChanges(staged)) {
     cancel(
       `Only whitespace-only staged changes detected in ${staged.stagedFiles.length} file(s). Nothing to send to AI.`,
@@ -402,13 +400,7 @@ async function runGenerationWorkflow(params: {
     return;
   }
 
-  const commitTarget = await inspectCommitTargetSafe(services.gitService, targetCommit, logger);
-  const initialCommitCapability = evaluateCommitCapability(
-    repositoryState,
-    targetCommit,
-    commitTarget,
-  );
-  showRepositoryWarnings(repositoryState, targetCommit, initialCommitCapability);
+  showRepositoryWarnings(repositoryState, targetCommit, inspection.capability);
   const preflight =
     parsedArgs.model || parsedArgs.mode ? 'continue' : await services.dialogue.configure(state, apiKey);
   if (preflight === 'exit') return;
@@ -418,10 +410,7 @@ async function runGenerationWorkflow(params: {
     );
     return;
   }
-  const commitCapability = {
-    ...evaluateCommitCapability(repositoryState, targetCommit, commitTarget),
-    initialIndexTree,
-  };
+  const commitCapability = inspection.capability;
   const meta = buildLogMetadata(staged, targetCommit);
   const commitContextHints = await resolveCommitContextHints(staged.stagedFiles, logger);
   const shouldContinue = await services.dialogue.confirmAtomicity(staged.stagedFiles, targetCommit);
@@ -485,77 +474,6 @@ async function resolveReadyRepositoryState(params: {
   }
 
   return { repositoryState, staged };
-}
-
-async function inspectCommitTargetSafe(
-  gitService: GitService,
-  targetCommit: string | null,
-  logger: Logger,
-): Promise<CommitTarget | null> {
-  if (!targetCommit) return null;
-  try {
-    return await gitService.inspectCommitTarget(targetCommit, logger);
-  } catch (error) {
-    logger.log('debug', `Could not inspect commit target: ${error}`);
-    return null;
-  }
-}
-
-// Analysing a past commit is not read-only by nature; it just needs a different
-// verb. Amending rewrites the tip, so it is offered only for an unpublished
-// HEAD. Every other target gets an `amend!` commit, which adds to history
-// instead of rewriting it.
-export function evaluateCommitCapability(
-  repositoryState: RepositoryState,
-  targetCommit: string | null,
-  commitTarget: CommitTarget | null,
-): CommitCapability {
-  if (repositoryState.inProgressOperation) {
-    return {
-      allowed: false,
-      mode: 'commit',
-      reason: `Commit is disabled while a git ${repositoryState.inProgressOperation} is in progress. Finish or abort the operation first.`,
-    };
-  }
-  if (!targetCommit) return { allowed: true, mode: 'commit' };
-  // Both amend and an `amend!` commit take whatever sits in the index. The
-  // message was generated from the target commit's diff, so staged work would
-  // travel into that commit undescribed.
-  if (repositoryState.hasStagedChanges) {
-    return {
-      allowed: false,
-      mode: 'commit',
-      reason:
-        'Staged changes are present. Amend and reword would carry them into the target commit, which the generated message does not describe. Unstage them first.',
-    };
-  }
-  if (!commitTarget) {
-    return {
-      allowed: false,
-      mode: 'commit',
-      reason: 'Commit target could not be resolved. Analysis stays read-only.',
-    };
-  }
-  if (commitTarget.isHeadDetached) {
-    return {
-      allowed: false,
-      mode: 'commit',
-      reason:
-        'HEAD is detached. A commit made here is orphaned as soon as another branch is checked out. Check out a branch first.',
-    };
-  }
-  if (commitTarget.isHead && !commitTarget.isPublished) {
-    return { allowed: true, mode: 'amend', target: commitTarget };
-  }
-  if (!commitTarget.isAncestorOfHead) {
-    return {
-      allowed: false,
-      mode: 'commit',
-      reason:
-        'The target commit is not reachable from HEAD. An amend! commit would land on this branch and never reach it. Check out a branch that contains the commit.',
-    };
-  }
-  return { allowed: true, mode: 'reword', target: commitTarget };
 }
 
 function showRepositoryWarnings(
@@ -641,27 +559,7 @@ async function getRepositoryStateSafe(
   gitService: GitService,
   logger: Logger,
 ): Promise<RepositoryState> {
-  if (typeof gitService.getRepositoryState === 'function') {
-    return gitService.getRepositoryState(logger);
-  }
-  logger.log('debug', 'Git service does not expose repository state; using safe fallback.');
-  return {
-    hasStagedChanges: false,
-    hasUnstagedChanges: false,
-    hasUntrackedFiles: false,
-    hasUnmergedPaths: false,
-    inProgressOperation: null,
-    changedFiles: [],
-  };
-}
-
-async function getIndexTreeSafe(
-  gitService: GitService,
-  repositoryState: RepositoryState,
-  logger: Logger,
-): Promise<string | undefined> {
-  if (repositoryState.inProgressOperation || repositoryState.hasUnmergedPaths) return undefined;
-  return gitService.getIndexTree(logger);
+  return gitService.getRepositoryState(logger);
 }
 
 function buildLogMetadata(
@@ -905,103 +803,6 @@ async function handleSuccessfulGeneration(params: {
   });
 }
 
-// The capability was decided before generation, and the repository can move
-// while the user regenerates: work gets staged, or a new commit lands and the
-// target stops being HEAD. Amend and reword both write into an existing commit,
-// so the decision is taken again here, immediately before the side effect.
-async function revalidateCommitCapability(
-  commitCapability: CommitCapability,
-  services: RunnerServices,
-  logger: Logger,
-  repositoryState?: RepositoryState,
-): Promise<CommitCapability> {
-  if (commitCapability.mode === 'commit') return commitCapability;
-  const hash = commitCapability.target?.hash ?? null;
-  const currentRepositoryState =
-    repositoryState ?? (await getRepositoryStateSafe(services.gitService, logger));
-  const target = await inspectCommitTargetSafe(services.gitService, hash, logger);
-  const fresh = evaluateCommitCapability(currentRepositoryState, hash, target);
-
-  if (!fresh.allowed) {
-    throw new Error(
-      fresh.reason ?? 'The repository changed and the action is no longer available.',
-    );
-  }
-  if (fresh.mode !== commitCapability.mode) {
-    throw new Error(
-      `The repository changed since generation: the action would now be a ${fresh.mode}, not a ${commitCapability.mode}. Run again.`,
-    );
-  }
-  return fresh;
-}
-
-// autosquash folds into the first subject match in its range, so the base is
-// not a suggestion when an older commit shares the subject: widening it hands
-// the rewrite to the wrong commit.
-function describeRewordResult(target: CommitTarget): string {
-  const short = target.hash.slice(0, 7);
-  const base = target.hasParent ? `${short}~1` : '--root';
-  const lines = [
-    `amend! commit created for ${short}. History is untouched until you fold it in:`,
-    `  git rebase --autosquash ${base}`,
-  ];
-  if (target.hasAmbiguousSubject) {
-    lines.push(
-      `An older commit shares the subject "${target.subject}". Use exactly this base: a wider one folds the message into that commit instead.`,
-    );
-  }
-  if (target.isPublished) {
-    lines.push(
-      'This commit is already on a remote branch. Folding the amend! commit in rewrites published history.',
-    );
-  }
-  return lines.join('\n');
-}
-
-async function applyCommitAction(params: {
-  commitCapability: CommitCapability;
-  commitMessage: string;
-  services: RunnerServices;
-  logger: Logger;
-}): Promise<string> {
-  const { commitMessage, services, logger } = params;
-  const { gitService } = services;
-
-  let repositoryState: RepositoryState | undefined;
-  if (params.commitCapability.initialIndexTree !== undefined) {
-    repositoryState = await getRepositoryStateSafe(gitService, logger);
-    const currentIndexTree = await getIndexTreeSafe(
-      gitService,
-      repositoryState,
-      logger,
-    );
-    if (
-      currentIndexTree !== undefined &&
-      currentIndexTree !== params.commitCapability.initialIndexTree
-    ) {
-      throw new Error('Staged changes changed. Regenerate the message before committing.');
-    }
-  }
-
-  const capability = await revalidateCommitCapability(
-    params.commitCapability,
-    services,
-    logger,
-    repositoryState,
-  );
-
-  if (capability.mode === 'amend') {
-    await gitService.amendCommit(commitMessage, logger);
-    return 'HEAD amended.';
-  }
-  if (capability.mode === 'reword' && capability.target) {
-    await gitService.rewordCommit(capability.target, commitMessage, logger);
-    return describeRewordResult(capability.target);
-  }
-  await gitService.commitChanges(commitMessage, logger);
-  return 'Commit successfully created!';
-}
-
 async function commitGeneratedMessage(params: {
   commitMessage: string;
   commitCapability: CommitCapability;
@@ -1014,14 +815,17 @@ async function commitGeneratedMessage(params: {
   const verb = commitCapability.mode === 'commit' ? 'Committing changes' : commitCapability.mode;
   s.start(`${verb}...`);
   try {
-    const summary = await applyCommitAction({ commitCapability, commitMessage, services, logger });
+    const commitActions = createCommitActionService({ gitService: services.gitService, logger });
+    const { summary } = await commitActions.apply(commitCapability, commitMessage);
     await saveSession({ modelName: state.baselineModelName, outputMode: state.outputMode });
     s.stop('Done');
     outro(`${C.cyan}${summary}${C.reset}`);
   } catch (error) {
     s.stop('Failed');
     cancel(
-      `Failed to apply commit action: ${error instanceof Error ? error.message : String(error)}`,
+      isCommitActionRefusal(error)
+        ? error.message
+        : `Failed to apply commit action: ${error instanceof Error ? error.message : String(error)}`,
     );
     logger.log('error', `Commit action failed: ${error}`);
   }

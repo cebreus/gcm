@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import { evaluateCommitCapability } from '../src/runner.js';
+import { evaluateCommitCapability } from '../src/commit-action-service.js';
 import { createGitService } from '../src/services/git-service.js';
 import type { CommitTarget, RepositoryState } from '../src/services/git-service.js';
 
@@ -18,6 +18,7 @@ function createRecorder(responses: Record<string, string> = {}) {
 
 const TARGET: CommitTarget = {
   hash: 'a'.repeat(40),
+  headHash: 'b'.repeat(40),
   subject: 'feat: original subject',
   isHead: false,
   isPublished: false,
@@ -28,6 +29,57 @@ const TARGET: CommitTarget = {
 };
 
 describe('commit actions', () => {
+  test('binds a staged diff to a stable index snapshot after one retry', async () => {
+    let treeRead = 0;
+    let diffRead = 0;
+    const { calls, runner } = createRecorder({
+      'diff --staged --name-only': 'first.ts\n',
+      'ls-files --stage -z': '100644 1111111111111111111111111111111111111111 0\tfirst.ts\0',
+      'diff --staged -w': 'diff --git a/first.ts b/first.ts\n',
+    });
+    const gitService = createGitService({
+      gitCommandRunner: async function (args) {
+        if (args[0] === 'write-tree') {
+          treeRead += 1;
+          return { text: treeRead === 3 ? 'second-tree\n' : treeRead < 3 ? 'first-tree\n' : 'second-tree\n', truncated: false };
+        }
+        if (args[0] === 'diff' && !args.includes('--name-only')) diffRead += 1;
+        return runner(args);
+      },
+    });
+
+    const staged = await gitService.retrieveStagedChanges(null, null);
+
+    expect(staged?.snapshot).toEqual({
+      tree: 'second-tree',
+      entries: [{ path: 'first.ts', mode: '100644', objectId: '1'.repeat(40) }],
+    });
+    expect(diffRead).toBe(2);
+    expect(treeRead).toBe(6);
+  });
+
+  test('refuses a staged diff that remains unstable after one retry', async () => {
+    let treeRead = 0;
+    const { runner } = createRecorder({
+      'diff --staged --name-only': 'first.ts\n',
+      'ls-files --stage -z': '100644 1111111111111111111111111111111111111111 0\tfirst.ts\0',
+      'diff --staged -w': 'diff --git a/first.ts b/first.ts\n',
+    });
+    const gitService = createGitService({
+      gitCommandRunner: async function (args) {
+        if (args[0] === 'write-tree') {
+          treeRead += 1;
+          return { text: ['first-tree', 'first-tree', 'second-tree', 'second-tree', 'second-tree', 'third-tree'][treeRead - 1] ?? '', truncated: false };
+        }
+        return runner(args);
+      },
+    });
+
+    await expect(gitService.retrieveStagedChanges(null, null)).rejects.toThrow(
+      'Staged changes changed while their diff was being read',
+    );
+  });
+
   test('amend rewrites the message of HEAD', async () => {
     const { calls, runner } = createRecorder({ commit: '' });
     const service = createGitService({ gitCommandRunner: runner });
@@ -35,6 +87,53 @@ describe('commit actions', () => {
     await service.amendCommit('feat(scope): new subject', null);
 
     expect(calls).toEqual([['commit', '--amend', '-m', 'feat(scope): new subject']]);
+  });
+
+  test('refuses an index mutation at the delegated write boundary', async () => {
+    let writeEntered = false;
+    const service = createGitService({
+      gitCommandRunner: async function (args) {
+        if (args[0] === 'write-tree') return { text: 'changed-tree\n', truncated: false };
+        if (args[0] === 'commit') writeEntered = true;
+        return { text: '', truncated: false };
+      },
+    });
+
+    await expect(
+      service.commitChanges('feat: first', null, {
+        snapshot: { tree: 'original-tree', entries: [] },
+      }),
+    ).rejects.toThrow('Staged changes changed before the commit could be written');
+    expect(writeEntered).toBe(false);
+  });
+
+  test('refuses a moved HEAD at the delegated amend boundary', async () => {
+    let writeEntered = false;
+    const originalHead = 'a'.repeat(40);
+    const movedHead = 'b'.repeat(40);
+    const originalTarget = { ...TARGET, hash: originalHead, headHash: originalHead, isHead: true };
+    const service = createGitService({
+      gitCommandRunner: async function (args) {
+        if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
+        if (args[0] === 'rev-parse') {
+          return { text: `${args[args.length - 1]?.startsWith('HEAD') ? movedHead : originalHead}\n`, truncated: false };
+        }
+        if (args[0] === 'log') return { text: 'feat: original subject\n', truncated: false };
+        if (args[0] === 'branch') return { text: '', truncated: false };
+        if (args[0] === 'merge-base') return { text: `${originalHead}\n`, truncated: false };
+        if (args[0] === 'symbolic-ref') return { text: 'refs/heads/main\n', truncated: false };
+        if (args[0] === 'commit') writeEntered = true;
+        return { text: '', truncated: false };
+      },
+    });
+
+    await expect(
+      service.amendCommit('feat: first', null, {
+        snapshot: { tree: 'tree', entries: [] },
+        target: originalTarget,
+      }),
+    ).rejects.toThrow('HEAD or target commit moved before the commit could be written');
+    expect(writeEntered).toBe(false);
   });
 
   // The amend! subject is what git matches during autosquash; the second -m
@@ -83,6 +182,7 @@ describe('commit actions', () => {
     const target = await service.inspectCommitTarget('HEAD', null);
 
     expect(target.isHead).toBe(true);
+    expect(target.headHash).toBe('b'.repeat(40));
     expect(target.isPublished).toBe(false);
     expect(target.subject).toBe('fix: tip subject');
   });
