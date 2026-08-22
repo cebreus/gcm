@@ -17,13 +17,19 @@ import type { ContextService } from './services/context-service.js';
 import { createGeminiService } from './services/gemini-service.js';
 import type { GeminiService } from './services/gemini-service.js';
 import { generateFallbackCommitDetails } from './runner-utils.js';
-import { buildAtomicSplitProposal, detectAtomicGroup } from './atomic-commit-planner.js';
+import { buildAtomicSplitProposal } from './atomic-commit-planner.js';
 import { loadSession, saveSession } from './session.js';
-import { intro, outro, spinner, note, select, text, isCancel, cancel } from '@clack/prompts';
+import { intro, outro, spinner, note, select, text, confirm, isCancel, cancel } from '@clack/prompts';
 import { KNOWN_MODELS, getModelSpec } from './model-registry.js';
 import { sanitizeForDisplay } from './utils.js';
 import clipboardy from 'clipboardy';
 import pkg from '../package.json';
+import {
+  createInteractiveGenerationDialogue,
+  type ActionMenuResult,
+  type GenerationState,
+  type InteractiveGenerationDialogue,
+} from './interactive-generation-dialogue.js';
 
 const C = {
   reset: '\x1b[0m',
@@ -43,20 +49,7 @@ interface RunnerServices {
   gitService: GitService;
   contextService: ContextService;
   geminiService: GeminiService;
-  listModelsFn: (apiKey: string) => Promise<string[]>;
-}
-
-interface GenerationState {
-  baselineModelName: string;
-  modelName: string;
-  outputMode: 'full' | 'commit-only';
-  userHint?: string;
-}
-
-interface ActionMenuResult {
-  type: 'commit' | 'regenerate' | 'cancel';
-  modelName: string;
-  userHint?: string;
+  dialogue: InteractiveGenerationDialogue;
 }
 
 interface CommitCapability {
@@ -66,15 +59,6 @@ interface CommitCapability {
   target?: CommitTarget;
   initialIndexTree?: string;
 }
-
-type ActionChoice =
-  | 'commit'
-  | 'copy'
-  | 'edit'
-  | 'regenerate'
-  | 'regenerate-hint'
-  | 'switch'
-  | 'cancel';
 
 function getPackageInfo(): PackageInfo {
   return { name: pkg.name, version: pkg.version };
@@ -200,132 +184,6 @@ export interface RunnerOptions {
   listModels?: (apiKey: string) => Promise<string[]>;
 }
 
-function toModelOption(name: string): { value: string; label: string; hint?: string } {
-  const normalizedName = name.replace(/^models\//, '');
-  const knownModel = KNOWN_MODELS.find(function (model) {
-    return model.name === normalizedName;
-  });
-
-  if (knownModel) {
-    return {
-      value: knownModel.name,
-      label: knownModel.label,
-      hint: knownModel.description,
-    };
-  }
-
-  return {
-    value: normalizedName,
-    label: normalizedName,
-    hint: 'Available from Gemini API',
-  };
-}
-
-function isSelectableTextModel(name: string): boolean {
-  return !/(embedding|image|tts|audio|live|robotics|computer-use|veo|imagen)/i.test(name);
-}
-
-async function getModelSelectionOptions(
-  apiKey: string,
-  logger: Logger,
-  listModelsFn: (apiKey: string) => Promise<string[]>,
-): Promise<Array<{ value: string; label: string; hint?: string }>> {
-  try {
-    const apiModels = await listModelsFn(apiKey);
-    const uniqueModels = [
-      ...new Set(
-        apiModels.map(function (name) {
-          return name.replace(/^models\//, '');
-        }),
-      ),
-    ]
-      .filter(function (name) {
-        return name.startsWith('gemini-');
-      })
-      .filter(isSelectableTextModel);
-
-    if (uniqueModels.length > 0) {
-      return uniqueModels.map(toModelOption);
-    }
-  } catch (error) {
-    logger.log('debug', 'Failed to load live Gemini model list; falling back to known models', {
-      error: String(error),
-    });
-  }
-
-  return KNOWN_MODELS.map(function (model) {
-    return {
-      value: model.name,
-      label: model.label,
-      hint: model.description,
-    };
-  });
-}
-
-async function runPreflightIfNeeded(params: {
-  parsedArgs: ParsedOptions;
-  state: GenerationState;
-  apiKey: string;
-  logger: Logger;
-  listModelsFn: (apiKey: string) => Promise<string[]>;
-}): Promise<'continue' | 'exit'> {
-  const { parsedArgs, state, apiKey, logger, listModelsFn } = params;
-  if (parsedArgs.model || parsedArgs.mode) return 'continue';
-
-  for (;;) {
-    const modeLabel = state.outputMode === 'full' ? 'Full Report' : 'Commit Msg Only';
-    const action = await select({
-      message: `Settings: [Model: ${state.modelName}] [Mode: ${modeLabel}]`,
-      options: [
-        { value: 'generate', label: 'Generate' },
-        { value: 'configure', label: 'Configure...' },
-        { value: 'exit', label: 'Exit' },
-      ],
-    });
-
-    if (isCancel(action) || action === 'exit') {
-      outro('Bye!');
-      return 'exit';
-    }
-
-    if (action !== 'configure') return 'continue';
-
-    const configAction = await select({
-      message: 'Configure Settings',
-      options: [
-        { value: 'model', label: `Change Model (Current: ${state.modelName})` },
-        { value: 'mode', label: `Change Mode (Current: ${state.outputMode})` },
-        { value: 'back', label: 'Back' },
-      ],
-    });
-
-    if (configAction === 'model') {
-      const modelOptions = await getModelSelectionOptions(apiKey, logger, listModelsFn);
-      const selectedModel = await select({
-        message: 'Select AI Model',
-        options: modelOptions,
-      });
-      if (!isCancel(selectedModel)) {
-        state.baselineModelName = String(selectedModel);
-        state.modelName = state.baselineModelName;
-      }
-    } else if (configAction === 'mode') {
-      const selectedMode = await select({
-        message: 'Select Output Mode',
-        options: [
-          {
-            value: 'commit-only',
-            label: 'Commit Message Only (Default)',
-            hint: 'Faster, concise',
-          },
-          { value: 'full', label: 'Full Report (Branch, PR)', hint: 'Detailed' },
-        ],
-      });
-      if (!isCancel(selectedMode)) state.outputMode = selectedMode as 'full' | 'commit-only';
-    }
-  }
-}
-
 function buildNoteContent(outputMode: 'full' | 'commit-only', parsedOut: Labels): string {
   if (outputMode === 'commit-only') return parsedOut.COMMIT_MESSAGE;
 
@@ -360,158 +218,34 @@ function parseAndSanitizeResponse(
   }
 }
 
-async function handleActionCopy(finalMessage: string): Promise<void> {
-  try {
-    await clipboardy.write(finalMessage);
-    note('Commit message copied to clipboard!', 'Success');
-  } catch (error) {
-    note(`Failed to copy to clipboard: ${error}`, 'Error');
-  }
-}
-
-async function handleActionEdit(finalMessage: string): Promise<string> {
-  const edited = await text({
-    message: 'Edit commit message',
-    initialValue: finalMessage,
-    placeholder: 'Enter commit message',
-  });
-  if (isCancel(edited)) return finalMessage;
-  const updated = String(edited);
-  note(updated, 'Updated Commit Message');
-  return updated;
-}
-
-async function runActionMenu(params: {
-  state: GenerationState;
-  parsedOut: Labels;
-  apiKey: string;
-  logger: Logger;
-  listModelsFn: (apiKey: string) => Promise<string[]>;
-  commitCapability: CommitCapability;
-}): Promise<ActionMenuResult> {
-  const { state, parsedOut, apiKey, logger, listModelsFn, commitCapability } = params;
-  let finalMessage = parsedOut.COMMIT_MESSAGE;
-  if (!commitCapability.allowed && commitCapability.reason) {
-    note(commitCapability.reason, 'Commit unavailable');
-  }
-
-  for (;;) {
-    const action = await selectAction(commitCapability);
-    if (action === null || action === 'cancel') {
-      outro('Commit cancelled.');
-      return { type: 'cancel', modelName: state.modelName, userHint: state.userHint };
-    }
-    const actionResult = await handleActionChoice({
-      action,
-      finalMessage,
-      parsedOut,
-      state,
-      apiKey,
-      logger,
-      listModelsFn,
-    });
-    if (actionResult.type === 'update-message') {
-      finalMessage = actionResult.message;
-      continue;
-    }
-    if (actionResult.type === 'continue') continue;
-    return actionResult.result;
-  }
-}
-
-function commitActionLabel(commitCapability: CommitCapability): string {
-  const subject = commitCapability.target?.subject ?? '';
-  if (commitCapability.mode === 'amend') return `Amend HEAD (${subject})`;
-  if (commitCapability.mode === 'reword') return `Reword via amend! commit (${subject})`;
-  return 'Commit';
-}
-
-async function selectAction(commitCapability: CommitCapability): Promise<ActionChoice | null> {
-  const options: Array<{ value: ActionChoice; label: string }> = [];
-  if (commitCapability.allowed) {
-    options.push({ value: 'commit', label: commitActionLabel(commitCapability) });
-  }
-  options.push(
-    { value: 'copy', label: 'Copy to clipboard' },
-    { value: 'edit', label: 'Edit message' },
-    { value: 'regenerate', label: 'Regenerate (same model)' },
-    { value: 'regenerate-hint', label: 'Regenerate with Hint...' },
-    { value: 'switch', label: 'Switch Model & Regenerate' },
-    { value: 'cancel', label: 'Cancel' },
-  );
-  const action = await select({
-    message: 'What would you like to do?',
-    options,
-  });
-  if (isCancel(action)) return null;
-  return action as ActionChoice;
-}
-
-async function handleActionChoice(params: {
-  action: ActionChoice;
-  finalMessage: string;
-  parsedOut: Labels;
-  state: GenerationState;
-  apiKey: string;
-  logger: Logger;
-  listModelsFn: (apiKey: string) => Promise<string[]>;
-}): Promise<
-  | { type: 'continue' }
-  | { type: 'update-message'; message: string }
-  | { type: 'return'; result: ActionMenuResult }
-> {
-  const { action, finalMessage, parsedOut, state, apiKey, logger, listModelsFn } = params;
-  if (action === 'copy') {
-    await handleActionCopy(finalMessage);
-    return { type: 'continue' };
-  }
-  if (action === 'edit') {
-    return { type: 'update-message', message: await handleActionEdit(finalMessage) };
-  }
-  if (action === 'regenerate') {
-    return {
-      type: 'return',
-      result: { type: 'regenerate', modelName: state.modelName, userHint: undefined },
-    };
-  }
-  if (action === 'regenerate-hint') return handleRegenerateHint(state);
-  if (action === 'switch') return handleSwitchModel(apiKey, logger, listModelsFn);
-  parsedOut.COMMIT_MESSAGE = finalMessage;
-  return {
-    type: 'return',
-    result: { type: 'commit', modelName: state.modelName, userHint: state.userHint },
-  };
-}
-
-async function handleRegenerateHint(
-  state: GenerationState,
-): Promise<{ type: 'continue' } | { type: 'return'; result: ActionMenuResult }> {
-  const hint = await text({
-    message: 'Enter hint for regeneration (e.g. "emphasize refactoring")',
-    placeholder: 'Add instructions...',
-  });
-  if (isCancel(hint)) return { type: 'continue' };
-  return {
-    type: 'return',
-    result: { type: 'regenerate', modelName: state.modelName, userHint: String(hint) },
-  };
-}
-
-async function handleSwitchModel(
-  apiKey: string,
+function createRunnerDialogue(
   logger: Logger,
   listModelsFn: (apiKey: string) => Promise<string[]>,
-): Promise<{ type: 'continue' } | { type: 'return'; result: ActionMenuResult }> {
-  const modelOptions = await getModelSelectionOptions(apiKey, logger, listModelsFn);
-  const selectedModel = await select({
-    message: 'Select AI Model for Regeneration',
-    options: modelOptions,
+): InteractiveGenerationDialogue {
+  return createInteractiveGenerationDialogue({
+    prompts: {
+      select: async function (options) {
+        return select(options);
+      },
+      text: async function (options) {
+        return text(options);
+      },
+      confirm: async function (options) {
+        return confirm(options);
+      },
+      note,
+      outro,
+      cancel,
+      isCancel,
+    },
+    clipboard: {
+      write: async function (message) {
+        await clipboardy.write(message);
+      },
+    },
+    listModels: listModelsFn,
+    logger,
   });
-  if (isCancel(selectedModel)) return { type: 'continue' };
-  return {
-    type: 'return',
-    result: { type: 'regenerate', modelName: String(selectedModel), userHint: undefined },
-  };
 }
 
 function createRunnerServices(opts: RunnerOptions, logger: Logger, apiKey: string): RunnerServices {
@@ -521,7 +255,8 @@ function createRunnerServices(opts: RunnerOptions, logger: Logger, apiKey: strin
   const geminiService =
     opts.geminiService || createGeminiService({ client: geminiClient, logger, apiKey, contextService });
   const listModelsFn = opts.listModels || listGeminiModels;
-  return { gitService, contextService, geminiService, listModelsFn };
+  const dialogue = createRunnerDialogue(logger, listModelsFn);
+  return { gitService, contextService, geminiService, dialogue };
 }
 
 async function maybeHandleListModels(parsedArgs: ParsedOptions): Promise<number | null> {
@@ -674,13 +409,8 @@ async function runGenerationWorkflow(params: {
     commitTarget,
   );
   showRepositoryWarnings(repositoryState, targetCommit, initialCommitCapability);
-  const preflight = await runPreflightIfNeeded({
-    parsedArgs,
-    state,
-    apiKey,
-    logger,
-    listModelsFn: services.listModelsFn,
-  });
+  const preflight =
+    parsedArgs.model || parsedArgs.mode ? 'continue' : await services.dialogue.configure(state, apiKey);
   if (preflight === 'exit') return;
   if (repositoryState.hasUnmergedPaths) {
     cancel(
@@ -694,7 +424,7 @@ async function runGenerationWorkflow(params: {
   };
   const meta = buildLogMetadata(staged, targetCommit);
   const commitContextHints = await resolveCommitContextHints(staged.stagedFiles, logger);
-  const shouldContinue = await confirmAtomicityIfNeeded(staged.stagedFiles, targetCommit);
+  const shouldContinue = await services.dialogue.confirmAtomicity(staged.stagedFiles, targetCommit);
   if (!shouldContinue) return;
   await runGenerationCycle({
     services,
@@ -996,34 +726,6 @@ async function resolveCommitContextHints(
   }
 }
 
-async function confirmAtomicityIfNeeded(
-  stagedFiles: string[],
-  targetCommit: string | null,
-): Promise<boolean> {
-  if (targetCommit) return true;
-  const stagedGroups = Array.from(new Set(stagedFiles.map(detectAtomicGroup)));
-  if (stagedGroups.length <= 1) return true;
-  for (;;) {
-    const action = await select({
-      message: [
-        `Staged files suggest multiple possible scopes: ${stagedGroups.join(', ')}.`,
-        'Atomic commits are preferred; split unrelated changes unless this is one functional unit.',
-      ].join('\n'),
-      options: [
-        { value: 'split', label: 'Show split proposal' },
-        { value: 'continue', label: 'Continue anyway' },
-        { value: 'cancel', label: 'Cancel' },
-      ],
-    });
-    if (isCancel(action) || action === 'cancel') {
-      outro('Commit cancelled.');
-      return false;
-    }
-    if (action === 'continue') return true;
-    note(buildAtomicSplitProposal(stagedFiles), 'Atomic split proposal');
-  }
-}
-
 async function runGenerationCycle(params: {
   services: RunnerServices;
   logger: Logger;
@@ -1182,12 +884,10 @@ async function handleSuccessfulGeneration(params: {
     (state.outputMode === 'full' ? 'Generated Report' : 'Generated Commit Message') + warningIcon,
   );
   reportStats(logger, state.modelName, response.usage, response.text.length);
-  const actionResult = await runActionMenu({
+  const actionResult: ActionMenuResult = await services.dialogue.review({
     state,
-    parsedOut,
+    result: parsedOut,
     apiKey,
-    logger,
-    listModelsFn: services.listModelsFn,
     commitCapability,
   });
   if (actionResult.type === 'cancel') return 'done';
