@@ -191,7 +191,6 @@ The tool can be configured using environment variables. These are defined in `gc
 | `GCM_MAX_OUTPUT_TOKENS`                 | Maximum tokens for Gemini's response; raise it if responses are cut off.    | `2048`             |
 | `GCM_ENABLE_HUNK_WEIGHTS`               | Set to `true` to favour important files when choosing diff hunks.           | `false`            |
 | `GCM_LOG_LEVEL`                         | Default console logging level; set `debug` when investigating a problem.    | `info`             |
-| `GCM_TELEMETRY_FILE`                    | Path to append telemetry lines; leave empty to keep telemetry off.          | empty              |
 | `GCM_DEBUG_API`                         | Set to `true` to save API logs to a file while debugging.                   | `false`            |
 | `GCM_DEBUG_FILE`                        | File path for API debug logs; change it to store logs elsewhere.            | `.debug.log`       |
 | `GCM_DEBUG_MAX_BODY_LOG_BYTES`          | Maximum API body bytes written to debug logs; lower it for smaller logs.    | `32768`            |

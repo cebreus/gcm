@@ -35,8 +35,6 @@ const mockCreateGeminiClient = mock(() => mockGeminiClient);
 
 const mockLoggerInstance = {
   log: mock(() => {}),
-  flush: mock(async () => {}),
-  flushSync: mock(() => {}),
 };
 const mockCreateLogger = mock(() => mockLoggerInstance);
 

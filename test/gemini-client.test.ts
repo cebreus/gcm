@@ -399,8 +399,6 @@ test('gemini-client: preserves MAX_TOKENS when marker parsing fails', () => {
     log: function (): void {
       throw new Error('logger unavailable');
     },
-    flush: async function (): Promise<void> {},
-    flushSync: function (): void {},
   };
 
   const result = parseCandidates(
