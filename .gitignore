@@ -2,3 +2,7 @@ node_modules/
 dist/
 .debug.log
 .tmp/
+
+# Owned by the release skill, recreated per run
+.changeset/config.json
+.changeset/bits-changelog.mjs
