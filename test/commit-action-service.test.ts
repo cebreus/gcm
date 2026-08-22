@@ -248,23 +248,28 @@ describe('commit action service', () => {
   });
 });
 
-function runGit(repository: string, args: string[]): string {
-  const result = Bun.spawnSync({ cmd: ['git', ...args], cwd: repository, stdout: 'pipe', stderr: 'pipe' });
-  if (!result.success) throw new Error(result.stderr.toString());
-  return result.stdout.toString();
+async function runGit(repository: string, args: string[]): Promise<string> {
+  const child = Bun.spawn({ cmd: ['git', ...args], cwd: repository, stdout: 'pipe', stderr: 'pipe' });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0) throw new Error(stderr);
+  return stdout;
 }
 
 test('integration: refuses staging drift without creating a commit', async () => {
   const repository = await mkdtemp(join(tmpdir(), 'gcm-commit-action-'));
   try {
-    runGit(repository, ['init', '-q']);
-    runGit(repository, ['config', 'user.email', 'test@gcm.local']);
-    runGit(repository, ['config', 'user.name', 'GCM Test']);
+    await runGit(repository, ['init', '-q']);
+    await runGit(repository, ['config', 'user.email', 'test@gcm.local']);
+    await runGit(repository, ['config', 'user.name', 'GCM Test']);
     await writeFile(join(repository, 'base.ts'), 'export const base = true;\n');
-    runGit(repository, ['add', 'base.ts']);
-    runGit(repository, ['commit', '-qm', 'chore: base']);
+    await runGit(repository, ['add', 'base.ts']);
+    await runGit(repository, ['commit', '-qm', 'chore: base']);
     await writeFile(join(repository, 'first.ts'), 'export const first = true;\n');
-    runGit(repository, ['add', 'first.ts']);
+    await runGit(repository, ['add', 'first.ts']);
 
     let writeEntered = false;
     const gitService = createGitService({
@@ -277,11 +282,11 @@ test('integration: refuses staging drift without creating a commit', async () =>
     const staged = await gitService.retrieveStagedChanges(null, null);
     if (!staged) throw new Error('Expected staged changes');
     await writeFile(join(repository, 'second.ts'), 'export const second = true;\n');
-    runGit(repository, ['add', 'second.ts']);
+    await runGit(repository, ['add', 'second.ts']);
     const inspection = await actions.inspect(null, staged.snapshot);
 
     await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow('Added: "second.ts"');
-    expect(runGit(repository, ['rev-list', '--count', 'HEAD']).trim()).toBe('1');
+    expect((await runGit(repository, ['rev-list', '--count', 'HEAD'])).trim()).toBe('1');
     expect(writeEntered).toBe(false);
   } finally {
     await rm(repository, { recursive: true, force: true });

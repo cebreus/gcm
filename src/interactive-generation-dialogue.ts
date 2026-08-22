@@ -186,6 +186,50 @@ type ReviewActionResult =
   | { type: 'update-message'; message: string }
   | { type: 'return'; result: ActionMenuResult };
 
+async function confirmExcludedPathCommit(
+  prompts: PromptAdapter,
+  excludedPaths: string[],
+): Promise<boolean> {
+  if (excludedPaths.length === 0) return true;
+  const acknowledged = await prompts.confirm({
+    message: `${describeExcludedPaths(excludedPaths)}\n\nCommit every staged path, including these excluded paths?`,
+    initialValue: false,
+  });
+  return !prompts.isCancel(acknowledged) && acknowledged === true;
+}
+
+async function chooseRegeneration(
+  action: 'regenerate' | 'regenerate-hint' | 'switch',
+  state: GenerationState,
+  apiKey: string,
+  dependencies: DialogueDependencies,
+): Promise<ReviewActionResult> {
+  if (action === 'regenerate') {
+    return { type: 'return', result: { type: 'regenerate', modelName: state.modelName, userHint: undefined } };
+  }
+  if (action === 'regenerate-hint') {
+    const hint = await dependencies.prompts.text({
+      message: 'Enter hint for regeneration (e.g. "emphasize refactoring")',
+      placeholder: 'Add instructions...',
+    });
+    if (dependencies.prompts.isCancel(hint)) return { type: 'continue' };
+    return {
+      type: 'return',
+      result: { type: 'regenerate', modelName: state.modelName, userHint: String(hint) },
+    };
+  }
+  const modelOptions = await getModelSelectionOptions(apiKey, dependencies);
+  const selectedModel = await dependencies.prompts.select({
+    message: 'Select AI Model for Regeneration',
+    options: modelOptions,
+  });
+  if (dependencies.prompts.isCancel(selectedModel)) return { type: 'continue' };
+  return {
+    type: 'return',
+    result: { type: 'regenerate', modelName: String(selectedModel), userHint: undefined },
+  };
+}
+
 async function handleActionChoice(params: {
   action: ActionChoice;
   message: string;
@@ -197,18 +241,12 @@ async function handleActionChoice(params: {
 }): Promise<ReviewActionResult> {
   const { action, message, result, state, apiKey, dependencies, excludedPaths } = params;
   if (action === 'commit') {
-    if (excludedPaths.length > 0) {
-      const acknowledged = await dependencies.prompts.confirm({
-        message: `${describeExcludedPaths(excludedPaths)}\n\nCommit every staged path, including these excluded paths?`,
-        initialValue: false,
-      });
-      if (dependencies.prompts.isCancel(acknowledged) || acknowledged !== true) {
-        dependencies.prompts.outro('Commit cancelled.');
-        return {
-          type: 'return',
-          result: { type: 'cancel', modelName: state.modelName, userHint: state.userHint },
-        };
-      }
+    if (!(await confirmExcludedPathCommit(dependencies.prompts, excludedPaths))) {
+      dependencies.prompts.outro('Commit cancelled.');
+      return {
+        type: 'return',
+        result: { type: 'cancel', modelName: state.modelName, userHint: state.userHint },
+      };
     }
     result.COMMIT_MESSAGE = message;
     return {
@@ -226,31 +264,8 @@ async function handleActionChoice(params: {
     return { type: 'continue' };
   }
   if (action === 'edit') return { type: 'update-message', message: await editMessage(dependencies.prompts, message) };
-  if (action === 'regenerate') {
-    return { type: 'return', result: { type: 'regenerate', modelName: state.modelName, userHint: undefined } };
-  }
-  if (action === 'regenerate-hint') {
-    const hint = await dependencies.prompts.text({
-      message: 'Enter hint for regeneration (e.g. "emphasize refactoring")',
-      placeholder: 'Add instructions...',
-    });
-    if (dependencies.prompts.isCancel(hint)) return { type: 'continue' };
-    return {
-      type: 'return',
-      result: { type: 'regenerate', modelName: state.modelName, userHint: String(hint) },
-    };
-  }
-  if (action === 'switch') {
-    const modelOptions = await getModelSelectionOptions(apiKey, dependencies);
-    const selectedModel = await dependencies.prompts.select({
-      message: 'Select AI Model for Regeneration',
-      options: modelOptions,
-    });
-    if (dependencies.prompts.isCancel(selectedModel)) return { type: 'continue' };
-    return {
-      type: 'return',
-      result: { type: 'regenerate', modelName: String(selectedModel), userHint: undefined },
-    };
+  if (action === 'regenerate' || action === 'regenerate-hint' || action === 'switch') {
+    return chooseRegeneration(action, state, apiKey, dependencies);
   }
   return { type: 'continue' };
 }

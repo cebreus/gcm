@@ -4,15 +4,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildAtomicSplitProposal, detectAtomicGroup } from '../src/atomic-commit-planner.js';
 
-function runGit(repository: string, args: string[]): string {
-  const result = Bun.spawnSync({
+async function runGit(repository: string, args: string[]): Promise<string> {
+  const child = Bun.spawn({
     cmd: ['git', ...args],
     cwd: repository,
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  if (!result.success) throw new Error(result.stderr.toString());
-  return result.stdout.toString();
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0) throw new Error(stderr);
+  return stdout;
 }
 
 test('atomic commit planner: classifies paths in rule precedence order', () => {
@@ -211,16 +216,17 @@ test('atomic commit planner: a later group stages only its own files', async () 
     await mkdir(join(repository, 'test'));
     await writeFile(join(repository, 'src/one.ts'), 'one\n');
     await writeFile(join(repository, 'test/two.test.ts'), 'two\n');
-    runGit(repository, ['init', '-q']);
-    runGit(repository, ['add', '--', 'src/one.ts']);
+    await runGit(repository, ['init', '-q']);
+    await runGit(repository, ['add', '--', 'src/one.ts']);
 
     if (laterCommands === undefined) throw new Error('Missing later group commands');
     expect(laterCommands).toBe(`git reset
 git add -- 'test/two.test.ts'`);
-    const result = Bun.spawnSync({ cmd: ['sh', '-c', laterCommands], cwd: repository, stderr: 'pipe' });
-    if (!result.success) throw new Error(result.stderr.toString());
+    const child = Bun.spawn({ cmd: ['sh', '-c', laterCommands], cwd: repository, stderr: 'pipe' });
+    const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    if (exitCode !== 0) throw new Error(stderr);
 
-    expect(runGit(repository, ['diff', '--cached', '--name-only'])).toBe('test/two.test.ts\n');
+    expect(await runGit(repository, ['diff', '--cached', '--name-only'])).toBe('test/two.test.ts\n');
   } finally {
     await rm(repository, { recursive: true, force: true });
   }
