@@ -1,5 +1,35 @@
 # gcm
 
+## 0.8.0
+
+> GCM now links each generated message to the exact files that were ready for the next commit. It checks those files again before it writes to Git. It also protects secrets and terminal output, and stops Git actions that may lose work.
+
+### Minor Changes
+
+- **New default model:** The default Gemini model is now `gemini-3.7-flash`. A saved session that uses `gemini-2.5-flash` or `gemini-2.5-pro` moves to the configured or default model. Other saved model names stay unchanged.
+- **Safe work on old commits:** With `--commit <target>`, GCM changes a message directly only when the target is the current `HEAD`, no remote branch contains it, `HEAD` is attached to a branch, and no files are staged. If GCM cannot get a safe answer from configured remotes, it treats the commit as published. For an older or published target, GCM creates a new `amend!` commit and prints the exact manual rebase command. It does not rewrite old history itself.
+- **Git write checks:** A target outside the current branch is read-only. Before every Git write, GCM checks `HEAD`, the target, the action type, and the exact staged tree again. It retries one unstable read of the staging area, then stops. It also stops when excluded staged files were not accepted by the user. Excluding a file keeps its text away from the AI service but does not remove it from the staging area.
+- **Commit split plan:** GCM can group staged files that look like more than one change. When nothing is staged, it can instead use changed worktree files and labels them as worktree files. It shows copy-ready `git reset` and `git add` commands but does not run them. Each command puts `--` before file paths, so a path that starts with `-` is not read as an option. In this release, commands for staged paths can mix unstaged content from the same path into a commit. The user must check both versions before using them. Release `0.11.0` later removes these commands for staged input.
+- **Safe debug logs:** GCM creates a debug log with private file access, does not follow a symbolic link, and limits each saved API body preview. The file itself can still grow as new records are added.
+
+### Patch Changes
+
+- **API key safety:** The Gemini model-list request now sends the API key in an HTTP header, not in the URL.
+- **Secret removal:** GCM removes supported Google, AWS, GitHub, Slack, OpenAI-style, JWT, and PEM secret shapes before a diff is sent to Gemini or logged. This pattern check cannot find every secret. A stricter outbound check keeps ordinary code that only looks similar to a secret.
+- **Safe terminal text:** GCM removes ANSI and other terminal control text from AI output, API errors, Git text, and commit subjects.
+- **Safe file names:** GCM reads staged file names with Git's zero-byte separator. File names with spaces, quotes, new lines, or non-ASCII text cannot avoid an `--exclude` rule. GCM stops if this file list is cut.
+- **Correct merge diff:** GCM compares a merge commit with its first parent, so the merge changes are not shown as empty.
+- **Git hook changes:** After a commit, GCM compares the committed tree with the tree it analysed. It warns when a Git hook changed the tree and names new file paths. It cannot stop the hook from changing the commit, so this is a warning after the write.
+- **Empty Gemini reply:** If Gemini gives no text after all retries, GCM shows a fixed diagnostic result. It does not offer a Git write action for that result.
+- **Gemini error detail:** A Gemini API failure shows the error detail and a short part of the response. This part has a size limit and known secret shapes are hidden, so it may not contain the full server reply.
+- **Commit body layout:** Release `0.7.1` removed manual line wrapping. This release also keeps blank lines and indentation in the generated commit body instead of trimming every body line.
+- **Token limits:** GCM counts fixed instructions, repository facts, diff summaries, and user hints in the model input limit. It keeps a full user hint or removes it; it never cuts the hint in half. It uses a diff summary only when the summary is shorter. It treats `MAX_TOKENS` as an incomplete reply and stops retrying when output space cannot grow. Server retry waits are limited. The default output limit is now 8,192 tokens and the default diff limit is 40 hunks.
+- **Clear CLI errors:** GCM rejects unknown options, missing values, invalid values, and repeated options that accept only one value. `--exclude` can be repeated or use comma-separated patterns. An exclude value may start with a dash. `--` ends option parsing, so later text is not treated as an option. Errors use a non-zero exit code instead of silent success.
+- **Removed CLI and settings:** `--dry-run` is removed. GCM also stops reading `GCM_FILE_CONCURRENCY`, `GCM_MAX_CONTEXT_TOKENS`, `GCM_MAX_INPUT_TOKENS`, and `GCM_MAX_INPUT_TOKENS_SAFETY_FACTOR`. Scripts and settings must stop using these names before upgrade.
+- **Exact exclude rules:** Exclude patterns are case-sensitive and match the full path. `*` can cross folders. `?` matches exactly one character.
+- **Bounded debug previews:** Each saved API request or response body preview has a size limit measured in UTF-8 bytes, and a cut never splits a character. Normal redacted log messages are no longer cut at the old 256-character metadata limit.
+- **No saved telemetry:** GCM removes telemetry events and `GCM_TELEMETRY_FILE` because there is no supported reader for them. Only terminal output and optional debug logs with bounded API body previews remain.
+
 ## 0.7.1
 
 > GCM no longer wraps a long subject at 60 characters or a long body line at 80 characters. This avoids unwanted breaks in Markdown lists.
