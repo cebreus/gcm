@@ -9,6 +9,7 @@ import {
   filterExcludedFiles,
   sanitizeForDisplay,
   stripTerminalControlSequences,
+  redactSensitiveText,
 } from '../src/utils';
 import type { Hunk } from '../src/utils';
 
@@ -347,6 +348,10 @@ test('utils: sanitizeForDisplay - should remove non-printable characters', () =>
   expect(result).toBe('contentwithspecialchars');
 });
 
+test('utils: sanitizeForDisplay - should remove complete ANSI escape sequences', () => {
+  expect(sanitizeForDisplay('\u001B[31mfeat: red\u001B[0m')).toBe('feat: red');
+});
+
 test('utils: sanitizeForDisplay - should preserve tabs, newlines, and carriage returns', () => {
   const input = 'line1\nline2\tindented\rcarriage';
   const result = sanitizeForDisplay(input);
@@ -373,5 +378,11 @@ test('utils: sanitizeForDisplay - should handle multiple occurrences', () => {
 test('utils: stripTerminalControlSequences removes ANSI and controls but keeps newlines and tabs', () => {
   expect(stripTerminalControlSequences('first\tline\n\u001B]8;;https://example.test\u0007link\u001B]8;;\u0007\u009B2J\u0000')).toBe(
     'first\tline\nlink',
+  );
+});
+
+test('utils: redactSensitiveText keeps broad log redaction', () => {
+  expect(redactSensitiveText('const opt = "sk-optional-flag"; docs mention AIzaSyExample1234')).toBe(
+    'const opt = "[REDACTED-KEY]"; docs mention [REDACTED-KEY]',
   );
 });

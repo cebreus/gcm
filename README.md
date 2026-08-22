@@ -231,8 +231,13 @@ Follow these steps to set up a local development environment.
     The project uses `bun:test` for testing.
 
     ```bash
-    bun test
+    bun run test
     ```
+
+    Run it through the script, not as a bare `bun test`. The script passes `--isolate`, which gives
+    each test file its own module registry. Several files install `mock.module` stubs that are
+    otherwise process-wide and leak into every file that runs after them, which makes the result
+    depend on file order: without the flag, reversing the file order turns one passing test red.
 
     The compiled-binary contract suite also builds `gcm` outside the repository and runs it in temporary repositories:
 

@@ -60,3 +60,46 @@ test('git service: warns when a pre-commit hook stages an extra path', async fun
     runCommand(['rm', '-rf', repository]);
   }
 });
+
+async function createRepository(repository: string): Promise<void> {
+  runCommand(['mkdir', '-p', repository]);
+  runGit(repository, ['init', '-q']);
+  runGit(repository, ['config', 'user.name', 'Test User']);
+  runGit(repository, ['config', 'user.email', 'test@example.com']);
+  await Bun.write(`${repository}/file.txt`, 'content\n');
+  runGit(repository, ['add', 'file.txt']);
+  runGit(repository, ['commit', '-qm', 'chore: initial']);
+}
+
+test('git service: treats a commit as published when configured remotes have no tracking refs', async function () {
+  const repository = `/tmp/gcm-unfetched-remote-${crypto.randomUUID()}`;
+  try {
+    await createRepository(repository);
+    runGit(repository, ['remote', 'add', 'origin', 'https://example.test/repository.git']);
+    const service = createGitService({
+      gitCommandRunner: async function (args) {
+        return runGit(repository, args);
+      },
+    });
+
+    expect((await service.inspectCommitTarget('HEAD', null)).isPublished).toBe(true);
+  } finally {
+    runCommand(['rm', '-rf', repository]);
+  }
+});
+
+test('git service: treats a commit as unpublished when the repository has no remotes', async function () {
+  const repository = `/tmp/gcm-local-remote-${crypto.randomUUID()}`;
+  try {
+    await createRepository(repository);
+    const service = createGitService({
+      gitCommandRunner: async function (args) {
+        return runGit(repository, args);
+      },
+    });
+
+    expect((await service.inspectCommitTarget('HEAD', null)).isPublished).toBe(false);
+  } finally {
+    runCommand(['rm', '-rf', repository]);
+  }
+});

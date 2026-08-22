@@ -490,6 +490,7 @@ test('gemini-client: retry on truncated response when enabled', geminiClientRetr
 async function geminiClientTruncationRetryRespectsModelOutputLimitTest(): Promise<void> {
   let callCount = 0;
   const seenMaxOutput: number[] = [];
+  const warnings: string[] = [];
   async function fetchStub(_input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     void _input;
     callCount += 1;
@@ -515,6 +516,11 @@ async function geminiClientTruncationRetryRespectsModelOutputLimitTest(): Promis
   const client = createGeminiClient({
     fetchImpl: fetchStub as typeof fetch,
     config: { MAX_OUTPUT_TOKENS: 8192 },
+    logger: {
+      log: function (level, message): void {
+        if (level === 'warn') warnings.push(message);
+      },
+    },
   });
   const result = await client.callGemini({
     apiKey: 'fake-key',
@@ -525,11 +531,12 @@ async function geminiClientTruncationRetryRespectsModelOutputLimitTest(): Promis
     modelOverride: 'gemini-3.7-flash',
   });
 
-  expect(result?.truncated).toBeFalsy();
-  expect(seenMaxOutput).toEqual([8192, 8192]);
+  expect(result?.truncated).toBe(true);
+  expect(seenMaxOutput).toEqual([8192]);
+  expect(warnings).toContain("Gemini response was truncated because the model's output limit was reached.");
 }
 test(
-  'gemini-client: truncation retries stay within the selected model output limit',
+  'gemini-client: stops truncation retries at the selected model output limit',
   geminiClientTruncationRetryRespectsModelOutputLimitTest,
 );
 
