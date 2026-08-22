@@ -1,7 +1,6 @@
 import { spawnGitStream } from '../git-utils.js';
 import { filterExcludedFiles } from '../utils.js';
 import type { Logger } from '../logger.js';
-import { stat } from 'node:fs/promises';
 
 export interface StagedChangesResult {
   stagedDiff: string;
@@ -300,7 +299,7 @@ async function inspectCommitTargetWithDeps(params: {
 
 async function fileExists(path: string): Promise<boolean> {
   try {
-    await stat(path);
+    await Bun.file(path).stat();
     return true;
   } catch {
     return false;

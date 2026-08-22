@@ -36,7 +36,7 @@ async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
 
   const service = createGeminiService({
     client: mockClient as GeminiClient,
-    logger: { log: () => {}, flush: async () => {}, flushSync: () => {} } as any,
+    logger: { log: () => {} } as any,
     apiKey: 'fake',
   });
   const res = await service.callGeminiAPI({
@@ -101,7 +101,7 @@ test('gemini-service: retry delegates context reduction to ContextService', asyn
   };
   const service = createGeminiService({
     client,
-    logger: { log: () => {}, flush: async () => {}, flushSync: () => {} },
+    logger: { log: () => {} },
     apiKey: 'fake',
     contextService,
   });
@@ -153,7 +153,7 @@ test('gemini-service: keeps a construction summary and structured context on ove
         return { text: 'result', usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 } };
       },
     },
-    logger: { log: () => {}, flush: async () => {}, flushSync: () => {} },
+    logger: { log: () => {} },
     apiKey: 'fake',
     contextService,
     sleep: async () => {},
@@ -195,7 +195,7 @@ test('gemini-service: retries after emptying a diff below an unreachable proport
         return { text: 'result', usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 } };
       },
     },
-    logger: { log: () => {}, flush: async () => {}, flushSync: () => {} },
+    logger: { log: () => {} },
     apiKey: 'fake',
     contextService: createContextService(),
     sleep: async () => {},
@@ -255,8 +255,6 @@ test('gemini-service: retry mode selects its original delay and log message', as
       },
       logger: {
         log: (_level, logMessage) => messages.push(logMessage),
-        flush: async () => {},
-        flushSync: () => {},
       },
       apiKey: 'fake',
       contextService,

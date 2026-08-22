@@ -47,7 +47,7 @@ mock.module('clipboardy', () => ({
 }));
 
 // Mocks
-const mockLogger = { log: mock(), flush: mock(), flushSync: mock() };
+const mockLogger = { log: mock() };
 const mockGitService = {
   retrieveStagedChanges: mock(),
   commitChanges: mock(),

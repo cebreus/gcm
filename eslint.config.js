@@ -37,4 +37,13 @@ export default [
       'max-statements': ['warn', { max: 18 }],
     },
   },
+  {
+    files: ['src/**/*.{js,ts}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [{ group: ['node:*'], message: 'Use Bun native APIs instead.' }] },
+      ],
+    },
+  },
 ];

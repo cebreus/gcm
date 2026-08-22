@@ -16,7 +16,6 @@ export const CONFIG = {
   MAX_OUTPUT_TOKENS: Number(process.env.GCM_MAX_OUTPUT_TOKENS || 2048),
   ENABLE_HUNK_WEIGHTS: (process.env.GCM_ENABLE_HUNK_WEIGHTS || 'false') === 'true',
   LOG_LEVEL: process.env.GCM_LOG_LEVEL || 'info',
-  TELEMETRY_FILE: process.env.GCM_TELEMETRY_FILE || '',
   DEBUG_API: (process.env.GCM_DEBUG_API || 'false') === 'true',
   DEBUG_FILE: process.env.GCM_DEBUG_FILE || '.debug.log',
   DEBUG_MAX_BODY_LOG_BYTES: Number(process.env.GCM_DEBUG_MAX_BODY_LOG_BYTES || DEFAULT_MAX_DEBUG_LOG_BYTES),

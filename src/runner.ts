@@ -23,7 +23,7 @@ import { intro, outro, spinner, note, select, text, isCancel, cancel } from '@cl
 import { KNOWN_MODELS, getModelSpec } from './model-registry.js';
 import { sanitizeForDisplay } from './utils.js';
 import clipboardy from 'clipboardy';
-import { readFileSync } from 'node:fs';
+import pkg from '../package.json';
 
 const C = {
   reset: '\x1b[0m',
@@ -77,17 +77,7 @@ type ActionChoice =
   | 'cancel';
 
 function getPackageInfo(): PackageInfo {
-  try {
-    const packageJsonPath = new URL('../package.json', import.meta.url);
-    const packageRaw = readFileSync(packageJsonPath, 'utf8');
-    const packageJson = JSON.parse(packageRaw) as { name?: string; version?: string };
-    return {
-      name: packageJson.name || 'gcm',
-      version: packageJson.version || 'unknown',
-    };
-  } catch {
-    return { name: 'gcm', version: 'unknown' };
-  }
+  return { name: pkg.name, version: pkg.version };
 }
 
 function showHelp() {
@@ -559,7 +549,6 @@ async function maybeHandleListModels(parsedArgs: ParsedOptions): Promise<number 
 function buildLoggerConfig(parsedArgs: ParsedOptions): LoggerConfig {
   const loggerConfig: LoggerConfig = {
     LOG_LEVEL: CONFIG.LOG_LEVEL,
-    TELEMETRY_FILE: CONFIG.TELEMETRY_FILE,
   };
   if (parsedArgs.verbose) loggerConfig.LOG_LEVEL = 'debug';
   if (parsedArgs.debug) CONFIG.DEBUG_API = true;

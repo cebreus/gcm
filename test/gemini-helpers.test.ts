@@ -9,10 +9,6 @@ async function geminiHelpersTryParseJSONTest(): Promise<void> {
   }
   const logger: Logger = {
     log: loggerLog,
-    flush: () => Promise.resolve(),
-    flushSync: () => {
-      /* ignore */
-    },
   };
   expect(() => tryParseJSON(logger, 'this is not json')).toThrow();
   expect(logged).toBe(true);
@@ -74,10 +70,6 @@ async function geminiHelpersParseCandidatesMarkersTest(): Promise<void> {
   const logger = {
     log: (_: any, message: string) => {
       if (message.includes('missing <<END>>')) warned = true;
-    },
-    flush: () => Promise.resolve(),
-    flushSync: () => {
-      /* ignore */
     },
   } as unknown as Logger;
 
