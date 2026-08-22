@@ -7,13 +7,13 @@ function positiveInteger(value: string | undefined, fallback: number): number {
 
 export const CONFIG = {
   CHILD_PROCESS_MAX_BUFFER: Number(process.env.GCM_MAX_BUFFER) || 50 * 1024 * 1024,
-  MAX_HUNKS: positiveInteger(process.env.GCM_MAX_HUNKS, 16),
+  MAX_HUNKS: positiveInteger(process.env.GCM_MAX_HUNKS, 40),
   PER_FILE_BUFFER: Number(process.env.GCM_PER_FILE_BUFFER || 1 * 1024 * 1024),
   MODEL_NAME: process.env.GCM_MODEL || process.env.GEMINI_MODEL || 'gemini-3.7-flash',
   TEMPERATURE: Number(process.env.GCM_TEMPERATURE || process.env.GEMINI_TEMP || 1),
   ENABLE_THINKING: (process.env.GCM_ENABLE_THINKING || 'false') === 'true',
   TOKEN_BYTES_RATIO: Number(process.env.GCM_TOKEN_BYTES_RATIO || 3.5),
-  MAX_OUTPUT_TOKENS: Number(process.env.GCM_MAX_OUTPUT_TOKENS || 2048),
+  MAX_OUTPUT_TOKENS: Number(process.env.GCM_MAX_OUTPUT_TOKENS || 8192),
   ENABLE_HUNK_WEIGHTS: (process.env.GCM_ENABLE_HUNK_WEIGHTS || 'false') === 'true',
   LOG_LEVEL: process.env.GCM_LOG_LEVEL || 'info',
   DEBUG_API: (process.env.GCM_DEBUG_API || 'false') === 'true',

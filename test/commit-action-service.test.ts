@@ -98,6 +98,21 @@ describe('commit action service', () => {
     expect(fake.writes).toEqual(['commit:feat: first']);
   });
 
+  test('refuses excluded staged paths until they are explicitly acknowledged', async () => {
+    const fake = createFakeGitService({});
+    const actions = createActionService(fake.service);
+    const inspection = await actions.inspect(null);
+    const capability = { ...inspection.capability, excludedPaths: ['secrets.txt'] };
+
+    await expect(actions.apply(capability, 'feat: first')).rejects.toThrow(
+      'Explicit confirmation is required before committing excluded staged paths',
+    );
+    expect(fake.writes).toEqual([]);
+
+    await actions.apply({ ...capability, exclusionsAcknowledged: true }, 'feat: first');
+    expect(fake.writes).toEqual(['commit:feat: first']);
+  });
+
   test('refuses a changed index and names changed paths', async () => {
     const fake = createFakeGitService({
       trees: ['first-tree', 'first-tree', 'second-tree', 'second-tree'],

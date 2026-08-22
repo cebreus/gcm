@@ -1,4 +1,4 @@
-import { test, expect, mock, afterEach } from 'bun:test';
+import { test, expect, mock, afterAll, afterEach, beforeEach } from 'bun:test';
 import { executeCommitMessageGeneration as runnerRun } from '../src/runner.js';
 import { createGitService } from '../src/services/git-service.js';
 import { createGeminiService } from '../src/services/gemini-service.js';
@@ -9,8 +9,44 @@ const mockIntro = mock();
 const mockOutro = mock();
 const mockSpinner = mock(() => ({ start: mock(), stop: mock() }));
 const mockNote = mock();
-const mockSelect = mock(() => Promise.resolve('continue'));
-const mockText = mock(() => Promise.resolve('edited message'));
+const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+
+async function selectIntegrationPrompt(options: {
+  message: string;
+  options: Array<{ value: string }>;
+}): Promise<string> {
+  const values = options.options.map(function (option) {
+    return option.value;
+  });
+  if (
+    options.message.startsWith('Settings:') &&
+    values.join(',') === 'generate,configure,exit'
+  ) {
+    return 'generate';
+  }
+  if (
+    options.message.startsWith('Staged files suggest multiple possible scopes:') &&
+    values.join(',') === 'split,continue,cancel'
+  ) {
+    return 'continue';
+  }
+  if (options.message === 'What would you like to do?' && values.includes('cancel')) {
+    return 'cancel';
+  }
+  throw new Error(`Unexpected select prompt: ${options.message}`);
+}
+
+async function rejectUnexpectedTextPrompt(options: { message: string }): Promise<never> {
+  throw new Error(`Unexpected text prompt: ${options.message}`);
+}
+
+async function rejectUnexpectedConfirmPrompt(options: { message: string }): Promise<never> {
+  throw new Error(`Unexpected confirm prompt: ${options.message}`);
+}
+
+const mockSelect = mock(selectIntegrationPrompt);
+const mockText = mock(rejectUnexpectedTextPrompt);
+const mockConfirm = mock(rejectUnexpectedConfirmPrompt);
 const mockIsCancel = mock(() => false);
 const mockCancel = mock();
 
@@ -21,6 +57,7 @@ mock.module('@clack/prompts', () => ({
   note: mockNote,
   select: mockSelect,
   text: mockText,
+  confirm: mockConfirm,
   isCancel: mockIsCancel,
   cancel: mockCancel,
 }));
@@ -58,6 +95,15 @@ mock.module('../src/summarizer', () => ({ summarizeLargeDiff: mockSummarizeLarge
 // DO NOT mock CLI or Logger globally - that causes issues in other tests.
 // Instead, we'll pass mocks through dependency injection where needed.
 
+beforeEach(() => {
+  process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
+});
+
+afterAll(() => {
+  if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+  else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+});
+
 afterEach(() => {
   mockCallGemini.mockClear();
   mockCreateGeminiClient.mockClear();
@@ -70,6 +116,7 @@ afterEach(() => {
   mockNote.mockClear();
   mockSelect.mockClear();
   mockText.mockClear();
+  mockConfirm.mockClear();
   mockCancel.mockClear();
 });
 

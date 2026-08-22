@@ -1,6 +1,7 @@
 import type { Logger } from './logger.js';
 import { KNOWN_MODELS } from './model-registry.js';
 import { buildAtomicSplitProposal, detectAtomicGroup } from './atomic-commit-planner.js';
+import { describeExcludedPaths } from './commit-action-service.js';
 
 export interface GenerationState {
   baselineModelName: string;
@@ -13,6 +14,7 @@ export interface ActionMenuResult {
   type: 'commit' | 'regenerate' | 'cancel';
   modelName: string;
   userHint?: string;
+  exclusionsAcknowledged?: boolean;
 }
 
 export interface CommitCapability {
@@ -20,6 +22,7 @@ export interface CommitCapability {
   mode: 'commit' | 'amend' | 'reword';
   reason?: string;
   target?: { subject: string };
+  excludedPaths?: string[];
 }
 
 export interface PromptAdapter {
@@ -189,8 +192,34 @@ async function handleActionChoice(params: {
   state: GenerationState;
   apiKey: string;
   dependencies: DialogueDependencies;
+  excludedPaths: string[];
 }): Promise<ReviewActionResult> {
-  const { action, message, result, state, apiKey, dependencies } = params;
+  const { action, message, result, state, apiKey, dependencies, excludedPaths } = params;
+  if (action === 'commit') {
+    if (excludedPaths.length > 0) {
+      const acknowledged = await dependencies.prompts.confirm({
+        message: `${describeExcludedPaths(excludedPaths)}\n\nCommit every staged path, including these excluded paths?`,
+        initialValue: false,
+      });
+      if (dependencies.prompts.isCancel(acknowledged) || acknowledged !== true) {
+        dependencies.prompts.outro('Commit cancelled.');
+        return {
+          type: 'return',
+          result: { type: 'cancel', modelName: state.modelName, userHint: state.userHint },
+        };
+      }
+    }
+    result.COMMIT_MESSAGE = message;
+    return {
+      type: 'return',
+      result: {
+        type: 'commit',
+        modelName: state.modelName,
+        userHint: state.userHint,
+        ...(excludedPaths.length > 0 ? { exclusionsAcknowledged: true } : {}),
+      },
+    };
+  }
   if (action === 'copy') {
     await copyMessage(dependencies.prompts, dependencies.clipboard, message);
     return { type: 'continue' };
@@ -222,8 +251,7 @@ async function handleActionChoice(params: {
       result: { type: 'regenerate', modelName: String(selectedModel), userHint: undefined },
     };
   }
-  result.COMMIT_MESSAGE = message;
-  return { type: 'return', result: { type: 'commit', modelName: state.modelName, userHint: state.userHint } };
+  return { type: 'continue' };
 }
 
 export function createInteractiveGenerationDialogue(
@@ -286,6 +314,9 @@ export function createInteractiveGenerationDialogue(
       if (!commitCapability.allowed && commitCapability.reason) {
         prompts.note(commitCapability.reason, 'Commit unavailable');
       }
+      if (commitCapability.excludedPaths?.length) {
+        prompts.note(describeExcludedPaths(commitCapability.excludedPaths), 'Commit warning');
+      }
 
       for (;;) {
         const action = await selectAction(prompts, commitCapability);
@@ -300,6 +331,7 @@ export function createInteractiveGenerationDialogue(
           state,
           apiKey,
           dependencies,
+          excludedPaths: commitCapability.excludedPaths ?? [],
         });
         if (actionResult.type === 'update-message') {
           finalMessage = actionResult.message;

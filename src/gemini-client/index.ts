@@ -1,3 +1,4 @@
+import { dlopen, read, type Pointer } from 'bun:ffi';
 import { CONFIG } from '../../gcm.config.js';
 import { createLogger } from '../logger.js';
 import type { Logger, LoggerConfig, LogMetadata } from '../logger.js';
@@ -7,6 +8,7 @@ import { buildRequestBody } from './requestBuilder.js';
 import { GeminiApiError } from './errors.js';
 import { unescapeNewlinesInText } from '../utils.js';
 import { DEFAULT_MAX_DEBUG_LOG_BYTES } from '../constants.js';
+import { getModelSpec } from '../model-registry.js';
 
 export interface GeminiUsage {
   promptTokens: number;
@@ -62,6 +64,7 @@ interface CallSetup {
   urlBase: string;
   truncMaxRetries: number;
   truncIncrease: number;
+  maxOutputTokensLimit: number;
 }
 
 interface GeminiClientDeps {
@@ -72,6 +75,78 @@ interface GeminiClientDeps {
   maxRetries: number;
   retryBaseMs: number;
   retryMaxMs: number;
+}
+
+interface DebugFileApi {
+  open(path: string, flags: number, mode: number): number;
+  close(fileDescriptor: number): number;
+  fchmod(fileDescriptor: number, mode: number): number;
+  __error?(): Pointer;
+  __errno_location?(): Pointer;
+}
+
+const DEBUG_FILE_MODE = 0o600;
+
+function createDebugFileApi(): { api: DebugFileApi; noFollowFlag: number; nonBlockFlag: number; loopError: number } {
+  if (process.platform === 'darwin') {
+    return {
+      api: dlopen('/usr/lib/libSystem.B.dylib', {
+        open: { args: ['cstring', 'i32', 'i32'], returns: 'i32' },
+        close: { args: ['i32'], returns: 'i32' },
+        fchmod: { args: ['i32', 'i32'], returns: 'i32' },
+        __error: { args: [], returns: 'ptr' },
+      }).symbols as unknown as DebugFileApi,
+      noFollowFlag: 0x100,
+      nonBlockFlag: 0x4,
+      loopError: 62,
+    };
+  }
+  return {
+    api: dlopen('libc.so.6', {
+      open: { args: ['cstring', 'i32', 'i32'], returns: 'i32' },
+      close: { args: ['i32'], returns: 'i32' },
+      fchmod: { args: ['i32', 'i32'], returns: 'i32' },
+      __errno_location: { args: [], returns: 'ptr' },
+    }).symbols as unknown as DebugFileApi,
+    noFollowFlag: 0x20_000,
+    nonBlockFlag: 0x800,
+    loopError: 40,
+  };
+}
+
+function debugFileRefusal(path: string, reason: string): Error {
+  return new Error(`Refusing to write debug log ${JSON.stringify(path)}: ${reason}.`);
+}
+
+async function openDebugWriter(path: string): Promise<ReturnType<ReturnType<typeof Bun.file>['writer']>> {
+  const { api, noFollowFlag, nonBlockFlag, loopError } = createDebugFileApi();
+  const fileDescriptor = api.open(
+    path,
+    0x1 | 0x200 | 0x8 | noFollowFlag | nonBlockFlag,
+    DEBUG_FILE_MODE,
+  );
+  if (fileDescriptor < 0) {
+    const errorPointer = process.platform === 'darwin' ? api.__error?.() : api.__errno_location?.();
+    const errno = errorPointer === undefined ? -1 : read.i32(errorPointer);
+    if (errno === loopError) throw debugFileRefusal(path, 'it is a symbolic link');
+    throw debugFileRefusal(path, 'it could not be opened without following links');
+  }
+
+  try {
+    const file = Bun.file(fileDescriptor);
+    const stats = await file.stat();
+    if (!stats.isFile()) throw debugFileRefusal(path, 'it is not a regular file');
+    if (typeof process.getuid === 'function' && stats.uid !== process.getuid()) {
+      throw debugFileRefusal(path, 'it is not owned by the current user');
+    }
+    if (api.fchmod(fileDescriptor, DEBUG_FILE_MODE) !== 0) {
+      throw debugFileRefusal(path, 'its permissions could not be set to 0600');
+    }
+    return file.writer();
+  } catch (error) {
+    api.close(fileDescriptor);
+    throw error;
+  }
 }
 
 function shouldRetryClientError(error: unknown): boolean {
@@ -86,35 +161,39 @@ function createDefaultLogger(): Logger {
 }
 
 function createDebugLogger(config: Partial<typeof CONFIG>): (label: string, data: unknown) => void {
-  // Using Bun.file().writer() for debug logging
-  // Note: Bun.FileSink is async for flush/end, but write can be queued.
-  // We need to keep the writer open or open/close on demand?
-  // Keeping it open is better for performance.
   let writer: ReturnType<ReturnType<typeof Bun.file>['writer']> | null = null;
+  const pending: string[] = [];
 
   if (config.DEBUG_API && config.DEBUG_FILE) {
-    try {
-      const file = Bun.file(config.DEBUG_FILE);
-      writer = file.writer();
-      writer.write(`\n\n=== Debug session started: ${new Date().toISOString()} ===\n\n`);
-
-      // Ensure we flush/close on exit
-      // Note: Bun doesn't have a perfect equivalent to process.on('beforeExit') that guarantees async completion
-      // but we can try best effort.
-    } catch (e) {
-      process.stderr.write('Failed to create debug logger: ' + String(e) + '\n');
-    }
+    pending.push(`\n\n=== Debug session started: ${new Date().toISOString()} ===\n\n`);
+    void openDebugWriter(config.DEBUG_FILE)
+      .then(function (openedWriter) {
+        writer = openedWriter;
+        for (const entry of pending) writer.write(entry);
+        pending.length = 0;
+        void writer.flush();
+      })
+      .catch(function (error: unknown) {
+        pending.length = 0;
+        process.stderr.write('Failed to create debug logger: ' + String(error) + '\n');
+      });
   }
 
   return function writeDebug(label: string, data: unknown): void {
-    if (!writer) return;
     const timestamp = new Date().toISOString();
-    writer.write(`[${timestamp}] ${label}:\n`);
-    writer.write(typeof data === 'string' ? data : JSON.stringify(data, null, 2));
-    writer.write('\n\n');
-    // We don't await flush here to avoid slowing down the main flow, relying on Bun's buffering
-    writer.flush();
+    const entry = `[${timestamp}] ${label}:\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n\n`;
+    if (!writer) {
+      if (config.DEBUG_API && config.DEBUG_FILE) pending.push(entry);
+      return;
+    }
+    writer.write(entry);
+    void writer.flush();
   };
+}
+
+function capDebugBody(data: unknown, maxLog: number): string {
+  const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  return text.length > maxLog ? text.slice(0, maxLog) + '...[TRUNCATED]' : text;
 }
 
 function logDebugRequest(params: {
@@ -127,8 +206,7 @@ function logDebugRequest(params: {
   const { deps, attempt, reqUrl, body, bodyStr } = params;
   if (!deps.config.DEBUG_API) return;
   const maxLog = Number(deps.config.DEBUG_MAX_BODY_LOG_BYTES || DEFAULT_MAX_DEBUG_LOG_BYTES);
-  const bodyPreview =
-    bodyStr.length > maxLog ? bodyStr.slice(0, maxLog) + '...[TRUNCATED]' : bodyStr;
+  const bodyPreview = capDebugBody(bodyStr, maxLog);
   deps.writeDebug('API REQUEST', {
     attempt,
     url: reqUrl,
@@ -137,14 +215,17 @@ function logDebugRequest(params: {
     bodyLength: bodyStr.length,
     body: bodyPreview,
   });
-  deps.writeDebug('API REQUEST BODY (pretty-printed)', unescapeNewlinesInText(body));
+  deps.writeDebug('API REQUEST BODY (pretty-printed)', capDebugBody(unescapeNewlinesInText(body), maxLog));
   if (
     (body as { contents?: Array<{ parts?: Array<{ text?: string }> }> })?.contents?.[0]?.parts?.[0]
       ?.text
   ) {
     deps.writeDebug(
       'API REQUEST USER CONTENT (text)',
-      (body as { contents: Array<{ parts: Array<{ text: string }> }> }).contents[0].parts[0].text,
+      capDebugBody(
+        (body as { contents: Array<{ parts: Array<{ text: string }> }> }).contents[0].parts[0].text,
+        maxLog,
+      ),
     );
   }
 }
@@ -157,8 +238,7 @@ function logDebugResponse(
 ): void {
   if (!deps.config.DEBUG_API) return;
   const maxLog = Number(deps.config.DEBUG_MAX_BODY_LOG_BYTES || DEFAULT_MAX_DEBUG_LOG_BYTES);
-  const bodyPreview =
-    textRes.length > maxLog ? textRes.slice(0, maxLog) + '...[TRUNCATED]' : textRes;
+  const bodyPreview = capDebugBody(textRes, maxLog);
   deps.writeDebug('API RESPONSE', {
     attempt,
     status: res.status,
@@ -169,7 +249,7 @@ function logDebugResponse(
   });
   try {
     const jsonRes: unknown = JSON.parse(textRes);
-    deps.writeDebug('API RESPONSE BODY (pretty-printed)', unescapeNewlinesInText(jsonRes));
+    deps.writeDebug('API RESPONSE BODY (pretty-printed)', capDebugBody(unescapeNewlinesInText(jsonRes), maxLog));
   } catch {
     // Not JSON
   }
@@ -262,6 +342,7 @@ async function handleSuccessfulResponse(
     truncMaxRetries: number;
     truncIncrease: number;
     currentMaxOutputTokens: number;
+    maxOutputTokensLimit: number;
   },
 ): Promise<{
   retry: boolean;
@@ -321,7 +402,7 @@ async function handleSuccessfulResponse(
     retry: true,
     response: null,
     truncRetries: nextTruncRetries,
-    currentMaxOutputTokens: currentMaxOutputTokens + truncIncrease,
+    currentMaxOutputTokens: Math.min(currentMaxOutputTokens + truncIncrease, params.maxOutputTokensLimit),
   };
 }
 
@@ -340,7 +421,14 @@ function buildCallSetup(
     opts.retryIfTruncatedIncreaseTokens === undefined
       ? config.MAX_OUTPUT_TOKENS
       : opts.retryIfTruncatedIncreaseTokens;
-  return { opts, start: Date.now(), urlBase, truncMaxRetries, truncIncrease };
+  return {
+    opts,
+    start: Date.now(),
+    urlBase,
+    truncMaxRetries,
+    truncIncrease,
+    maxOutputTokensLimit: getModelSpec(activeModel).maxOutputTokens,
+  };
 }
 
 async function applySuccessfulOutcome(params: {
@@ -361,6 +449,7 @@ async function applySuccessfulOutcome(params: {
     truncMaxRetries: setup.truncMaxRetries,
     truncIncrease: setup.truncIncrease,
     currentMaxOutputTokens: state.currentMaxOutputTokens,
+    maxOutputTokensLimit: setup.maxOutputTokensLimit,
   });
   state.truncRetries = success.truncRetries;
   state.currentMaxOutputTokens = success.currentMaxOutputTokens;

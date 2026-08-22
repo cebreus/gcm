@@ -1,4 +1,7 @@
 import { test, expect } from 'bun:test';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createGeminiClient } from '../src/gemini-client';
 import type { GeminiClient, GeminiResponse } from '../src/gemini-client';
 import { parseCandidates } from '../src/gemini-client/parsers';
@@ -48,6 +51,80 @@ async function geminiClientSuccessTest(): Promise<void> {
   }
 }
 test('gemini-client: successTest', geminiClientSuccessTest);
+
+test('gemini-client: refuses a symlinked debug log without touching its target', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'gcm-debug-log-'));
+  const victim = join(directory, 'victim');
+  const debugPath = join(directory, '.debug.log');
+  const originalWrite = process.stderr.write;
+  let stderr = '';
+  try {
+    await writeFile(victim, 'keep this content intact\n');
+    await symlink(victim, debugPath);
+    process.stderr.write = function (chunk: string | Uint8Array): boolean {
+      stderr += String(chunk);
+      return true;
+    } as typeof process.stderr.write;
+
+    createGeminiClient({ config: { DEBUG_API: true, DEBUG_FILE: debugPath } });
+
+    await Bun.sleep(10);
+    expect(await readFile(victim, 'utf8')).toBe('keep this content intact\n');
+    expect(stderr).toContain(`Refusing to write debug log ${JSON.stringify(debugPath)}: it is a symbolic link.`);
+  } finally {
+    process.stderr.write = originalWrite;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('gemini-client: caps every debug body payload', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'gcm-debug-body-'));
+  const debugPath = join(directory, '.debug.log');
+  const requestTail = 'request-secret-tail';
+  const responseTail = 'response-secret-tail';
+  const userContent = 'a'.repeat(256) + requestTail;
+  const responseText = JSON.stringify({
+    candidates: [
+      {
+        content: {
+          parts: [{ text: '<<START>>' + 'b'.repeat(256) + responseTail + '<<END>>' }],
+        },
+      },
+    ],
+  });
+
+  async function fetchStub(_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
+    void _input;
+    void _init;
+    return new Response(responseText);
+  }
+
+  try {
+    const client = createGeminiClient({
+      fetchImpl: fetchStub as typeof fetch,
+      config: {
+        DEBUG_API: true,
+        DEBUG_FILE: debugPath,
+        DEBUG_MAX_BODY_LOG_BYTES: 64,
+      },
+    });
+    await client.callGemini({
+      apiKey: 'fake-key',
+      userContent,
+      enableThinking: false,
+      telemetryMeta: {},
+      callOptions: {},
+    });
+
+    await Bun.sleep(10);
+    const debugLog = await readFile(debugPath, 'utf8');
+    expect(debugLog).toContain('[TRUNCATED]');
+    expect(debugLog).not.toContain(requestTail);
+    expect(debugLog).not.toContain(responseTail);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 async function geminiClientRetryTest(): Promise<void> {
   let callCount = 0;
@@ -349,6 +426,52 @@ async function geminiClientRetryOnTruncatedTest(): Promise<void> {
   }
 }
 test('gemini-client: retry on truncated response when enabled', geminiClientRetryOnTruncatedTest);
+
+async function geminiClientTruncationRetryRespectsModelOutputLimitTest(): Promise<void> {
+  let callCount = 0;
+  const seenMaxOutput: number[] = [];
+  async function fetchStub(_input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    void _input;
+    callCount += 1;
+    const requestBody: unknown = init?.body ? JSON.parse(String(init.body)) : null;
+    if (typeof requestBody === 'object' && requestBody !== null && 'generationConfig' in requestBody) {
+      const generationConfig = requestBody.generationConfig;
+      if (
+        typeof generationConfig === 'object' &&
+        generationConfig !== null &&
+        'maxOutputTokens' in generationConfig &&
+        typeof generationConfig.maxOutputTokens === 'number'
+      ) {
+        seenMaxOutput.push(generationConfig.maxOutputTokens);
+      }
+    }
+    const responseText =
+      callCount === 1 ? 'prefix <<START>>partial result...' : 'prefix <<START>>full result<<END>>';
+    return new Response(
+      JSON.stringify({ candidates: [{ content: { parts: [{ text: responseText }] } }] }),
+    );
+  }
+
+  const client = createGeminiClient({
+    fetchImpl: fetchStub as typeof fetch,
+    config: { MAX_OUTPUT_TOKENS: 8192 },
+  });
+  const result = await client.callGemini({
+    apiKey: 'fake-key',
+    userContent: 'hello',
+    enableThinking: false,
+    telemetryMeta: {},
+    callOptions: { retryIfTruncated: true },
+    modelOverride: 'gemini-3.7-flash',
+  });
+
+  expect(result?.truncated).toBeFalsy();
+  expect(seenMaxOutput).toEqual([8192, 8192]);
+}
+test(
+  'gemini-client: truncation retries stay within the selected model output limit',
+  geminiClientTruncationRetryRespectsModelOutputLimitTest,
+);
 
 async function geminiClientRetriesMaxTokensWithoutMarkersTest(): Promise<void> {
   let callCount = 0;

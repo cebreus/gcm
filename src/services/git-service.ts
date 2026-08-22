@@ -5,6 +5,7 @@ import type { Logger } from '../logger.js';
 export interface StagedChangesResult {
   stagedDiff: string;
   stagedFiles: string[];
+  excludedPaths?: string[];
   truncated: boolean;
   snapshot?: IndexSnapshot;
 }
@@ -78,19 +79,50 @@ export interface RepositoryState {
 
 function buildFileListArgs(commitHash: string | null): string[] {
   return commitHash
-    ? ['show', '-w', '--name-only', '--pretty=format:', commitHash]
-    : ['diff', '--staged', '--name-only'];
+    ? ['show', '-w', '--name-only', '--pretty=format:', '-z', commitHash]
+    : ['diff', '--staged', '--name-only', '-z'];
 }
 
 function buildDiffArgs(commitHash: string | null): string[] {
   return commitHash ? ['show', '-w', commitHash] : ['diff', '--staged', '-w'];
 }
 
+function decodeGitQuotedPath(path: string): string {
+  if (!(path.startsWith('"') && path.endsWith('"'))) return path;
+  const escapes: Record<string, string> = {
+    a: '\x07',
+    b: '\b',
+    f: '\f',
+    n: '\n',
+    r: '\r',
+    t: '\t',
+    v: '\v',
+    '"': '"',
+    '\\': '\\',
+  };
+  const bytes: number[] = [];
+  const encoder = new TextEncoder();
+  for (let index = 1; index < path.length - 1; index += 1) {
+    if (path[index] !== '\\') {
+      bytes.push(...encoder.encode(path[index]));
+      continue;
+    }
+    const octal = path.slice(index + 1, index + 4);
+    if (/^[0-7]{3}$/.test(octal)) {
+      bytes.push(Number.parseInt(octal, 8));
+      index += 3;
+      continue;
+    }
+    const escaped = path[index + 1];
+    bytes.push(...encoder.encode(escapes[escaped] ?? escaped));
+    index += 1;
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
 function parseFileList(text: string): string[] {
-  return text
-    .split('\n')
-    .map(s => s.trim())
-    .filter(Boolean);
+  if (text.includes('\0')) return text.split('\0').filter(path => path.length > 0);
+  return text.split('\n').filter(path => path.length > 0).map(decodeGitQuotedPath);
 }
 
 function logExcludedFiles(
@@ -179,9 +211,16 @@ async function retrieveStagedChangesWithDeps(params: {
   const { deps, commitHash, logger, excludePatterns } = params;
   logger?.log('debug', 'Checking git status');
   const fileListRes = await deps.gitCommandRunner(buildFileListArgs(commitHash));
-  let files = parseFileList(fileListRes.text);
-  const originalFileCount = files.length;
-  files = filterExcludedFiles(files, excludePatterns);
+  if (fileListRes.truncated) {
+    throw new Error('File list output was truncated. Reduce the change set, then try again.');
+  }
+  const allFiles = parseFileList(fileListRes.text);
+  const files = filterExcludedFiles(allFiles, excludePatterns);
+  const includedPaths = new Set(files);
+  const excludedPaths = allFiles.filter(function (path) {
+    return !includedPaths.has(path);
+  });
+  const originalFileCount = allFiles.length;
   logExcludedFiles(logger, excludePatterns, originalFileCount, files.length);
   if (files.length === 0) {
     logNoChanges(logger, commitHash);
@@ -195,6 +234,7 @@ async function retrieveStagedChangesWithDeps(params: {
   return {
     stagedDiff: diffRes.text,
     stagedFiles: files,
+    excludedPaths,
     truncated: diffRes.truncated,
     snapshot: 'snapshot' in diff ? diff.snapshot : undefined,
   };

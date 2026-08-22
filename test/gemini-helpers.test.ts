@@ -42,6 +42,20 @@ async function geminiHelpersGetRetryMsFromResponseTest(): Promise<void> {
   const ms = getRetryMsFromResponse(textRes, 100, 1000, 1);
   expect(ms).toBeGreaterThanOrEqual(10);
   expect(ms).toBeLessThanOrEqual(11);
+  const cappedMs = getRetryMsFromResponse(
+    JSON.stringify({ error: { details: [{ retryInfo: { retryDelay: '86400s' } }] } }),
+    1000,
+    60000,
+    1,
+  );
+  expect(cappedMs).toBe(60000);
+  const negativeMs = getRetryMsFromResponse(
+    JSON.stringify({ error: { details: [{ retryInfo: { retryDelay: '-10s' } }] } }),
+    1000,
+    60000,
+    1,
+  );
+  expect(negativeMs).toBe(0);
   // fallback path (no details): returns exponential backoff
   const ms2 = getRetryMsFromResponse('{}', 1000, 60000, 2);
   // attempt=2 => base <= ms2 <= retryMax + jitter

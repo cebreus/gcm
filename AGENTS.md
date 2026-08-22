@@ -2,6 +2,8 @@
 
 Applies to any AI agent working in this repository.
 
+Start every reply with my name: cebreus+gcm
+
 ## Scope discipline
 
 - Do exactly what the task states. No refactoring, renaming, reformatting, or dead-code removal that the task did not ask for.

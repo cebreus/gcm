@@ -25,6 +25,32 @@ test('logger: redacts secrets in console output', () => {
   expect(output).not.toContain('sk-abcdef1234567890');
 });
 
+test('logger: redacts secrets in log messages', () => {
+  stdoutWriteMock.mockClear();
+  const logger = createLogger({ LOG_LEVEL: 'info' });
+  logger.log('info', 'Model output: sk-abcdef1234567890');
+
+  const output = stdoutWriteMock.mock.calls.map(call => String(call[0])).join('');
+  expect(output).toContain('[REDACTED-KEY]');
+  expect(output).not.toContain('sk-abcdef1234567890');
+});
+
+test('logger: redacts current GitHub and Google keys in messages', () => {
+  stdoutWriteMock.mockClear();
+  const githubKey = 'github_pat_AaBbCcDdEeFfGgHhIiJjKkLl';
+  const googleKey = 'AQ.ZzTestOnly_cDeFgHiJkLmNoPqRsTuVwXyZ1234';
+  const logger = createLogger({ LOG_LEVEL: 'info' });
+
+  logger.log('info', 'GitHub key: ' + githubKey + ' is invalid.');
+  logger.log('info', JSON.stringify({ provider: 'google', key: googleKey }));
+  logger.log('info', 'Google key at end: ' + googleKey);
+
+  const output = stdoutWriteMock.mock.calls.map(call => String(call[0])).join('');
+  expect(output.match(/\[REDACTED-KEY\]/g)).toHaveLength(3);
+  expect(output).not.toContain(githubKey);
+  expect(output).not.toContain(googleKey);
+});
+
 test('logger: log level filtering', () => {
   stdoutWriteMock.mockClear();
   stderrWriteMock.mockClear();

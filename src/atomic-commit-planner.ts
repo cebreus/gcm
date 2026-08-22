@@ -21,7 +21,7 @@ export function buildAtomicSplitProposal(stagedFiles: readonly string[]): string
         ...files.map(file => `- ${file}`),
         '',
         'Suggested commands:',
-        `git reset`,
+        'git reset',
         `git add -- ${escapedFiles}`,
         `git commit -m $'${escapeForAnsiCString(commitSubject)}' \\`,
         `  -m $'- ${escapeForAnsiCString(commitBodyBullet)}'`,
@@ -30,7 +30,7 @@ export function buildAtomicSplitProposal(stagedFiles: readonly string[]): string
   }
 
   return [
-    `Found ${stagedFiles.length} staged file(s), proposed ${groups.size} atomic group(s).`,
+    `Found ${stagedFiles.length} changed file(s) in the worktree, proposed ${groups.size} atomic group(s).`,
     'Rules applied: lockfiles grouped with dependency manifests; docs/formatting split from functional changes.',
     '',
     ...sections,
