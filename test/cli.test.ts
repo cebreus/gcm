@@ -156,6 +156,34 @@ test('cli: should handle --exclude with spaces around patterns', () => {
   expect(result.exclude).toEqual(['*manifest*', '*.lock']);
 });
 
+for (const inputCase of [
+  { args: ['--exclude', '-generated/*'], exclude: ['-generated/*'] },
+  { args: ['-e', '-generated/*'], exclude: ['-generated/*'] },
+  { args: ['--exclude=-generated/*'], exclude: ['-generated/*'] },
+  { args: ['-e=-generated/*'], exclude: ['-generated/*'] },
+  { args: ['--exclude', 'path with space/*'], exclude: ['path with space/*'] },
+] as const) {
+  test(`cli: preserves the exclude pattern ${inputCase.args.join(' ')}`, () => {
+    const result = parseArgs([...inputCase.args]);
+
+    expect(result.exclude).toEqual([...inputCase.exclude]);
+    expect(result.debug).toBe(false);
+  });
+}
+
+test('cli: rejects an option terminator and known flags as separated exclude values', () => {
+  for (const value of ['--', '-v', '--commit']) {
+    expect(() => parseArgs(['--exclude', value])).toThrow('Missing value for flag: --exclude');
+  }
+});
+
+test('cli: ignores flags after the option terminator', () => {
+  const result = parseArgs(['--', '--debug', '--exclude', 'private/*']);
+
+  expect(result.debug).toBe(false);
+  expect(result.exclude).toEqual([]);
+});
+
 const valueTakingFlagCases = [
   { aliases: ['--commit', '-c'], longAlias: '--commit', option: 'commit', value: 'a1b2c3d4', expected: 'a1b2c3d4' },
   { aliases: ['--exclude', '-e'], longAlias: '--exclude', option: 'exclude', value: '*.lock', expected: Array.of('*.lock') },

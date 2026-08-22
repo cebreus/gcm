@@ -4,6 +4,7 @@
   "scripts": {
     "start": "bun run ./gcm.ts",
     "test": "bun test",
+    "test:binary-contract": "bun test test/binary-contract.test.ts",
     "check": "bunx tsc --noEmit",
     "lint": "eslint",
     "format": "eslint --fix . --ignore-pattern dist && prettier -l -w .",

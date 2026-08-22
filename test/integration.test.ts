@@ -257,19 +257,26 @@ test('integration: should not send whitespace-only staged changes to AI', async 
     apiKey: 'test-key',
   });
   const contextService = createContextService();
+  const originalExitCode = process.exitCode;
+  process.exitCode = undefined;
 
-  await runnerRun([], {
-    logger: mockLoggerInstance as any,
-    gitService,
-    geminiService,
-    contextService,
-  });
+  try {
+    await runnerRun([], {
+      logger: mockLoggerInstance as any,
+      gitService,
+      geminiService,
+      contextService,
+    });
 
-  expect(mockGetCommitContextHints).not.toHaveBeenCalled();
-  expect(mockCallGemini).not.toHaveBeenCalled();
-  expect(mockCancel).toHaveBeenCalledWith(
-    'Only whitespace-only staged changes detected in 2 file(s). Nothing to send to AI.',
-  );
+    expect(mockGetCommitContextHints).not.toHaveBeenCalled();
+    expect(mockCallGemini).not.toHaveBeenCalled();
+    expect(mockCancel).toHaveBeenCalledWith(
+      'Only whitespace-only staged changes detected in 2 file(s). Nothing to send to AI.',
+    );
+    expect(Number(process.exitCode)).toBe(1);
+  } finally {
+    process.exitCode = originalExitCode;
+  }
 });
 
 test('integration: should handle real git repository state', async () => {

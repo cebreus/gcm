@@ -57,6 +57,8 @@ interface RunnerServices {
   dialogue: InteractiveGenerationDialogue;
 }
 
+type TerminalOutcome = 'success' | 'failure';
+
 function getPackageInfo(): PackageInfo {
   return { name: pkg.name, version: pkg.version };
 }
@@ -309,23 +311,27 @@ async function buildGenerationState(parsedArgs: ParsedOptions): Promise<{
   };
 }
 
+// eslint-disable-next-line max-statements -- terminal outcomes must reach the entrypoint intact.
 async function runGenerationSafely(params: {
   opts: RunnerOptions;
   parsedArgs: ParsedOptions;
   logger: Logger;
-  apiKey: string;
+  apiKey: string | undefined;
   targetCommit: string | null;
   state: GenerationState;
   s: ReturnType<typeof spinner>;
-}): Promise<void> {
+}): Promise<TerminalOutcome> {
   const { opts, parsedArgs, logger, apiKey, targetCommit, state, s } = params;
   try {
-    const services = createRunnerServices(opts, logger, apiKey);
-    await runGenerationWorkflow({ services, parsedArgs, logger, apiKey, targetCommit, state, s });
+    const services = createRunnerServices(opts, logger, apiKey || '');
+    return await runGenerationWorkflow({ services, parsedArgs, logger, apiKey, targetCommit, state, s });
   } catch (error: unknown) {
     s.stop('An error occurred');
     const errStr = String(error);
-    if (/Not a git repository/i.test(errStr)) cancel('Error: Not inside a git repository.');
+    if (/Not a git repository/i.test(errStr)) {
+      cancel('Error: Not inside a git repository.');
+      return 'failure';
+    }
     else if (/unknown revision/i.test(errStr)) cancel(`Error: Invalid commit SHA: ${targetCommit}`);
     else if (isGeminiApiError(error)) {
       const metadata = error.metadata || {};
@@ -371,15 +377,16 @@ function isGeminiApiError(
   );
 }
 
+// eslint-disable-next-line max-statements -- terminal outcomes must reach the entrypoint intact.
 async function runGenerationWorkflow(params: {
   services: RunnerServices;
   parsedArgs: ParsedOptions;
   logger: Logger;
-  apiKey: string;
+  apiKey: string | undefined;
   targetCommit: string | null;
   state: GenerationState;
   s: ReturnType<typeof spinner>;
-}): Promise<void> {
+}): Promise<TerminalOutcome> {
   const { services, parsedArgs, logger, apiKey, targetCommit, state, s } = params;
   logTargetCommitInfo(logger, targetCommit);
   const readyState = await resolveReadyRepositoryState({
@@ -389,33 +396,37 @@ async function runGenerationWorkflow(params: {
     logger,
     s,
   });
-  if (!readyState) return;
+  if (!readyState) return 'failure';
   const { repositoryState, staged } = readyState;
-  const commitActions = createCommitActionService({ gitService: services.gitService, logger });
-  const inspection = await commitActions.inspect(targetCommit, staged.snapshot);
   if (!targetCommit && isWhitespaceOnlyStagedChanges(staged)) {
     cancel(
       `Only whitespace-only staged changes detected in ${staged.stagedFiles.length} file(s). Nothing to send to AI.`,
     );
-    return;
+    return 'failure';
   }
+  if (!apiKey) {
+    cancel('Error: Environment variable GOOGLE_GEMINI_API_KEY not set.');
+    return 'failure';
+  }
+  const commitActions = createCommitActionService({ gitService: services.gitService, logger });
+  const inspection = await commitActions.inspect(targetCommit, staged.snapshot);
 
   showRepositoryWarnings(repositoryState, targetCommit, inspection.capability);
   const preflight =
     parsedArgs.model || parsedArgs.mode ? 'continue' : await services.dialogue.configure(state, apiKey);
-  if (preflight === 'exit') return;
+  if (preflight === 'exit') return 'success';
   if (repositoryState.hasUnmergedPaths) {
     cancel(
       'Git index has unresolved conflicts. Resolve conflicts before generating or committing.',
     );
-    return;
+    return 'failure';
   }
   const commitCapability = inspection.capability;
   const meta = buildLogMetadata(staged, targetCommit);
   const commitContextHints = await resolveCommitContextHints(staged.stagedFiles, logger);
   const shouldContinue = await services.dialogue.confirmAtomicity(staged.stagedFiles, targetCommit);
-  if (!shouldContinue) return;
-  await runGenerationCycle({
+  if (!shouldContinue) return 'success';
+  return runGenerationCycle({
     services,
     logger,
     apiKey,
@@ -454,6 +465,8 @@ async function resolveReadyRepositoryState(params: {
     s,
     suppressNoChangesMessage: true,
   });
+
+  if (!staged && !process.stdin.isTTY) return null;
 
   while (!staged) {
     const nextStep = await handleEmptyStaging({
@@ -635,7 +648,7 @@ async function runGenerationCycle(params: {
   commitContextHints: CommitContextHints;
   targetCommit: string | null;
   commitCapability: CommitCapability;
-}): Promise<void> {
+}): Promise<TerminalOutcome> {
   const {
     services,
     logger,
@@ -662,7 +675,7 @@ async function runGenerationCycle(params: {
       commitCapability,
     });
     if (outcome === 'regenerate') continue;
-    return;
+    return outcome;
   }
 }
 
@@ -677,7 +690,7 @@ async function runSingleGenerationAttempt(params: {
   commitContextHints: CommitContextHints;
   targetCommit: string | null;
   commitCapability: CommitCapability;
-}): Promise<'done' | 'regenerate'> {
+}): Promise<TerminalOutcome | 'regenerate'> {
   const {
     services,
     logger,
@@ -739,7 +752,7 @@ async function runSingleGenerationAttempt(params: {
   if (!response) {
     logger.log('warn', 'Gemini did not return text after retries; using deterministic fallback');
     displayResultStructured(logger, generateFallbackCommitDetails(staged.stagedFiles));
-    return 'done';
+    return 'success';
   }
   const action = await handleSuccessfulGeneration({
     response,
@@ -763,7 +776,7 @@ async function handleSuccessfulGeneration(params: {
   meta: LogMetadata;
   s: ReturnType<typeof spinner>;
   commitCapability: CommitCapability;
-}): Promise<'done' | 'regenerate'> {
+}): Promise<TerminalOutcome | 'regenerate'> {
   const { response, state, logger, apiKey, services, meta, s, commitCapability } = params;
   logger.log('debug', 'LLM response received', {
     promptTokens: response.usage.promptTokens,
@@ -774,7 +787,7 @@ async function handleSuccessfulGeneration(params: {
   if (!parsedOut) {
     logger.log('info', response.text);
     outro('Failed to parse structured output.');
-    return 'done';
+    return 'failure';
   }
   const warningIcon = response.truncated ? ` ${C.yellow}[⚠ ZKRACENO]${C.reset}` : '';
   note(
@@ -788,7 +801,7 @@ async function handleSuccessfulGeneration(params: {
     apiKey,
     commitCapability,
   });
-  if (actionResult.type === 'cancel') return 'done';
+  if (actionResult.type === 'cancel') return 'success';
   state.baselineModelName = actionResult.modelName;
   state.modelName = actionResult.modelName;
   state.userHint = actionResult.userHint;
@@ -810,7 +823,7 @@ async function commitGeneratedMessage(params: {
   state: GenerationState;
   logger: Logger;
   s: ReturnType<typeof spinner>;
-}): Promise<'done'> {
+}): Promise<TerminalOutcome> {
   const { commitMessage, commitCapability, services, state, logger, s } = params;
   const verb = commitCapability.mode === 'commit' ? 'Committing changes' : commitCapability.mode;
   s.start(`${verb}...`);
@@ -828,27 +841,25 @@ async function commitGeneratedMessage(params: {
         : `Failed to apply commit action: ${error instanceof Error ? error.message : String(error)}`,
     );
     logger.log('error', `Commit action failed: ${error}`);
+    return 'failure';
   }
-  return 'done';
+  return 'success';
 }
 
 async function handleCliEarlyExit(
   parsedArgs: ParsedOptions,
   packageInfo: PackageInfo,
-): Promise<boolean> {
+): Promise<number | null> {
   if (parsedArgs.version) {
     process.stdout.write(`${packageInfo.name} ${packageInfo.version}\n`);
-    return true;
+    return 0;
   }
   intro(`${C.bright}Gemini Commit Message Helper v${packageInfo.version}${C.reset}`);
   if (parsedArgs.help) {
     showHelp();
-    return true;
+    return 0;
   }
-  const listModelsExitCode = await maybeHandleListModels(parsedArgs);
-  if (listModelsExitCode === null) return false;
-  process.exitCode = listModelsExitCode;
-  return true;
+  return maybeHandleListModels(parsedArgs);
 }
 
 function parseArgsOrReport(argv: string[]): ParsedOptions | null {
@@ -857,7 +868,6 @@ function parseArgsOrReport(argv: string[]): ParsedOptions | null {
   } catch (error) {
     if (!(error instanceof ArgumentValidationError)) throw error;
     cancel(`Error: ${error.message}. Run gcm --help for usage.`);
-    process.exitCode = 1;
     return null;
   }
 }
@@ -869,20 +879,31 @@ export async function executeCommitMessageGeneration(
   const opts = dependencies || {};
   const parsedArgs = parseArgsOrReport(argv || process.argv.slice(2));
   const packageInfo = getPackageInfo();
-  if (!parsedArgs || (await handleCliEarlyExit(parsedArgs, packageInfo))) return;
-
-  const loggerConfig = buildLoggerConfig(parsedArgs);
-  const logger = opts.logger || createLogger(loggerConfig);
-  const s = spinner();
-
-  const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
-  if (!apiKey) {
-    cancel('Error: Environment variable GOOGLE_GEMINI_API_KEY not set.');
-    return;
+  let exitCode = 0;
+  if (parsedArgs) {
+    const earlyExitCode = await handleCliEarlyExit(parsedArgs, packageInfo);
+    if (earlyExitCode === null) {
+      const loggerConfig = buildLoggerConfig(parsedArgs);
+      const logger = opts.logger || createLogger(loggerConfig);
+      const s = spinner();
+      const { targetCommit, state } = await buildGenerationState(parsedArgs);
+      const outcome = await runGenerationSafely({
+        opts,
+        parsedArgs,
+        logger,
+        apiKey: process.env.GOOGLE_GEMINI_API_KEY,
+        targetCommit,
+        state,
+        s,
+      });
+      exitCode = outcome === 'failure' ? 1 : 0;
+    } else {
+      exitCode = earlyExitCode;
+    }
+  } else {
+    exitCode = 1;
   }
-
-  const { targetCommit, state } = await buildGenerationState(parsedArgs);
-  await runGenerationSafely({ opts, parsedArgs, logger, apiKey, targetCommit, state, s });
+  process.exitCode = exitCode;
 }
 
 export default { executeCommitMessageGeneration };

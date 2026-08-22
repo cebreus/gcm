@@ -213,6 +213,12 @@ Follow these steps to set up a local development environment.
     bun test
     ```
 
+    The compiled-binary contract suite also builds `gcm` outside the repository and runs it in temporary repositories:
+
+    ```bash
+    bun run test:binary-contract
+    ```
+
 3.  **Building the Project:**
     You can bundle the entire application into a single, executable file.
 

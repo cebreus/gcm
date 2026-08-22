@@ -405,15 +405,140 @@ describe('Refactored Runner', () => {
   test('Should handle no staged changes', async () => {
     mockGitService.retrieveStagedChanges.mockResolvedValue(null);
     mockSelect.mockResolvedValueOnce('generate'); // Pre-flight
+    const originalExitCode = process.exitCode;
+    process.exitCode = undefined;
 
-    await executeCommitMessageGeneration([], {
-      logger: mockLogger,
-      gitService: mockGitService,
-      contextService: mockContextService,
-      geminiService: mockGeminiService,
-      listModels: mockListModels,
+    try {
+      await executeCommitMessageGeneration([], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      });
+      expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
+      expect(Number(process.exitCode)).toBe(1);
+    } finally {
+      process.exitCode = originalExitCode;
+    }
+  });
+
+  test('Should fail when Git has unresolved conflicts', async () => {
+    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    const originalExitCode = process.exitCode;
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.exitCode = undefined;
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['file.ts'],
+      truncated: false,
     });
-    expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
+    mockGitService.getRepositoryState.mockResolvedValue({
+      hasStagedChanges: true,
+      hasUnstagedChanges: false,
+      hasUntrackedFiles: false,
+      hasUnmergedPaths: true,
+      inProgressOperation: null,
+      changedFiles: ['file.ts'],
+    });
+
+    try {
+      await executeCommitMessageGeneration(['--mode', 'commit-only'], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      });
+
+      expect(mockCancel).toHaveBeenCalledWith(
+        'Git index has unresolved conflicts. Resolve conflicts before generating or committing.',
+      );
+      expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
+      expect(Number(process.exitCode)).toBe(1);
+    } finally {
+      process.exitCode = originalExitCode;
+      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+    }
+  });
+
+  test('Should fail when Gemini returns malformed full output', async () => {
+    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    const originalExitCode = process.exitCode;
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.exitCode = undefined;
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['file.ts'],
+      truncated: false,
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.callGeminiAPI.mockResolvedValue({
+      text: 'COMMIT_MESSAGE: missing branch',
+      usage: {},
+    });
+
+    try {
+      await executeCommitMessageGeneration(['--mode', 'full'], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      });
+
+      expect(mockOutro).toHaveBeenCalledWith('Failed to parse structured output.');
+      expect(Number(process.exitCode)).toBe(1);
+    } finally {
+      process.exitCode = originalExitCode;
+      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+    }
+  });
+
+  test('Should fail when the commit action fails', async () => {
+    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    const originalExitCode = process.exitCode;
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.exitCode = undefined;
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['file.ts'],
+      truncated: false,
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.callGeminiAPI.mockResolvedValue({
+      text: 'COMMIT_MESSAGE: test message',
+      usage: {},
+    });
+    mockGitService.commitChanges.mockRejectedValueOnce(new Error('git commit failed'));
+    mockSelect.mockResolvedValueOnce('commit');
+
+    try {
+      await executeCommitMessageGeneration(['--mode', 'commit-only'], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      });
+
+      expect(mockCancel).toHaveBeenCalledWith('Failed to apply commit action: git commit failed');
+      expect(Number(process.exitCode)).toBe(1);
+    } finally {
+      process.exitCode = originalExitCode;
+      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+    }
   });
 
   test('Should handle Copy to clipboard flow', async () => {
