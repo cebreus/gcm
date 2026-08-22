@@ -136,10 +136,10 @@ async function mockSpawnStreamImpl(args: string[]): Promise<{ text: string; trun
       truncated: false,
     };
   }
-  if (cmd.includes('show -w') && cmd.includes('--name-only')) {
+  if (cmd.includes('show --first-parent -w') && cmd.includes('--name-only')) {
     return { text: 'src/index.js', truncated: false };
   }
-  if (cmd.includes('show -w') && cmd.includes('a1b2c3d')) {
+  if (cmd.includes('show --first-parent -w') && cmd.includes('a1b2c3d')) {
     return { text: 'diff for commit a1b2c3d', truncated: false };
   }
   return { text: '', truncated: false };

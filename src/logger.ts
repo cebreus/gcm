@@ -1,3 +1,5 @@
+import { redactSensitiveText } from './utils.js';
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LoggerConfig {
@@ -28,16 +30,7 @@ function writeStderrLine(text: string): void {
 
 function sanitiseTextForLogs(text: string, maxLen = 256): string {
   if (!text || typeof text !== 'string') return text;
-  let out = text;
-  out = out.replace(
-    /(ey[A-Za-z0-9-_=]+)\.(ey[A-Za-z0-9-_=]+)\.([A-Za-z0-9-_.+/=]*)/g,
-    '[REDACTED-JWT]',
-  );
-  out = out.replace(
-    /\b(?:AKIA|AIza|ghp_|xoxb-|sk-)[A-Za-z0-9\-_]{8,}\b|\bgithub_pat_[A-Za-z0-9_]{8,}\b|\bAQ\.[A-Za-z0-9\-_]{8,}\b/g,
-    '[REDACTED-KEY]',
-  );
-  out = out.replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED-PEM]');
+  const out = redactSensitiveText(text);
   if (out.length > maxLen) return out.substring(0, maxLen) + '...[TRUNCATED]';
   return out;
 }
@@ -103,7 +96,7 @@ function createLogFunction(
     const metaLocal = meta || {};
     writeRuntimeLog(
       level,
-      formatLogLine(new Date().toISOString(), level, sanitiseTextForLogs(message)),
+      formatLogLine(new Date().toISOString(), level, sanitiseTextForLogs(message, Infinity)),
       sanitiseMetaForLogs(metaLocal),
     );
   };

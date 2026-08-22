@@ -1,4 +1,5 @@
 import type { CONFIG } from '../../gcm.config.js';
+import { redactSensitiveText } from '../utils.js';
 interface RequestBody {
   contents: Array<{ role: string; parts: Array<{ text: string }> }>;
   systemInstruction: { parts: Array<{ text: string }> };
@@ -18,9 +19,10 @@ export function buildRequestBody(
   const START = '<<START>>';
   const END = '<<END>>';
 
+  const redactedUserContent = redactSensitiveText(userContent);
   const wrappedUserContent = config.ADD_RESPONSE_MARKERS
-    ? `${START}\n${userContent}\n${END}`
-    : userContent;
+    ? `${START}\n${redactedUserContent}\n${END}`
+    : redactedUserContent;
 
   // Ensure marker-focused system instruction is present. If caller provided system
   // instructions, append ours so we keep their intent while enforcing markers.

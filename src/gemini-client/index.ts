@@ -193,7 +193,11 @@ function createDebugLogger(config: Partial<typeof CONFIG>): (label: string, data
 
 function capDebugBody(data: unknown, maxLog: number): string {
   const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  return text.length > maxLog ? text.slice(0, maxLog) + '...[TRUNCATED]' : text;
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.length <= maxLog) return text;
+  let end = maxLog;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
+  return new TextDecoder().decode(bytes.subarray(0, end)) + '...[TRUNCATED]';
 }
 
 function logDebugRequest(params: {

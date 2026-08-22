@@ -127,6 +127,27 @@ This refactors the logging mechanism for the Gemini API client.
 `--exclude` supports `*` (any number of characters, including `/`) and `?` (exactly one character).
 Patterns are case-sensitive and match the complete file path.
 
+Excluded paths are dropped from the diff that is analysed, but they stay in the index: `git commit` still
+commits them. When the staged set contains an excluded path, `gcm` says so and asks for confirmation
+before writing the commit.
+
+If the staged file listing itself exceeds `GCM_MAX_BUFFER`, `gcm` refuses to continue rather than
+analysing a partial list: a truncated listing would hide files from both the message and the exclusion
+check while `git commit` committed them anyway. Raise the buffer or split the change.
+
+`--commit <hash>` compares a merge commit against its first parent, which is what "what did this merge
+bring in" usually means. Ordinary, root and rename commits are unaffected.
+
+`--debug` writes the raw API request and response to `.debug.log`, and the request contains the diff
+being analysed. If a staged file holds a secret, that secret lands in the log file. Known key shapes
+(Google, AWS, GitHub, Slack, OpenAI-style keys, JWTs and PEM blocks) are redacted from both the log and
+the request sent to Gemini, but redaction is pattern-based and cannot recognise every secret. Treat
+`.debug.log` as sensitive and delete it when you are done.
+
+If a pre-commit hook stages further files while the commit is being written, the committed tree no longer
+matches the analysed diff. `gcm` cannot prevent that without disabling your hooks, so it compares the
+committed tree afterwards and warns you which paths ended up in the commit beyond what it analysed.
+
 `--list-models` queries the live Gemini API, so the output reflects the models currently available to your API key instead of a hard-coded list.
 
 ### Interactive Menu
@@ -185,10 +206,10 @@ The tool can be configured using environment variables. These are defined in `gc
 | `GCM_TEMPERATURE` or `GEMINI_TEMP`      | The model creativity from 0.0 to 1.0; lower it for more consistent messages. | `1`                |
 | `GCM_MAX_BUFFER`                        | Maximum memory for git output; raise it only for very large changes.        | `50 MiB`           |
 | `GCM_PER_FILE_BUFFER`                   | Maximum diff size read from one file; raise it when large files are cut off. | `1 MiB`            |
-| `GCM_MAX_HUNKS`                         | Maximum number of git diff hunks to analyse; raise it for broader coverage. | `16`               |
+| `GCM_MAX_HUNKS`                         | Maximum number of git diff hunks to analyse; raise it for broader coverage. | `40`               |
 | `GCM_ENABLE_THINKING`                   | Set to `true` to enable Gemini thinking; use it only with a supporting model. | `false`            |
 | `GCM_TOKEN_BYTES_RATIO`                 | Bytes assumed per input token; adjust it only if context sizing is inaccurate. | `3.5`              |
-| `GCM_MAX_OUTPUT_TOKENS`                 | Maximum tokens for Gemini's response; raise it if responses are cut off.    | `2048`             |
+| `GCM_MAX_OUTPUT_TOKENS`                 | Maximum tokens for Gemini's response; raise it if responses are cut off.    | `8192`             |
 | `GCM_ENABLE_HUNK_WEIGHTS`               | Set to `true` to favour important files when choosing diff hunks.           | `false`            |
 | `GCM_LOG_LEVEL`                         | Default console logging level; set `debug` when investigating a problem.    | `info`             |
 | `GCM_DEBUG_API`                         | Set to `true` to save API logs to a file while debugging.                   | `false`            |

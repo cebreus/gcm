@@ -2,6 +2,7 @@ import type { Logger } from './logger.js';
 import { KNOWN_MODELS } from './model-registry.js';
 import { buildAtomicSplitProposal, detectAtomicGroup } from './atomic-commit-planner.js';
 import { describeExcludedPaths } from './commit-action-service.js';
+import { stripTerminalControlSequences } from './utils.js';
 
 export interface GenerationState {
   baselineModelName: string;
@@ -128,7 +129,7 @@ async function getModelSelectionOptions(
 }
 
 function commitActionLabel(commitCapability: CommitCapability): string {
-  const subject = commitCapability.target?.subject ?? '';
+  const subject = stripTerminalControlSequences(commitCapability.target?.subject ?? '');
   if (commitCapability.mode === 'amend') return `Amend HEAD (${subject})`;
   if (commitCapability.mode === 'reword') return `Reword via amend! commit (${subject})`;
   return 'Commit';

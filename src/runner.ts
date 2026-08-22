@@ -26,7 +26,7 @@ import { buildAtomicSplitProposal } from './atomic-commit-planner.js';
 import { loadSession, saveSession } from './session.js';
 import { intro, outro, spinner, note, select, text, confirm, isCancel, cancel } from '@clack/prompts';
 import { KNOWN_MODELS, getModelSpec } from './model-registry.js';
-import { sanitizeForDisplay } from './utils.js';
+import { sanitizeForDisplay, stripTerminalControlSequences } from './utils.js';
 import clipboardy from 'clipboardy';
 import pkg from '../package.json';
 import {
@@ -343,18 +343,18 @@ async function runGenerationSafely(params: {
         const responseError = isRecord(parsed) ? parsed.error : undefined;
         const responseMessage = isRecord(responseError) ? responseError.message : undefined;
         if (responseMessage) {
-          msg += `: ${String(responseMessage)}`;
+          msg += `: ${stripTerminalControlSequences(String(responseMessage))}`;
         } else {
-          msg += `: ${error.message}`;
+          msg += `: ${stripTerminalControlSequences(error.message)}`;
         }
       } catch {
-        msg += `: ${error.message}`;
+        msg += `: ${stripTerminalControlSequences(error.message)}`;
       }
       logger.log('error', `Gemini commit helper failed: ${error}`, {
         error: errStr,
         snippet: metadata.snippet,
       });
-      cancel(msg);
+      cancel(stripTerminalControlSequences(msg));
     } else {
       logger.log('error', `Gemini commit helper failed: ${error}`, { error: errStr });
       cancel(`An unexpected error occurred: ${errStr}`);
@@ -788,7 +788,7 @@ async function handleSuccessfulGeneration(params: {
   });
   const parsedOut = parseAndSanitizeResponse(response.text, state.outputMode, logger);
   if (!parsedOut) {
-    logger.log('info', response.text);
+    logger.log('info', stripTerminalControlSequences(response.text));
     outro('Failed to parse structured output.');
     return 'failure';
   }

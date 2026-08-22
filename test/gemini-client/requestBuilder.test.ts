@@ -72,3 +72,12 @@ test('requestBuilder: should build a valid request body with all options', () =>
     thinkingConfig: { thinkingMode: 'THINKING_MODE_EXTENDED' },
   });
 });
+
+test('requestBuilder: redacts secrets from staged diff content without changing ordinary content', () => {
+  const stagedDiff = '+ const apiKey = "sk-abcdef1234567890";\n+ const name = "ordinary";';
+  const body = buildRequestBody(stagedDiff, testConfig, {}, false);
+
+  expect(body.contents[0].parts[0].text).toContain('[REDACTED-KEY]');
+  expect(body.contents[0].parts[0].text).not.toContain('sk-abcdef1234567890');
+  expect(body.contents[0].parts[0].text).toContain('+ const name = "ordinary";');
+});
