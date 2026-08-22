@@ -406,7 +406,15 @@ async function assertCommitWriteSafety(params: {
 async function isPublishedCommit(deps: GitServiceDeps, hash: string): Promise<boolean> {
   try {
     const remotes = await deps.gitCommandRunner(['branch', '--remotes', '--contains', hash]);
-    return remotes.text.trim().length > 0;
+    if (remotes.text.trim().length > 0) return true;
+    const configuredRemotes = await deps.gitCommandRunner(['remote']);
+    if (configuredRemotes.text.trim().length === 0) return false;
+    const trackingRefs = await deps.gitCommandRunner([
+      'for-each-ref',
+      '--format=%(refname)',
+      'refs/remotes',
+    ]);
+    return trackingRefs.text.trim().length === 0;
   } catch {
     return true;
   }

@@ -15,3 +15,18 @@ async function gitUtilsKillSignalTest(): Promise<void> {
   console.log('  killSignalTest -> passed');
 }
 test('git-utils: killSignalTest', gitUtilsKillSignalTest);
+
+test('git-utils: accepts a non-zero exit caused by its truncation kill', async function () {
+  const script = `process.on('SIGTERM', () => process.exit(1)); console.log('x'.repeat(2048)); setInterval(() => {}, 1000);`;
+  const result = await spawnGitStream(['-e', script], { maxBytes: 1024, execName: 'bun' });
+
+  expect(result.truncated).toBe(true);
+});
+
+test('git-utils: throws when a command fails after producing truncated output', async function () {
+  const script = `console.log('x'.repeat(2048)); process.exit(1);`;
+
+  await expect(spawnGitStream(['-e', script], { maxBytes: 1024, execName: 'bun' })).rejects.toThrow(
+    'failed:',
+  );
+});

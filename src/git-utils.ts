@@ -13,8 +13,10 @@ export interface SpawnGitStreamResult {
   truncated: boolean;
 }
 
-function killSpawnedChild(child: ReturnType<typeof Bun.spawn>, state: { killed: boolean }): void {
-  if (state.killed) return;
+async function killSpawnedChild(child: ReturnType<typeof Bun.spawn>, state: { killed: boolean }): Promise<void> {
+  if (state.killed || child.exitCode !== null) return;
+  const alreadyExited = await Promise.race([child.exited.then(() => true), Bun.sleep(1).then(() => false)]);
+  if (alreadyExited) return;
   state.killed = true;
   try {
     child.kill('SIGTERM');
@@ -53,7 +55,7 @@ async function spawnCore(
       bytes += chunk.length;
       if (bytes > maxBytes) {
         truncated = true;
-        killSpawnedChild(child, killState);
+        await killSpawnedChild(child, killState);
         break;
       }
       onChunk(chunk);
@@ -78,7 +80,7 @@ async function spawnCore(
 
   await stdoutTask;
   const [code, stderr] = await Promise.all([child.exited, stderrTask]);
-  if (!truncated && code !== 0) {
+  if (code !== 0 && !killState.killed) {
     throw new Error('git ' + args.join(' ') + ' failed: ' + stderr);
   }
   return { truncated };

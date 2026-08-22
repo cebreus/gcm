@@ -391,6 +391,11 @@ async function handleSuccessfulResponse(
   if (!(parsed.truncated && opts.retryIfTruncated && truncRetries < truncMaxRetries)) {
     return { retry: false, response: parsed, truncRetries, currentMaxOutputTokens };
   }
+  const nextMaxOutputTokens = Math.min(currentMaxOutputTokens + truncIncrease, params.maxOutputTokensLimit);
+  if (nextMaxOutputTokens === currentMaxOutputTokens) {
+    deps.logger.log('warn', "Gemini response was truncated because the model's output limit was reached.");
+    return { retry: false, response: parsed, truncRetries, currentMaxOutputTokens };
+  }
   const nextTruncRetries = truncRetries + 1;
   deps.logger.log(
     'warn',
@@ -406,7 +411,7 @@ async function handleSuccessfulResponse(
     retry: true,
     response: null,
     truncRetries: nextTruncRetries,
-    currentMaxOutputTokens: Math.min(currentMaxOutputTokens + truncIncrease, params.maxOutputTokensLimit),
+    currentMaxOutputTokens: nextMaxOutputTokens,
   };
 }
 

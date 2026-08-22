@@ -29,6 +29,25 @@ export function redactSensitiveText(text: string): string {
     .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED-PEM]');
 }
 
+function hasSecretEntropy(value: string): boolean {
+  return new Set(value).size >= 8;
+}
+
+export function redactSensitiveTextForPrompt(text: string): string {
+  return text
+    .replace(
+      /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_.+/=]{16,}\b/g,
+      '[REDACTED-JWT]',
+    )
+    .replace(
+      /\b(?:AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{31,}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{60,}|sk-(?:proj-)?[A-Za-z0-9_-]{32,}|AQ\.[A-Za-z0-9_-]{24,}|xoxb-[0-9]{6,}-[0-9]{6,}-[A-Za-z0-9-]{24,})\b/g,
+      function (value: string): string {
+        return hasSecretEntropy(value) ? '[REDACTED-KEY]' : value;
+      },
+    )
+    .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED-PEM]');
+}
+
 export function stripTerminalControlSequences(text: string): string {
   return text
     .replace(
@@ -167,7 +186,7 @@ export function sanitizeForDisplay(text: string): string {
   cleaned = cleaned.replace(/^[ \t]+/, '').replace(/[ \t]+$/, '');
 
   // Allow printable ASCII and all UTF-8 characters. Remove non-printable control characters (0-31) except tab, newline, CR.
-  return cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  return stripTerminalControlSequences(cleaned);
 }
 
 /**

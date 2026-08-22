@@ -1,5 +1,5 @@
 import type { CONFIG } from '../../gcm.config.js';
-import { redactSensitiveText } from '../utils.js';
+import { redactSensitiveTextForPrompt } from '../utils.js';
 interface RequestBody {
   contents: Array<{ role: string; parts: Array<{ text: string }> }>;
   systemInstruction: { parts: Array<{ text: string }> };
@@ -19,7 +19,7 @@ export function buildRequestBody(
   const START = '<<START>>';
   const END = '<<END>>';
 
-  const redactedUserContent = redactSensitiveText(userContent);
+  const redactedUserContent = redactSensitiveTextForPrompt(userContent);
   const wrappedUserContent = config.ADD_RESPONSE_MARKERS
     ? `${START}\n${redactedUserContent}\n${END}`
     : redactedUserContent;

@@ -173,6 +173,7 @@ describe('commit actions', () => {
       'rev-parse --verify': 'b'.repeat(40),
       'log -1': 'fix: tip subject',
       'branch --remotes --contains': '',
+      remote: '',
       'merge-base HEAD': 'b'.repeat(40),
       'symbolic-ref': 'refs/heads/main',
       'log --format=%s': 'chore: other\nchore: base',
