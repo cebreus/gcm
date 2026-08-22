@@ -8,6 +8,7 @@ import {
   shouldExcludeFile,
   filterExcludedFiles,
   sanitizeForDisplay,
+  stripTerminalControlSequences,
 } from '../src/utils';
 import type { Hunk } from '../src/utils';
 
@@ -367,4 +368,10 @@ test('utils: sanitizeForDisplay - should handle multiple occurrences', () => {
   const input = '<<START>>text1<<END>> middle <<START>>text2<<END>>';
   const result = sanitizeForDisplay(input);
   expect(result).toBe('text1 middle text2');
+});
+
+test('utils: stripTerminalControlSequences removes ANSI and controls but keeps newlines and tabs', () => {
+  expect(stripTerminalControlSequences('first\tline\n\u001B]8;;https://example.test\u0007link\u001B]8;;\u0007\u009B2J\u0000')).toBe(
+    'first\tline\nlink',
+  );
 });

@@ -16,6 +16,28 @@ export interface Hunk {
   score: number;
 }
 
+export function redactSensitiveText(text: string): string {
+  return text
+    .replace(
+      /(ey[A-Za-z0-9-_=]+)\.(ey[A-Za-z0-9-_=]+)\.([A-Za-z0-9-_.+/=]*)/g,
+      '[REDACTED-JWT]',
+    )
+    .replace(
+      /\b(?:AKIA|AIza|ghp_|xoxb-|sk-)[A-Za-z0-9\-_]{8,}\b|\bgithub_pat_[A-Za-z0-9_]{8,}\b|\bAQ\.[A-Za-z0-9\-_]{8,}\b/g,
+      '[REDACTED-KEY]',
+    )
+    .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED-PEM]');
+}
+
+export function stripTerminalControlSequences(text: string): string {
+  return text
+    .replace(
+      /(?:\x1B(?:\][\s\S]*?(?:\x07|\x1B\\)|[PX^_][\s\S]*?\x1B\\|\[[0-?]*[ -/]*[@-~]|[()][0-?]*[ -/]*[@-~]|[0-?]*[ -/]*[@-~])|\x9D[\s\S]*?(?:\x07|\x9C)|\x9B[0-?]*[ -/]*[@-~]|\x90[\s\S]*?\x9C|\x9E[\s\S]*?\x9C|\x9F[\s\S]*?\x9C)/g,
+      '',
+    )
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+}
+
 /**
  * Converts a glob pattern to a regex
  * Supports simple wildcards: * matches anything, ? matches single char

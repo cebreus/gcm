@@ -286,6 +286,37 @@ describe('Refactored Runner', () => {
     expect(mockCancel).toHaveBeenCalledWith('API Error (429): 429');
   });
 
+  test('Should remove terminal controls from Gemini API error messages', async () => {
+    const error = Object.assign(new Error('quota exhausted'), {
+      name: 'GeminiApiError',
+      metadata: { status: 429, snippet: '{"error":{"message":"bad\\u001b]8;;https://example.test\\u0007link\\u001b]8;;\\u0007"}}' },
+    });
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['file.ts'],
+      truncated: false,
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.callGeminiAPI.mockRejectedValueOnce(error);
+    mockSelect.mockResolvedValueOnce('generate');
+
+    await expect(
+      executeCommitMessageGeneration([], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      }),
+    ).rejects.toBe(error);
+
+    expect(mockCancel).toHaveBeenCalledWith('API Error (429): badlink');
+  });
+
   test('Should include version details in --help output', async () => {
     const originalStdoutWrite = process.stdout.write;
     const stdoutChunks: string[] = [];
@@ -494,6 +525,43 @@ describe('Refactored Runner', () => {
 
       expect(mockOutro).toHaveBeenCalledWith('Failed to parse structured output.');
       expect(Number(process.exitCode)).toBe(1);
+    } finally {
+      process.exitCode = originalExitCode;
+      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+    }
+  });
+
+  test('Should remove terminal controls before logging an unparseable model response', async () => {
+    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    const originalExitCode = process.exitCode;
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.exitCode = undefined;
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['file.ts'],
+      truncated: false,
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.callGeminiAPI.mockResolvedValue({
+      text: '\u001B[2Junparseable\u0000 response',
+      usage: {},
+    });
+
+    try {
+      await executeCommitMessageGeneration(['--mode', 'full'], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      });
+
+      expect(mockLogger.log).toHaveBeenCalledWith('info', 'unparseable response');
     } finally {
       process.exitCode = originalExitCode;
       if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;

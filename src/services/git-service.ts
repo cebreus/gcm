@@ -79,12 +79,12 @@ export interface RepositoryState {
 
 function buildFileListArgs(commitHash: string | null): string[] {
   return commitHash
-    ? ['show', '-w', '--name-only', '--pretty=format:', '-z', commitHash]
+    ? ['show', '--first-parent', '-w', '--name-only', '--pretty=format:', '-z', commitHash]
     : ['diff', '--staged', '--name-only', '-z'];
 }
 
 function buildDiffArgs(commitHash: string | null): string[] {
-  return commitHash ? ['show', '-w', commitHash] : ['diff', '--staged', '-w'];
+  return commitHash ? ['show', '--first-parent', '-w', commitHash] : ['diff', '--staged', '-w'];
 }
 
 function decodeGitQuotedPath(path: string): string {
@@ -268,6 +268,7 @@ async function commitChangesWithDeps(params: {
   await assertCommitWriteSafety({ deps, logger, safety });
   if (logger) logger.log('debug', 'Executing git commit');
   await deps.gitCommandRunner(['commit', '-m', message]);
+  await warnIfCommittedTreeChanged({ deps, logger, safety });
 }
 
 async function getIndexTreeWithDeps(params: {
@@ -314,6 +315,7 @@ async function amendCommitWithDeps(params: {
   await assertCommitWriteSafety({ deps, logger, safety });
   logger?.log('debug', 'Executing git commit --amend');
   await deps.gitCommandRunner(['commit', '--amend', '-m', message]);
+  await warnIfCommittedTreeChanged({ deps, logger, safety });
 }
 
 // An `amend!` commit carries the replacement message as an ordinary commit, so
@@ -337,6 +339,38 @@ async function rewordCommitWithDeps(params: {
     '-m',
     message,
   ]);
+  await warnIfCommittedTreeChanged({ deps, logger, safety });
+}
+
+async function warnIfCommittedTreeChanged(params: {
+  deps: GitServiceDeps;
+  logger: Logger | null;
+  safety?: CommitWriteSafety;
+}): Promise<void> {
+  const { deps, logger, safety } = params;
+  if (!safety) return;
+  try {
+    const committedTree = (
+      await deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^{tree}'])
+    ).text.trim();
+    if (committedTree === safety.snapshot.tree) return;
+    const changedPaths = parseFileList(
+      (await deps.gitCommandRunner(['diff', '--name-only', '-z', safety.snapshot.tree, committedTree])).text,
+    ).map(function (path) {
+      return JSON.stringify(path);
+    });
+    logger?.log(
+      'warn',
+      'Commit completed, but pre-commit hooks changed the committed tree after analysis. Paths that differ from the analysed snapshot: ' +
+        (changedPaths.join(', ') || 'the tree contents') +
+        '.',
+    );
+  } catch {
+    logger?.log(
+      'warn',
+      'Commit completed, but its tree could not be verified against the analysed snapshot.',
+    );
+  }
 }
 
 function commitSafetyRefusal(message: string): Error {

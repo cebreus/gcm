@@ -126,6 +126,66 @@ test('gemini-client: caps every debug body payload', async () => {
   }
 });
 
+test('gemini-client: caps debug bodies at UTF-8 character boundaries', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'gcm-debug-utf8-body-'));
+  const debugPath = join(directory, '.debug.log');
+  const userContent = 'é漢😀tail';
+
+  async function fetchStub(_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
+    void _input;
+    void _init;
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }));
+  }
+
+  try {
+    const client = createGeminiClient({
+      fetchImpl: fetchStub as typeof fetch,
+      config: {
+        DEBUG_API: true,
+        DEBUG_FILE: debugPath,
+        DEBUG_MAX_BODY_LOG_BYTES: 5,
+        ADD_RESPONSE_MARKERS: false,
+      },
+    });
+    await client.callGemini({
+      apiKey: 'fake-key',
+      userContent,
+      enableThinking: false,
+      telemetryMeta: {},
+      callOptions: {},
+    });
+
+    await Bun.sleep(10);
+    const debugLog = await readFile(debugPath, 'utf8');
+    expect(debugLog).toContain(`API REQUEST USER CONTENT (text):\né漢...[TRUNCATED]`);
+    expect(debugLog).not.toContain('\uFFFD');
+
+    const surrogateDebugPath = join(directory, '.debug-surrogate.log');
+    const surrogateClient = createGeminiClient({
+      fetchImpl: fetchStub as typeof fetch,
+      config: {
+        DEBUG_API: true,
+        DEBUG_FILE: surrogateDebugPath,
+        DEBUG_MAX_BODY_LOG_BYTES: 3,
+        ADD_RESPONSE_MARKERS: false,
+      },
+    });
+    await surrogateClient.callGemini({
+      apiKey: 'fake-key',
+      userContent,
+      enableThinking: false,
+      telemetryMeta: {},
+      callOptions: {},
+    });
+    await Bun.sleep(10);
+    const surrogateDebugLog = await readFile(surrogateDebugPath, 'utf8');
+    expect(surrogateDebugLog).toContain(`API REQUEST USER CONTENT (text):\né...[TRUNCATED]`);
+    expect(surrogateDebugLog).not.toContain('\uFFFD');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 async function geminiClientRetryTest(): Promise<void> {
   let callCount = 0;
   const origFetch = globalThis.fetch;

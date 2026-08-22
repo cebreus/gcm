@@ -51,6 +51,25 @@ test('logger: redacts current GitHub and Google keys in messages', () => {
   expect(output).not.toContain(googleKey);
 });
 
+test('logger: keeps full redacted messages while truncating metadata', () => {
+  stdoutWriteMock.mockClear();
+  const logger = createLogger({ LOG_LEVEL: 'info' });
+  const messageTail = 'message-tail';
+  const metadataTail = 'metadata-tail';
+  logger.log(
+    'info',
+    'x'.repeat(256) + messageTail + ' sk-abcdef1234567890',
+    { detail: 'x'.repeat(256) + metadataTail },
+  );
+
+  const output = stdoutWriteMock.mock.calls.map(call => String(call[0])).join('');
+  expect(output).toContain(messageTail);
+  expect(output).toContain('[REDACTED-KEY]');
+  expect(output).not.toContain('sk-abcdef1234567890');
+  expect(output).toContain('...[TRUNCATED]');
+  expect(output).not.toContain(metadataTail);
+});
+
 test('logger: log level filtering', () => {
   stdoutWriteMock.mockClear();
   stderrWriteMock.mockClear();
