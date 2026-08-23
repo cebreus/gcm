@@ -79,7 +79,7 @@ function showHelp() {
       ${C.cyan}-h, --help${C.reset}                Show this help message.
       ${C.cyan}--version${C.reset}                 Show package version and exit.
       ${C.cyan}-v, --verbose${C.reset}             Show detailed logs (debug level) in the console.
-      ${C.cyan}-d, --debug${C.reset}               Save complete logs to a '.debug.log' file for debugging.
+      ${C.cyan}-d, --debug${C.reset}               Save bounded API traces to '.debug.log' for debugging.
       ${C.cyan}-e, --exclude <pattern>${C.reset}   Exclude files matching pattern (e.g., *manifest*).
                                 Can be comma-separated or used multiple times.
       ${C.cyan}-m, --mode <mode>${C.reset}         Output mode: 'full' or 'commit-only'.
@@ -410,17 +410,13 @@ async function runGenerationWorkflow(params: {
   }
   const commitActions = createCommitActionService({ gitService: services.gitService, logger });
   const inspection = await commitActions.inspect(targetCommit, staged.snapshot);
+  const preflightRepositoryState = inspection.repositoryState ?? repositoryState;
+  if (reportUnresolvedConflicts(preflightRepositoryState)) return 'failure';
 
-  showRepositoryWarnings(repositoryState, targetCommit, inspection.capability);
+  showRepositoryWarnings(preflightRepositoryState, targetCommit, inspection.capability);
   const preflight =
-    parsedArgs.model || parsedArgs.mode ? 'continue' : await services.dialogue.configure(state, apiKey);
+    parsedArgs.model && parsedArgs.mode ? 'continue' : await services.dialogue.configure(state, apiKey);
   if (preflight === 'exit') return 'success';
-  if (repositoryState.hasUnmergedPaths) {
-    cancel(
-      'Git index has unresolved conflicts. Resolve conflicts before generating or committing.',
-    );
-    return 'failure';
-  }
   const commitCapability = {
     ...inspection.capability,
     excludedPaths: targetCommit ? [] : (staged.excludedPaths ?? []),
@@ -460,6 +456,7 @@ async function resolveReadyRepositoryState(params: {
 } | null> {
   const { services, parsedArgs, targetCommit, logger, s } = params;
   let repositoryState = await getRepositoryStateSafe(services.gitService, logger);
+  if (reportUnresolvedConflicts(repositoryState)) return null;
   let staged = await loadStagedChanges({
     services,
     parsedArgs,
@@ -479,6 +476,7 @@ async function resolveReadyRepositoryState(params: {
     });
     if (nextStep === 'cancel') return null;
     repositoryState = await getRepositoryStateSafe(services.gitService, logger);
+    if (reportUnresolvedConflicts(repositoryState)) return null;
     staged = await loadStagedChanges({
       services,
       parsedArgs,
@@ -490,6 +488,12 @@ async function resolveReadyRepositoryState(params: {
   }
 
   return { repositoryState, staged };
+}
+
+function reportUnresolvedConflicts(repositoryState: RepositoryState): boolean {
+  if (!repositoryState.hasUnmergedPaths) return false;
+  cancel('Git index has unresolved conflicts. Resolve conflicts before generating or committing.');
+  return true;
 }
 
 function showRepositoryWarnings(

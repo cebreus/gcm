@@ -475,7 +475,7 @@ describe('Refactored Runner', () => {
     });
 
     try {
-      await executeCommitMessageGeneration(['--mode', 'commit-only'], {
+      await executeCommitMessageGeneration([], {
         logger: mockLogger,
         gitService: mockGitService,
         contextService: mockContextService,
@@ -486,10 +486,119 @@ describe('Refactored Runner', () => {
       expect(mockCancel).toHaveBeenCalledWith(
         'Git index has unresolved conflicts. Resolve conflicts before generating or committing.',
       );
+      expect(mockSelect).not.toHaveBeenCalled();
       expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
       expect(Number(process.exitCode)).toBe(1);
     } finally {
       process.exitCode = originalExitCode;
+      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+    }
+  });
+
+  test('Should still offer settings when only --model is provided', async () => {
+    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['file.ts'],
+      truncated: false,
+    });
+    mockSelect.mockResolvedValueOnce('exit');
+
+    try {
+      await executeCommitMessageGeneration(['--model', 'gemini-3.1-pro-preview'], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      });
+
+      expect(mockSelect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Settings: [Model: gemini-3.1-pro-preview] [Mode: Commit Msg Only]',
+        }),
+      );
+      expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
+    } finally {
+      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+    }
+  });
+
+  test('Should still offer settings when only --mode is provided', async () => {
+    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['file.ts'],
+      truncated: false,
+    });
+    mockSelect.mockResolvedValueOnce('exit');
+
+    try {
+      await executeCommitMessageGeneration(['--mode', 'full'], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      });
+
+      expect(mockSelect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Settings: [Model: gemini-3.7-flash] [Mode: Full Report]',
+        }),
+      );
+      expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
+    } finally {
+      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+    }
+  });
+
+  test('Should show the latest repository state discovered during preflight', async () => {
+    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['file.ts'],
+      truncated: false,
+    });
+    mockGitService.getRepositoryState
+      .mockResolvedValueOnce({
+        hasStagedChanges: true,
+        hasUnstagedChanges: false,
+        hasUntrackedFiles: false,
+        hasUnmergedPaths: false,
+        inProgressOperation: null,
+        changedFiles: ['file.ts'],
+      })
+      .mockResolvedValueOnce({
+        hasStagedChanges: true,
+        hasUnstagedChanges: false,
+        hasUntrackedFiles: false,
+        hasUnmergedPaths: false,
+        inProgressOperation: 'rebase',
+        changedFiles: ['file.ts'],
+      });
+    mockSelect.mockResolvedValueOnce('exit');
+
+    try {
+      await executeCommitMessageGeneration([], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      });
+
+      expect(mockNote).toHaveBeenCalledWith(
+        expect.stringContaining('Git operation in progress: rebase.'),
+        'Repository warnings',
+      );
+    } finally {
       if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
       else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
     }
@@ -516,7 +625,7 @@ describe('Refactored Runner', () => {
     });
 
     try {
-      await executeCommitMessageGeneration(['--mode', 'full'], {
+      await executeCommitMessageGeneration(['--mode', 'full', '--model', 'gemini-3.7-flash'], {
         logger: mockLogger,
         gitService: mockGitService,
         contextService: mockContextService,
@@ -554,7 +663,7 @@ describe('Refactored Runner', () => {
     });
 
     try {
-      await executeCommitMessageGeneration(['--mode', 'full'], {
+      await executeCommitMessageGeneration(['--mode', 'full', '--model', 'gemini-3.7-flash'], {
         logger: mockLogger,
         gitService: mockGitService,
         contextService: mockContextService,
@@ -593,13 +702,16 @@ describe('Refactored Runner', () => {
     mockSelect.mockResolvedValueOnce('commit');
 
     try {
-      await executeCommitMessageGeneration(['--mode', 'commit-only'], {
-        logger: mockLogger,
-        gitService: mockGitService,
-        contextService: mockContextService,
-        geminiService: mockGeminiService,
-        listModels: mockListModels,
-      });
+      await executeCommitMessageGeneration(
+        ['--mode', 'commit-only', '--model', 'gemini-3.7-flash'],
+        {
+          logger: mockLogger,
+          gitService: mockGitService,
+          contextService: mockContextService,
+          geminiService: mockGeminiService,
+          listModels: mockListModels,
+        },
+      );
 
       expect(mockCancel).toHaveBeenCalledWith('Failed to apply commit action: git commit failed');
       expect(Number(process.exitCode)).toBe(1);
