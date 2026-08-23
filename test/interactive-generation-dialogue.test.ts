@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createInteractiveGenerationDialogue,
-  type CommitCapability,
+  type ReviewCommitCapability,
   type GenerationState,
   type PromptAdapter,
 } from '../src/interactive-generation-dialogue.js';
@@ -17,7 +17,7 @@ function createState(): GenerationState {
   };
 }
 
-function createCapability(overrides: Partial<CommitCapability> = {}): CommitCapability {
+function createCapability(overrides: Partial<ReviewCommitCapability> = {}): ReviewCommitCapability {
   return { allowed: true, mode: 'commit', ...overrides };
 }
 

@@ -3,7 +3,7 @@ import { CONFIG } from '../../gcm.config.js';
 import { createLogger } from '../logger.js';
 import type { Logger, LoggerConfig, LogMetadata } from '../logger.js';
 import { tryParseJSON, parseCandidates } from './parsers.js';
-import { getRetryMsFromResponse } from './backoff.js';
+import { addJitterWithinCap, getRetryMsFromResponse } from './backoff.js';
 import { buildRequestBody } from './requestBuilder.js';
 import { GeminiApiError } from './errors.js';
 import { unescapeNewlinesInText } from '../utils.js';
@@ -44,7 +44,6 @@ export interface GeminiClient {
   callGemini: (params: {
     apiKey: string;
     userContent: string;
-    enableThinking: boolean;
     telemetryMeta: LogMetadata;
     callOptions: GeminiCallOpts;
     modelOverride?: string;
@@ -348,7 +347,7 @@ async function handleNetworkFailure(
       'ms',
     { error: String(err) },
   );
-  await Bun.sleep(backoff + Math.floor(Math.random() * 300));
+  await Bun.sleep(addJitterWithinCap(backoff, deps.retryMaxMs, 300));
   return true;
 }
 
@@ -403,8 +402,7 @@ async function handleSuccessfulResponse(
     });
   }
   const parsed = parseCandidates(json, deps.logger) as
-    | (GeminiResponse & { truncated?: boolean })
-    | null;
+    (GeminiResponse & { truncated?: boolean }) | null;
   if (!parsed) throw new GeminiApiError('Gemini returned no text', { json });
   if (!(parsed.truncated && opts.retryIfTruncated && truncRetries < truncMaxRetries)) {
     return { retry: false, response: parsed, truncRetries, currentMaxOutputTokens };
@@ -544,19 +542,16 @@ async function runCallAttempt(params: {
   deps: GeminiClientDeps;
   apiKey: string;
   userContent: string;
-  enableThinking: boolean;
   telemetryMeta: LogMetadata;
   setup: CallSetup;
   state: CallState;
 }): Promise<'retry' | GeminiResponse | null> {
-  const { deps, apiKey, userContent, enableThinking, telemetryMeta, setup, state } = params;
+  const { deps, apiKey, userContent, telemetryMeta, setup, state } = params;
   state.attempt += 1;
-  const body = buildRequestBody(
-    userContent,
-    deps.config,
-    { ...setup.opts, maxOutputTokens: state.currentMaxOutputTokens },
-    enableThinking,
-  );
+  const body = buildRequestBody(userContent, deps.config, {
+    ...setup.opts,
+    maxOutputTokens: state.currentMaxOutputTokens,
+  });
   try {
     const timeoutMs = getTimeoutMs(setup.opts.timeoutMs);
     const bodyStr = JSON.stringify(body);
@@ -597,14 +592,12 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
   const callGemini = async ({
     apiKey,
     userContent,
-    enableThinking,
     telemetryMeta,
     callOptions,
     modelOverride,
   }: {
     apiKey: string;
     userContent: string;
-    enableThinking: boolean;
     telemetryMeta: LogMetadata;
     callOptions: GeminiCallOpts;
     modelOverride?: string;
@@ -625,7 +618,6 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
         deps,
         apiKey,
         userContent,
-        enableThinking,
         telemetryMeta,
         setup,
         state,

@@ -167,17 +167,9 @@ function logTokenInfo(params: {
   modelName: string;
   tokens: number;
   inputLength: number;
-  enableThinking: boolean;
   logger: Logger;
 }): void {
-  const { modelName, tokens, inputLength, enableThinking, logger } = params;
-  if (enableThinking) {
-    logger.log(
-      'info',
-      `model: ${modelName} (thinking) | estimated input: ~${tokens} tokens | length: ${inputLength}`,
-    );
-    return;
-  }
+  const { modelName, tokens, inputLength, logger } = params;
   logger.log(
     'info',
     `model: ${modelName} | estimated input: ~${tokens} tokens | length: ${inputLength}`,
@@ -739,7 +731,6 @@ async function runSingleGenerationAttempt(params: {
     modelName: state.modelName,
     tokens: contextResult.tokens,
     inputLength: contextResult.processedDiffContent.length,
-    enableThinking: CONFIG.ENABLE_THINKING,
     logger,
   });
   logger.log('debug', 'Run started', {

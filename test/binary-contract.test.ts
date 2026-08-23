@@ -5,6 +5,7 @@ import pkg from '../package.json';
 const ansiEscape = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 const tempRoot = Bun.env.TMPDIR || '/tmp';
 const packageVersion = pkg.version;
+const expectPath = Bun.which('expect');
 let binaryDirectory = '';
 let binaryPath = '';
 let gitRepository = '';
@@ -12,6 +13,8 @@ let nonRepository = '';
 let whitespaceRepository = '';
 let excludeRepository = '';
 let conflictRepository = '';
+let rewordRepository = '';
+let providerPreload = '';
 
 interface BinaryResult {
   exitCode: number;
@@ -21,6 +24,14 @@ interface BinaryResult {
 
 function clean(text: string): string {
   return text.replace(ansiEscape, '');
+}
+
+function escapeTclDoubleQuoted(text: string): string {
+  return text
+    .replaceAll('\\', '\\\\')
+    .replaceAll('$', '\\$')
+    .replaceAll('[', '\\[')
+    .replaceAll('"', '\\"');
 }
 
 function controlledEnvironment(apiKey?: string): Record<string, string> {
@@ -93,6 +104,38 @@ async function runBinary(
   };
 }
 
+async function runInteractiveBinary(args: string[], cwd: string): Promise<BinaryResult> {
+  if (expectPath === null) throw new Error('expect PTY is unavailable.');
+  const command = ['bun', '--preload', providerPreload, binaryPath, ...args]
+    .map(value => `'${value.replaceAll("'", "'\\''")}'`)
+    .join(' ');
+  const shellCommand = escapeTclDoubleQuoted(`stty rows 40 columns 200; exec ${command}`);
+  const script = [
+    'set timeout 10',
+    `spawn -noecho sh -c "${shellCommand}"`,
+    'expect {',
+    '  "Reword via amend! commit; manual rebase required" { send "\\r" }',
+    '  timeout { exit 124 }',
+    '}',
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  const child = Bun.spawn({
+    cmd: [expectPath, '-c', script],
+    cwd,
+    env: controlledEnvironment('fake-key'),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  return { exitCode, stdout: clean(stdout), stderr: clean(stderr) };
+}
+
 function expectCleanInputError(result: BinaryResult, message: string): void {
   expect(result.exitCode).not.toBe(0);
   expect(result.stdout.trim().split('\n')).toEqual([expect.stringContaining(message)]);
@@ -109,17 +152,42 @@ beforeAll(async () => {
   whitespaceRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-whitespace-`);
   excludeRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-exclude-`);
   conflictRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-conflict-`);
+  rewordRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-reword-`);
+  providerPreload = `${binaryDirectory}/provider-preload.ts`;
+
+  await Bun.write(
+    providerPreload,
+    `globalThis.fetch = async function () {
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '<<START>>fix: corrected message<<END>>' }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 4 }
+      }));
+    } as typeof fetch;`,
+  );
 
   await runCommand(
     ['bun', 'build', './gcm.ts', '--outfile', binaryPath, '--target=bun', '--minify'],
     process.cwd(),
   );
-  for (const repository of [gitRepository, whitespaceRepository, excludeRepository]) {
+  for (const repository of [
+    gitRepository,
+    whitespaceRepository,
+    excludeRepository,
+    rewordRepository,
+  ]) {
     await runCommand(['git', 'init', '--quiet'], repository);
   }
   await runCommand(['git', 'init', '--quiet', '--initial-branch=main'], conflictRepository);
   await runCommand(['git', 'config', 'user.email', 'test@gcm.local'], conflictRepository);
   await runCommand(['git', 'config', 'user.name', 'GCM Test'], conflictRepository);
+
+  await runCommand(['git', 'config', 'user.email', 'test@gcm.local'], rewordRepository);
+  await runCommand(['git', 'config', 'user.name', 'GCM Test'], rewordRepository);
+  await Bun.write(`${rewordRepository}/file.txt`, 'first\n');
+  await runCommand(['git', 'add', 'file.txt'], rewordRepository);
+  await runCommand(['git', 'commit', '-qm', 'feat: original subject'], rewordRepository);
+  await Bun.write(`${rewordRepository}/file.txt`, 'second\n');
+  await runCommand(['git', 'commit', '-am', 'feat: later work', '--quiet'], rewordRepository);
 
   await Bun.write(`${whitespaceRepository}/document.txt`, 'first line\n');
   await runCommand(['git', 'add', 'document.txt'], whitespaceRepository);
@@ -168,8 +236,41 @@ afterAll(async () => {
     rm(whitespaceRepository, { recursive: true, force: true }),
     rm(excludeRepository, { recursive: true, force: true }),
     rm(conflictRepository, { recursive: true, force: true }),
+    rm(rewordRepository, { recursive: true, force: true }),
   ]);
 });
+
+test.skipIf(expectPath === null)(
+  'binary contract: amend! is confirmed, created, and never rebased automatically (requires expect PTY)',
+  async () => {
+    const target = (
+      await runCommand(['git', 'rev-parse', 'HEAD~1'], rewordRepository)
+    ).stdout.trim();
+    const result = await runInteractiveBinary(
+      ['--commit', target, '--model', 'gemini-3.7-flash', '--mode', 'commit-only'],
+      rewordRepository,
+    );
+
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Interactive binary failed (${result.exitCode}):\n${result.stdout}\n${result.stderr}`,
+      );
+    }
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Reword via amend! commit; manual rebase required');
+    expect(result.stdout).toContain('git rebase --autosquash');
+    const subjects = (
+      await runCommand(['git', 'log', '-3', '--format=%s'], rewordRepository)
+    ).stdout
+      .trim()
+      .split('\n');
+    expect(subjects).toEqual([
+      'amend! feat: original subject',
+      'feat: later work',
+      'feat: original subject',
+    ]);
+  },
+);
 
 test('binary contract: reports its bundled package version outside the repository', async () => {
   const result = await runBinary(['--version']);

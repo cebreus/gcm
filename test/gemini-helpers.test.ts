@@ -60,7 +60,17 @@ async function geminiHelpersGetRetryMsFromResponseTest(): Promise<void> {
   const ms2 = getRetryMsFromResponse('{}', 1000, 60000, 2);
   // attempt=2 => base <= ms2 <= retryMax + jitter
   expect(ms2).toBeGreaterThanOrEqual(2000);
-  expect(ms2).toBeLessThanOrEqual(61000);
+  expect(ms2).toBeLessThanOrEqual(60000);
+
+  const originalRandom = Math.random;
+  Math.random = function (): number {
+    return 0.999;
+  };
+  try {
+    expect(getRetryMsFromResponse('{}', 60000, 60000, 1)).toBe(60000);
+  } finally {
+    Math.random = originalRandom;
+  }
 }
 test('gemini-helpers: getRetryMsFromResponse', geminiHelpersGetRetryMsFromResponseTest);
 

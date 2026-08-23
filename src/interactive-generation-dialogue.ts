@@ -18,7 +18,7 @@ export interface ActionMenuResult {
   exclusionsAcknowledged?: boolean;
 }
 
-export interface CommitCapability {
+export interface ReviewCommitCapability {
   allowed: boolean;
   mode: 'commit' | 'amend' | 'reword';
   reason?: string;
@@ -59,19 +59,13 @@ export interface InteractiveGenerationDialogue {
     state: GenerationState;
     result: CommitMessageResult;
     apiKey: string;
-    commitCapability: CommitCapability;
+    commitCapability: ReviewCommitCapability;
   }): Promise<ActionMenuResult>;
   confirmAtomicity(stagedFiles: string[], targetCommit: string | null): Promise<boolean>;
 }
 
 type ActionChoice =
-  | 'commit'
-  | 'copy'
-  | 'edit'
-  | 'regenerate'
-  | 'regenerate-hint'
-  | 'switch'
-  | 'cancel';
+  'commit' | 'copy' | 'edit' | 'regenerate' | 'regenerate-hint' | 'switch' | 'cancel';
 
 function toModelOption(name: string): PromptOption {
   const normalizedName = name.replace(/^models\//, '');
@@ -132,7 +126,7 @@ async function getModelSelectionOptions(
   });
 }
 
-function commitActionLabel(commitCapability: CommitCapability): string {
+function commitActionLabel(commitCapability: ReviewCommitCapability): string {
   const subject = stripTerminalControlSequences(commitCapability.target?.subject ?? '');
   if (commitCapability.mode === 'amend') return `Amend HEAD (${subject})`;
   if (commitCapability.mode === 'reword') {
@@ -143,7 +137,7 @@ function commitActionLabel(commitCapability: CommitCapability): string {
 
 async function selectAction(
   prompts: PromptAdapter,
-  commitCapability: CommitCapability,
+  commitCapability: ReviewCommitCapability,
 ): Promise<ActionChoice | null> {
   const options: PromptOption[] = [];
   if (commitCapability.allowed) {

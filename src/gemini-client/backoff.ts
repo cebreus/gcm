@@ -43,11 +43,12 @@ function parseRetryMsFromDetails(details: unknown): number {
 }
 
 function getExponentialBackoffMs(retryBaseMs: number, retryMaxMs: number, attempt: number): number {
-  const base = retryBaseMs;
-  const cap = retryMaxMs;
-  let retryMs = Math.min(cap, base * 2 ** (attempt - 1));
-  retryMs += Math.floor(Math.random() * 1000);
-  return retryMs;
+  const delay = Math.min(retryMaxMs, retryBaseMs * 2 ** (attempt - 1));
+  return addJitterWithinCap(delay, retryMaxMs, 1000);
+}
+
+export function addJitterWithinCap(delay: number, cap: number, jitterRange: number): number {
+  return Math.min(cap, delay + Math.floor(Math.random() * jitterRange));
 }
 
 export function getRetryMsFromResponse(
