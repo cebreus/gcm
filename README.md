@@ -237,20 +237,20 @@ The tool can be configured using environment variables. These are defined in `gc
 | ------------------------------ | ------------------------------------------------------------------------------ | ------------------ |
 | `GCM_MODEL`                    | The Gemini model used to generate messages.                                    | `gemini-3.7-flash` |
 | `GCM_TEMP`                     | Model creativity from 0.0 to 1.0; lower values are more consistent.            | `1`                |
-| `GCM_MAX_BUFFER`               | Maximum memory for git output; raise it only for very large changes.           | `50 MiB`           |
-| `GCM_PER_FILE_BUFFER`          | Maximum diff size read from one file; raise it when large files are cut off.   | `1 MiB`            |
-| `GCM_MAX_HUNKS`                | Maximum number of git diff hunks to analyse; raise it for broader coverage.    | `40`               |
+| `GCM_MAX_BUFFER`               | Git output limit from 1 byte to 1 GiB.                                         | `50 MiB`           |
+| `GCM_PER_FILE_BUFFER`          | Per-file diff limit from 1 byte to 1 GiB.                                      | `1 MiB`            |
+| `GCM_MAX_HUNKS`                | Diff hunks to analyse, from 1 to 10,000.                                       | `40`               |
 | `GCM_ENABLE_THINKING`          | Set to `true` to enable Gemini thinking; use it only with a supporting model.  | `false`            |
-| `GCM_TOKEN_BYTES_RATIO`        | Bytes assumed per input token; adjust it only if context sizing is inaccurate. | `3.5`              |
-| `GCM_MAX_OUTPUT_TOKENS`        | Maximum tokens for Gemini's response; raise it if responses are cut off.       | `8192`             |
+| `GCM_TOKEN_BYTES_RATIO`        | Estimated bytes per input token, from 0.1 to 100.                              | `3.5`              |
+| `GCM_MAX_OUTPUT_TOKENS`        | Positive whole response-token limit, capped by the selected model.             | `8192`             |
 | `GCM_ENABLE_HUNK_WEIGHTS`      | Set to `true` to favour important files when choosing diff hunks.              | `false`            |
 | `GCM_LOG_LEVEL`                | Default console logging level; set `debug` when investigating a problem.       | `info`             |
 | `GCM_DEBUG_API`                | Set to `true` to save API logs to a file while debugging.                      | `false`            |
 | `GCM_DEBUG_FILE`               | File path for API debug logs; change it to store logs elsewhere.               | `.debug.log`       |
-| `GCM_DEBUG_MAX_BODY_LOG_BYTES` | Maximum API body bytes written to debug logs; lower it for smaller logs.       | `32768`            |
-| `GCM_GEMINI_MAX_RETRIES`       | Maximum Gemini retry attempts after failures; raise it for transient errors.   | `3`                |
-| `GCM_GEMINI_RETRY_BASE_MS`     | Initial wait before a Gemini retry; raise it to slow retry attempts.           | `1000`             |
-| `GCM_GEMINI_RETRY_MAX_MS`      | Longest wait between Gemini retries; raise it for a higher backoff ceiling.    | `60000`            |
+| `GCM_DEBUG_MAX_BODY_LOG_BYTES` | Debug body limit from 1 byte to 10 MiB.                                        | `32768`            |
+| `GCM_GEMINI_MAX_RETRIES`       | Gemini retry attempts, from 1 to 10.                                           | `3`                |
+| `GCM_GEMINI_RETRY_BASE_MS`     | Initial retry delay, from 1 ms up to the retry maximum.                        | `1000`             |
+| `GCM_GEMINI_RETRY_MAX_MS`      | Retry delay ceiling, from 1 to 300,000 ms.                                     | `60000`            |
 | `GCM_ADD_RESPONSE_MARKERS`     | Set to `false` to omit response markers; keep enabled for reliable extraction. | `true`             |
 
 ## Development

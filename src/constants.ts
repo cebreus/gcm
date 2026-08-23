@@ -36,3 +36,4 @@ export const FILE_IMPORTANCE_WEIGHTS = {
 
 // Default values
 export const DEFAULT_MAX_DEBUG_LOG_BYTES = 32768;
+export const MAX_DEBUG_LOG_BYTES = 10 * 1024 * 1024;
