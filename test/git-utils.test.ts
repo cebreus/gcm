@@ -76,6 +76,23 @@ test('git-utils: limits output by bytes, not characters', async () => {
   expect(await spawnGitLines(['diff'], { maxBytes: 3 })).toEqual({ lines: [], truncated: true });
 });
 
+test('git-utils: uses the default limit for unsafe byte caps', async () => {
+  for (const maxBytes of [Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER, -1, 1.5]) {
+    mockSpawn.mockImplementationOnce(() => ({
+      stdout: new Response('x'.repeat(1024 * 1024 + 1)).body,
+      stderr: new Response('').body,
+      exited: Promise.resolve(0),
+      kill: mock(() => {}),
+    }));
+
+    const result = await spawnGitLines(['diff'], { maxBytes });
+    expect(result.truncated).toBe(true);
+    expect(new TextEncoder().encode(result.lines.join('')).byteLength).toBeLessThanOrEqual(
+      1024 * 1024,
+    );
+  }
+});
+
 test('git-utils: decodes UTF-8 split across stdout chunks', async () => {
   const stdout = new ReadableStream<Uint8Array<ArrayBuffer>>({
     start(controller) {

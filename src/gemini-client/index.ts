@@ -8,6 +8,7 @@ import { buildRequestBody } from './requestBuilder.js';
 import { GeminiApiError } from './errors.js';
 import { unescapeNewlinesInText } from '../utils.js';
 import { DEFAULT_MAX_DEBUG_LOG_BYTES, MAX_DEBUG_LOG_BYTES } from '../constants.js';
+import { normalizeRetryConfig } from '../config-values.js';
 import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   getEffectiveMaxOutputTokens,
@@ -455,24 +456,6 @@ function getTimeoutMs(value: number | undefined): number {
   return value;
 }
 
-function getClientRetryConfig(config: typeof CONFIG): {
-  maxRetries: number;
-  retryBaseMs: number;
-  retryMaxMs: number;
-} {
-  let retryMaxMs = config.GEMINI_RETRY_MAX_MS;
-  if (!Number.isSafeInteger(retryMaxMs) || retryMaxMs <= 0 || retryMaxMs > 300_000) {
-    retryMaxMs = 60_000;
-  }
-  let retryBaseMs = config.GEMINI_RETRY_BASE_MS;
-  if (!Number.isSafeInteger(retryBaseMs) || retryBaseMs <= 0 || retryBaseMs > retryMaxMs) {
-    retryBaseMs = Math.min(1000, retryMaxMs);
-  }
-  let maxRetries = config.GEMINI_MAX_RETRIES;
-  if (!Number.isSafeInteger(maxRetries) || maxRetries <= 0 || maxRetries > 10) maxRetries = 3;
-  return { maxRetries, retryBaseMs, retryMaxMs };
-}
-
 function normalizeClientConfig(config: typeof CONFIG): typeof CONFIG {
   let temperature = config.TEMP;
   if (!Number.isFinite(temperature) || temperature < 0 || temperature > 1) temperature = 1;
@@ -491,7 +474,11 @@ function normalizeClientConfig(config: typeof CONFIG): typeof CONFIG {
     maxDebugBodyLogBytes = DEFAULT_MAX_DEBUG_LOG_BYTES;
   }
 
-  const retry = getClientRetryConfig(config);
+  const retry = normalizeRetryConfig({
+    maxRetries: config.GEMINI_MAX_RETRIES,
+    retryBaseMs: config.GEMINI_RETRY_BASE_MS,
+    retryMaxMs: config.GEMINI_RETRY_MAX_MS,
+  });
   return {
     ...config,
     TEMP: temperature,
