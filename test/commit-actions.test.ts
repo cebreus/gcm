@@ -41,7 +41,11 @@ describe('commit actions', () => {
       gitCommandRunner: async function (args) {
         if (args[0] === 'write-tree') {
           treeRead += 1;
-          return { text: treeRead === 3 ? 'second-tree\n' : treeRead < 3 ? 'first-tree\n' : 'second-tree\n', truncated: false };
+          return {
+            text:
+              treeRead === 3 ? 'second-tree\n' : treeRead < 3 ? 'first-tree\n' : 'second-tree\n',
+            truncated: false,
+          };
         }
         if (args[0] === 'diff' && !args.includes('--name-only')) diffRead += 1;
         return runner(args);
@@ -69,7 +73,18 @@ describe('commit actions', () => {
       gitCommandRunner: async function (args) {
         if (args[0] === 'write-tree') {
           treeRead += 1;
-          return { text: ['first-tree', 'first-tree', 'second-tree', 'second-tree', 'second-tree', 'third-tree'][treeRead - 1] ?? '', truncated: false };
+          return {
+            text:
+              [
+                'first-tree',
+                'first-tree',
+                'second-tree',
+                'second-tree',
+                'second-tree',
+                'third-tree',
+              ][treeRead - 1] ?? '',
+            truncated: false,
+          };
         }
         return runner(args);
       },
@@ -116,7 +131,10 @@ describe('commit actions', () => {
       gitCommandRunner: async function (args) {
         if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
         if (args[0] === 'rev-parse') {
-          return { text: `${args[args.length - 1]?.startsWith('HEAD') ? movedHead : originalHead}\n`, truncated: false };
+          return {
+            text: `${args[args.length - 1]?.startsWith('HEAD') ? movedHead : originalHead}\n`,
+            truncated: false,
+          };
         }
         if (args[0] === 'log') return { text: 'feat: original subject\n', truncated: false };
         if (args[0] === 'branch') return { text: '', truncated: false };

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-async function readConfig(env: Record<string, string>): Promise<{ model: string; temp: number }> {
+async function readConfig(env: Record<string, string>): Promise<unknown> {
   const child = Bun.spawn({
     cmd: [
       'bun',
@@ -15,7 +15,8 @@ async function readConfig(env: Record<string, string>): Promise<{ model: string;
   const stdout = await new Response(child.stdout).text();
   const stderr = await new Response(child.stderr).text();
   expect(await child.exited, stderr).toBe(0);
-  return JSON.parse(stdout) as { model: string; temp: number };
+  const config: unknown = JSON.parse(stdout);
+  return config;
 }
 
 test('config: reads the short GCM names', async () => {

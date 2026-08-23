@@ -118,9 +118,13 @@ async function getModelSelectionOptions(
 
     if (uniqueModels.length > 0) return uniqueModels.map(toModelOption);
   } catch (error) {
-    dependencies.logger.log('debug', 'Failed to load live Gemini model list; falling back to known models', {
-      error: String(error),
-    });
+    dependencies.logger.log(
+      'debug',
+      'Failed to load live Gemini model list; falling back to known models',
+      {
+        error: String(error),
+      },
+    );
   }
 
   return KNOWN_MODELS.map(function (model) {
@@ -207,7 +211,10 @@ async function chooseRegeneration(
   dependencies: DialogueDependencies,
 ): Promise<ReviewActionResult> {
   if (action === 'regenerate') {
-    return { type: 'return', result: { type: 'regenerate', modelName: state.modelName, userHint: undefined } };
+    return {
+      type: 'return',
+      result: { type: 'regenerate', modelName: state.modelName, userHint: undefined },
+    };
   }
   if (action === 'regenerate-hint') {
     const hint = await dependencies.prompts.text({
@@ -265,7 +272,8 @@ async function handleActionChoice(params: {
     await copyMessage(dependencies.prompts, dependencies.clipboard, message);
     return { type: 'continue' };
   }
-  if (action === 'edit') return { type: 'update-message', message: await editMessage(dependencies.prompts, message) };
+  if (action === 'edit')
+    return { type: 'update-message', message: await editMessage(dependencies.prompts, message) };
   if (action === 'regenerate' || action === 'regenerate-hint' || action === 'switch') {
     return chooseRegeneration(action, state, apiKey, dependencies);
   }
@@ -306,7 +314,10 @@ export function createInteractiveGenerationDialogue(
 
         if (configAction === 'model') {
           const modelOptions = await getModelSelectionOptions(apiKey, dependencies);
-          const selectedModel = await prompts.select({ message: 'Select AI Model', options: modelOptions });
+          const selectedModel = await prompts.select({
+            message: 'Select AI Model',
+            options: modelOptions,
+          });
           if (!prompts.isCancel(selectedModel)) {
             state.baselineModelName = String(selectedModel);
             state.modelName = state.baselineModelName;
@@ -323,7 +334,8 @@ export function createInteractiveGenerationDialogue(
               { value: 'full', label: 'Full Report (Branch, PR)', hint: 'Detailed' },
             ],
           });
-          if (!prompts.isCancel(selectedMode)) state.outputMode = selectedMode as GenerationState['outputMode'];
+          if (!prompts.isCancel(selectedMode))
+            state.outputMode = selectedMode as GenerationState['outputMode'];
         }
       }
     },

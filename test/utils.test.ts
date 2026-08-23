@@ -57,7 +57,6 @@ const createHunk = (file: string, score: number): Hunk => ({
   content: '',
   added: 0,
   removed: 0,
-  bytes: 0,
 });
 
 test('utils: pushHunkToTop - should add hunk if array is not full', () => {
@@ -376,13 +375,15 @@ test('utils: sanitizeForDisplay - should handle multiple occurrences', () => {
 });
 
 test('utils: stripTerminalControlSequences removes ANSI and controls but keeps newlines and tabs', () => {
-  expect(stripTerminalControlSequences('first\tline\n\u001B]8;;https://example.test\u0007link\u001B]8;;\u0007\u009B2J\u0000')).toBe(
-    'first\tline\nlink',
-  );
+  expect(
+    stripTerminalControlSequences(
+      'first\tline\n\u001B]8;;https://example.test\u0007link\u001B]8;;\u0007\u009B2J\u0000',
+    ),
+  ).toBe('first\tline\nlink');
 });
 
 test('utils: redactSensitiveText keeps broad log redaction', () => {
-  expect(redactSensitiveText('const opt = "sk-optional-flag"; docs mention AIzaSyExample1234')).toBe(
-    'const opt = "[REDACTED-KEY]"; docs mention [REDACTED-KEY]',
-  );
+  expect(
+    redactSensitiveText('const opt = "sk-optional-flag"; docs mention AIzaSyExample1234'),
+  ).toBe('const opt = "[REDACTED-KEY]"; docs mention [REDACTED-KEY]');
 });

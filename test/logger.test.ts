@@ -56,11 +56,9 @@ test('logger: keeps full redacted messages while truncating metadata', () => {
   const logger = createLogger({ LOG_LEVEL: 'info' });
   const messageTail = 'message-tail';
   const metadataTail = 'metadata-tail';
-  logger.log(
-    'info',
-    'x'.repeat(256) + messageTail + ' sk-abcdef1234567890',
-    { detail: 'x'.repeat(256) + metadataTail },
-  );
+  logger.log('info', 'x'.repeat(256) + messageTail + ' sk-abcdef1234567890', {
+    detail: 'x'.repeat(256) + metadataTail,
+  });
 
   const output = stdoutWriteMock.mock.calls.map(call => String(call[0])).join('');
   expect(output).toContain(messageTail);

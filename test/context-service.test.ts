@@ -56,7 +56,11 @@ const retryParts: PromptContextParts = {
 
 test('context-service: retry summary replaces only the structured diff and preserves prompt context', async () => {
   const service = createContextService({
-    summarizeLargeDiff: async () => ({ text: 'summary from top hunks', numHunks: 1, totalTruncated: 2 }),
+    summarizeLargeDiff: async () => ({
+      text: 'summary from top hunks',
+      numHunks: 1,
+      totalTruncated: 2,
+    }),
   });
   const result = await service.reduceForRetry({
     promptParts: retryParts,
@@ -69,7 +73,9 @@ test('context-service: retry summary replaces only the structured diff and prese
   expect(result.promptContext).toContain('Changed files:\n- src/service.ts');
   expect(result.promptContext).toContain('Scope candidates:\n- service');
   expect(result.promptContext).toContain('Recent commit style examples for these files');
-  expect(result.promptContext).toContain('Additional user instructions: Use a clear commit message.');
+  expect(result.promptContext).toContain(
+    'Additional user instructions: Use a clear commit message.',
+  );
   expect(result.promptContext).toContain('Diff summary:');
   expect(result.promptContext).toContain(partialSummaryNotice);
   expect(result.promptContext).toContain(
@@ -80,7 +86,11 @@ test('context-service: retry summary replaces only the structured diff and prese
 
 test('context-service: retries retain at most 70% of the previous prompt per pass above the wrapper size', async () => {
   const service = createContextService({
-    summarizeLargeDiff: async () => ({ text: 'summary '.repeat(1_000), numHunks: 1, totalTruncated: 0 }),
+    summarizeLargeDiff: async () => ({
+      text: 'summary '.repeat(1_000),
+      numHunks: 1,
+      totalTruncated: 0,
+    }),
   });
   let promptParts: PromptContextParts = {
     prefix: 'P',
@@ -142,7 +152,10 @@ test('context-service: retries without staged files truncate without invoking th
   expect(summarizeCalls).toBe(0);
   expect(result.mode).toBe('truncation');
   expect(result.promptContext.length).toBeLessThan(
-    retryParts.prefix.length + retryParts.diffHeading.length + retryParts.diffBody.length + retryParts.suffix.length,
+    retryParts.prefix.length +
+      retryParts.diffHeading.length +
+      retryParts.diffBody.length +
+      retryParts.suffix.length,
   );
 });
 

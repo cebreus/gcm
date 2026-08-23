@@ -38,11 +38,18 @@ export default [
     },
   },
   {
-    files: ['src/**/*.{js,ts}'],
+    files: ['src/**/*.{js,ts}', 'gcm.ts', 'gcm.config.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [{ group: ['node:*'], message: 'Use Bun native APIs instead.' }] },
+        {
+          patterns: [
+            {
+              group: ['fs', 'fs/*', 'node:fs', 'node:fs/*', 'child_process', 'node:child_process'],
+              message: 'Use Bun.file, Bun.write, or Bun.spawn instead.',
+            },
+          ],
+        },
       ],
     },
   },

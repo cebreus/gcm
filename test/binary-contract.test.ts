@@ -123,14 +123,29 @@ beforeAll(async () => {
 
   await Bun.write(`${whitespaceRepository}/document.txt`, 'first line\n');
   await runCommand(['git', 'add', 'document.txt'], whitespaceRepository);
-  await runCommand(['git', '-c', 'user.email=test@gcm.local', '-c', 'user.name=GCM Test', 'commit', '-qm', 'initial'], whitespaceRepository);
+  await runCommand(
+    [
+      'git',
+      '-c',
+      'user.email=test@gcm.local',
+      '-c',
+      'user.name=GCM Test',
+      'commit',
+      '-qm',
+      'initial',
+    ],
+    whitespaceRepository,
+  );
   await Bun.write(`${whitespaceRepository}/document.txt`, 'first line \n');
   await runCommand(['git', 'add', 'document.txt'], whitespaceRepository);
 
   await runCommand(['mkdir', '-p', './-generated'], excludeRepository);
   await Bun.write(`${excludeRepository}/-generated/sentinel.txt`, 'do not send\n');
   await Bun.write(`${excludeRepository}/included.txt`, 'send this\n');
-  await runCommand(['git', 'add', '--', '-generated/sentinel.txt', 'included.txt'], excludeRepository);
+  await runCommand(
+    ['git', 'add', '--', '-generated/sentinel.txt', 'included.txt'],
+    excludeRepository,
+  );
 
   await Bun.write(`${conflictRepository}/file.txt`, 'base\n');
   await runCommand(['git', 'add', 'file.txt'], conflictRepository);
@@ -189,6 +204,7 @@ test('binary contract: reports no staged changes without calling Gemini', async 
 
   expect(result.exitCode).not.toBe(0);
   expect(result.stdout).toContain('No staged changes found');
+  expect(result.stdout).toContain('Use "git add" to stage files.');
   expect(result.stderr).toBe('');
 });
 
@@ -208,6 +224,14 @@ test('binary contract: reports conflicts before showing settings', async () => {
     'Git index has unresolved conflicts. Resolve conflicts before generating or committing.',
   );
   expect(result.stdout).not.toContain('Settings:');
+  expect(result.stderr).toBe('');
+});
+
+test('binary contract: one generation setting still shows configuration', async () => {
+  const result = await runBinary(['--mode', 'full'], excludeRepository, 'not-a-real-key');
+
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain('Settings: [Model: gemini-3.7-flash] [Mode: Full Report]');
   expect(result.stderr).toBe('');
 });
 

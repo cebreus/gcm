@@ -12,16 +12,12 @@ export interface Hunk {
   content: string;
   added: number;
   removed: number;
-  bytes: number;
   score: number;
 }
 
 export function redactSensitiveText(text: string): string {
   return text
-    .replace(
-      /(ey[A-Za-z0-9-_=]+)\.(ey[A-Za-z0-9-_=]+)\.([A-Za-z0-9-_.+/=]*)/g,
-      '[REDACTED-JWT]',
-    )
+    .replace(/(ey[A-Za-z0-9-_=]+)\.(ey[A-Za-z0-9-_=]+)\.([A-Za-z0-9-_.+/=]*)/g, '[REDACTED-JWT]')
     .replace(
       /\b(?:AKIA|AIza|ghp_|xoxb-|sk-)[A-Za-z0-9\-_]{8,}\b|\bgithub_pat_[A-Za-z0-9_]{8,}\b|\bAQ\.[A-Za-z0-9\-_]{8,}\b/g,
       '[REDACTED-KEY]',

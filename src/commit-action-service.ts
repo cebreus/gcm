@@ -24,10 +24,14 @@ export interface CommitCapability {
 export interface CommitActionInspection {
   repositoryState: RepositoryState | null;
   capability: CommitCapability;
+  observedSnapshotInvalid?: true;
 }
 
 export interface CommitActionService {
-  inspect(targetHash: string | null, observedSnapshot?: IndexSnapshot): Promise<CommitActionInspection>;
+  inspect(
+    targetHash: string | null,
+    observedSnapshot?: IndexSnapshot,
+  ): Promise<CommitActionInspection>;
   apply(capability: CommitCapability, message: string): Promise<{ summary: string }>;
 }
 
@@ -51,12 +55,16 @@ function indexEntryKey(entry: IndexEntry): string {
 }
 
 function describeChangedIndexPaths(before: IndexEntry[], after: IndexEntry[]): string | null {
-  const oldEntries = new Map(before.map(function (entry) {
-    return [entry.path, indexEntryKey(entry)];
-  }));
-  const newEntries = new Map(after.map(function (entry) {
-    return [entry.path, indexEntryKey(entry)];
-  }));
+  const oldEntries = new Map(
+    before.map(function (entry) {
+      return [entry.path, indexEntryKey(entry)];
+    }),
+  );
+  const newEntries = new Map(
+    after.map(function (entry) {
+      return [entry.path, indexEntryKey(entry)];
+    }),
+  );
   const changes: string[] = [];
   for (const path of newEntries.keys()) {
     const displayed = JSON.stringify(path);
@@ -77,7 +85,8 @@ function describeChangedIndexPaths(before: IndexEntry[], after: IndexEntry[]): s
 
 function describeIndexDrift(before: IndexEntry[], after: IndexEntry[]): string {
   const changedPaths = describeChangedIndexPaths(before, after);
-  if (!changedPaths) return indexIndeterminateReason('the changed staged paths could not be identified');
+  if (!changedPaths)
+    return indexIndeterminateReason('the changed staged paths could not be identified');
   return `Staged changes were modified while this message was on screen, so the message no longer describes what would be committed. ${changedPaths} Regenerate the message, review it, then commit.`;
 }
 
@@ -152,6 +161,23 @@ async function captureIndexSnapshot(
   return { tree: after, entries };
 }
 
+async function resolveIndexSnapshot(
+  gitService: GitService,
+  logger: Logger,
+  observedSnapshot?: IndexSnapshot,
+): Promise<{ snapshot: IndexSnapshot | null; observedSnapshotChanged: boolean }> {
+  if (!observedSnapshot) {
+    return {
+      snapshot: await captureIndexSnapshot(gitService, logger),
+      observedSnapshotChanged: false,
+    };
+  }
+  return {
+    snapshot: observedSnapshot,
+    observedSnapshotChanged: (await gitService.getIndexTree(logger)) !== observedSnapshot.tree,
+  };
+}
+
 async function inspectTarget(
   gitService: GitService,
   targetHash: string | null,
@@ -197,10 +223,37 @@ function cannotInspectRepository(): CommitActionInspection {
   };
 }
 
-function cannotInspectIndex(repositoryState: RepositoryState, detail?: string): CommitActionInspection {
+function cannotInspectIndex(
+  repositoryState: RepositoryState,
+  detail?: string,
+): CommitActionInspection {
   return {
     repositoryState,
     capability: { allowed: false, mode: 'commit', reason: indexIndeterminateReason(detail) },
+  };
+}
+
+async function inspectRepositoryState(
+  gitService: GitService,
+  logger: Logger,
+): Promise<RepositoryState | null> {
+  try {
+    return await gitService.getRepositoryState(logger);
+  } catch (error) {
+    logger.log('debug', `Could not inspect repository state: ${error}`);
+    return null;
+  }
+}
+
+async function cannotVerifyObservedSnapshot(
+  gitService: GitService,
+  logger: Logger,
+  repositoryState: RepositoryState,
+): Promise<CommitActionInspection> {
+  const refreshedState = (await inspectRepositoryState(gitService, logger)) ?? repositoryState;
+  return {
+    ...cannotInspectIndex(refreshedState, 'the analysed index could not be verified'),
+    observedSnapshotInvalid: true,
   };
 }
 
@@ -234,24 +287,32 @@ export function createCommitActionService(params: {
     targetHash: string | null,
     observedSnapshot?: IndexSnapshot,
   ): Promise<CommitActionInspection> {
-    let repositoryState: RepositoryState;
-    try {
-      repositoryState = await gitService.getRepositoryState(logger);
-    } catch (error) {
-      logger.log('debug', `Could not inspect repository state: ${error}`);
-      return cannotInspectRepository();
-    }
-    if (repositoryState.inProgressOperation || repositoryState.hasUnmergedPaths) {
-      return cannotInspectIndex(repositoryState, 'Git has an unfinished operation or unresolved conflicts');
+    const repositoryState = await inspectRepositoryState(gitService, logger);
+    if (!repositoryState) return cannotInspectRepository();
+    if (repositoryState.hasUnmergedPaths) {
+      return cannotInspectIndex(repositoryState, 'Git has unresolved conflicts');
     }
     let snapshot: IndexSnapshot | null;
     try {
-      snapshot = observedSnapshot ?? (await captureIndexSnapshot(gitService, logger));
+      const resolved = await resolveIndexSnapshot(gitService, logger, observedSnapshot);
+      if (resolved.observedSnapshotChanged) {
+        return {
+          ...cannotInspectIndex(repositoryState, 'the index changed after its diff was read'),
+          observedSnapshotInvalid: true,
+        };
+      }
+      snapshot = resolved.snapshot;
     } catch (error) {
       logger.log('debug', `Could not capture index snapshot: ${error}`);
+      if (observedSnapshot)
+        return cannotVerifyObservedSnapshot(gitService, logger, repositoryState);
       return cannotInspectIndex(repositoryState);
     }
-    if (!snapshot) return cannotInspectIndex(repositoryState, 'the index changed while it was being checked');
+    if (!snapshot)
+      return cannotInspectIndex(repositoryState, 'the index changed while it was being checked');
+    if (repositoryState.inProgressOperation) {
+      return cannotInspectIndex(repositoryState, 'Git has an unfinished operation');
+    }
     const target = await inspectTarget(gitService, targetHash, logger);
     return {
       repositoryState,
@@ -259,9 +320,13 @@ export function createCommitActionService(params: {
     };
   }
 
-  async function apply(capability: CommitCapability, message: string): Promise<{ summary: string }> {
+  async function apply(
+    capability: CommitCapability,
+    message: string,
+  ): Promise<{ summary: string }> {
     if (!capability.allowed) throw refusal(capability.reason ?? 'Commit action is unavailable.');
-    if (!capability.snapshot) throw refusal(indexIndeterminateReason('the original staged snapshot is missing'));
+    if (!capability.snapshot)
+      throw refusal(indexIndeterminateReason('the original staged snapshot is missing'));
     if (capability.excludedPaths?.length && !capability.exclusionsAcknowledged) {
       throw refusal(
         `Explicit confirmation is required before committing excluded staged paths. ${describeExcludedPaths(capability.excludedPaths)}`,
@@ -273,10 +338,15 @@ export function createCommitActionService(params: {
       throw refusal(revalidated.capability.reason ?? indexIndeterminateReason());
     }
     if (revalidated.capability.snapshot.tree !== capability.snapshot.tree) {
-      throw refusal(describeIndexDrift(capability.snapshot.entries, revalidated.capability.snapshot.entries));
+      throw refusal(
+        describeIndexDrift(capability.snapshot.entries, revalidated.capability.snapshot.entries),
+      );
     }
     if (!revalidated.capability.allowed) {
-      throw refusal(revalidated.capability.reason ?? 'The repository changed and the action is no longer available.');
+      throw refusal(
+        revalidated.capability.reason ??
+          'The repository changed and the action is no longer available.',
+      );
     }
     if (revalidated.capability.mode !== capability.mode) {
       throw refusal(
@@ -289,7 +359,9 @@ export function createCommitActionService(params: {
         revalidated.capability.target.hash !== capability.target.hash ||
         revalidated.capability.target.headHash !== capability.target.headHash)
     ) {
-      throw refusal('HEAD or target commit moved since generation. Regenerate the message, then try again.');
+      throw refusal(
+        'HEAD or target commit moved since generation. Regenerate the message, then try again.',
+      );
     }
     return writeCommitAction({
       gitService,

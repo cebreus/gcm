@@ -4,8 +4,16 @@ import type { Logger } from '../src/logger.js';
 
 const decoder = new TextDecoder();
 
-async function runGit(repository: string, args: string[]): Promise<{ text: string; truncated: boolean }> {
-  const child = Bun.spawn({ cmd: ['git', ...args], cwd: repository, stdout: 'pipe', stderr: 'pipe' });
+async function runGit(
+  repository: string,
+  args: string[],
+): Promise<{ text: string; truncated: boolean }> {
+  const child = Bun.spawn({
+    cmd: ['git', ...args],
+    cwd: repository,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   const [exitCode, stdout, stderr] = await Promise.all([
     child.exited,
     new Response(child.stdout).arrayBuffer(),
@@ -62,7 +70,9 @@ test('git service: warns when a pre-commit hook stages an extra path', async fun
 
     await service.commitChanges('feat: analysed change', logger, { snapshot: staged!.snapshot! });
 
-    expect((await runGit(repository, ['show', '--format=', '--name-only', 'HEAD'])).text).toContain('hook-added.txt');
+    expect((await runGit(repository, ['show', '--format=', '--name-only', 'HEAD'])).text).toContain(
+      'hook-added.txt',
+    );
     expect(warnings).toEqual([
       'Commit completed, but pre-commit hooks changed the committed tree after analysis. Paths that differ from the analysed snapshot: "hook-added.txt".',
     ]);

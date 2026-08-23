@@ -290,7 +290,11 @@ describe('Refactored Runner', () => {
   test('Should remove terminal controls from Gemini API error messages', async () => {
     const error = Object.assign(new Error('quota exhausted'), {
       name: 'GeminiApiError',
-      metadata: { status: 429, snippet: '{"error":{"message":"bad\\u001b]8;;https://example.test\\u0007link\\u001b]8;;\\u0007"}}' },
+      metadata: {
+        status: 429,
+        snippet:
+          '{"error":{"message":"bad\\u001b]8;;https://example.test\\u0007link\\u001b]8;;\\u0007"}}',
+      },
     });
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
@@ -398,17 +402,13 @@ describe('Refactored Runner', () => {
       },
     });
     mockGitService.getIndexTree
+      .mockResolvedValueOnce('original-tree')
       .mockResolvedValueOnce('changed-tree')
       .mockResolvedValueOnce('changed-tree');
-    mockGitService.getIndexEntries
-      .mockResolvedValueOnce([
-        { path: 'file.ts', mode: '100644', objectId: '1'.repeat(40) },
-        { path: 'later.ts', mode: '100644', objectId: '2'.repeat(40) },
-      ])
-      .mockResolvedValueOnce([
-        { path: 'file.ts', mode: '100644', objectId: '1'.repeat(40) },
-        { path: 'later.ts', mode: '100644', objectId: '2'.repeat(40) },
-      ]);
+    mockGitService.getIndexEntries.mockResolvedValueOnce([
+      { path: 'file.ts', mode: '100644', objectId: '1'.repeat(40) },
+      { path: 'later.ts', mode: '100644', objectId: '2'.repeat(40) },
+    ]);
     mockContextService.constructLLMPromptContext.mockResolvedValue({
       promptContext: 'ctx',
       processedDiffContent: 'diff',
@@ -496,67 +496,45 @@ describe('Refactored Runner', () => {
     }
   });
 
-  test('Should still offer settings when only --model is provided', async () => {
-    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
-    mockGitService.retrieveStagedChanges.mockResolvedValue({
-      stagedDiff: 'diff',
-      stagedFiles: ['file.ts'],
-      truncated: false,
-    });
-    mockSelect.mockResolvedValueOnce('exit');
-
-    try {
-      await executeCommitMessageGeneration(['--model', 'gemini-3.1-pro-preview'], {
-        logger: mockLogger,
-        gitService: mockGitService,
-        contextService: mockContextService,
-        geminiService: mockGeminiService,
-        listModels: mockListModels,
+  for (const inputCase of [
+    {
+      args: ['--model', 'gemini-3.1-pro-preview'],
+      message: 'Settings: [Model: gemini-3.1-pro-preview] [Mode: Commit Msg Only]',
+    },
+    {
+      args: ['--mode', 'full'],
+      message: 'Settings: [Model: gemini-3.7-flash] [Mode: Full Report]',
+    },
+  ]) {
+    test(`Should still offer settings when only ${inputCase.args[0]} is provided`, async () => {
+      const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+      process.env.GOOGLE_GEMINI_API_KEY = 'test';
+      mockGitService.retrieveStagedChanges.mockResolvedValue({
+        stagedDiff: 'diff',
+        stagedFiles: ['file.ts'],
+        truncated: false,
       });
+      mockSelect.mockResolvedValueOnce('exit');
 
-      expect(mockSelect).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: 'Settings: [Model: gemini-3.1-pro-preview] [Mode: Commit Msg Only]',
-        }),
-      );
-      expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
-    } finally {
-      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
-    }
-  });
+      try {
+        await executeCommitMessageGeneration(inputCase.args, {
+          logger: mockLogger,
+          gitService: mockGitService,
+          contextService: mockContextService,
+          geminiService: mockGeminiService,
+          listModels: mockListModels,
+        });
 
-  test('Should still offer settings when only --mode is provided', async () => {
-    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
-    mockGitService.retrieveStagedChanges.mockResolvedValue({
-      stagedDiff: 'diff',
-      stagedFiles: ['file.ts'],
-      truncated: false,
+        expect(mockSelect).toHaveBeenCalledWith(
+          expect.objectContaining({ message: inputCase.message }),
+        );
+        expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
+      } finally {
+        if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+        else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      }
     });
-    mockSelect.mockResolvedValueOnce('exit');
-
-    try {
-      await executeCommitMessageGeneration(['--mode', 'full'], {
-        logger: mockLogger,
-        gitService: mockGitService,
-        contextService: mockContextService,
-        geminiService: mockGeminiService,
-        listModels: mockListModels,
-      });
-
-      expect(mockSelect).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: 'Settings: [Model: gemini-3.7-flash] [Mode: Full Report]',
-        }),
-      );
-      expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
-    } finally {
-      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
-    }
-  });
+  }
 
   test('Should show the latest repository state discovered during preflight', async () => {
     const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
@@ -565,6 +543,7 @@ describe('Refactored Runner', () => {
       stagedDiff: 'diff',
       stagedFiles: ['file.ts'],
       truncated: false,
+      snapshot: { tree: 'index-tree', entries: [] },
     });
     mockGitService.getRepositoryState
       .mockResolvedValueOnce({
@@ -598,6 +577,38 @@ describe('Refactored Runner', () => {
         expect.stringContaining('Git operation in progress: rebase.'),
         'Repository warnings',
       );
+      expect(mockSelect).toHaveBeenCalled();
+    } finally {
+      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+    }
+  });
+
+  test('Should stop before settings when the staged snapshot changed', async () => {
+    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['file.ts'],
+      truncated: false,
+      snapshot: { tree: 'read-tree', entries: [] },
+    });
+    mockGitService.getIndexTree.mockResolvedValue('changed-tree');
+
+    try {
+      await executeCommitMessageGeneration([], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        listModels: mockListModels,
+      });
+
+      expect(mockCancel).toHaveBeenCalledWith(
+        expect.stringContaining('the index changed after its diff was read'),
+      );
+      expect(mockSelect).not.toHaveBeenCalled();
+      expect(mockGeminiService.callGeminiAPI).not.toHaveBeenCalled();
     } finally {
       if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
       else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
