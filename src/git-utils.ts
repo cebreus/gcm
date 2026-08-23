@@ -1,3 +1,6 @@
+import { integerInRange } from './config-values.js';
+import { MAX_CHILD_OUTPUT_BYTES } from './constants.js';
+
 interface SpawnGitOptions {
   maxBytes?: number;
   execName?: string;
@@ -42,8 +45,9 @@ async function spawnCore(
   args: string[],
   onChunk: (chunk: string) => void,
   options: SpawnGitOptions = {},
+  defaultMaxBytes = 1024 * 1024,
 ): Promise<{ truncated: boolean }> {
-  const maxBytes = options.maxBytes === undefined ? 1024 * 1024 : options.maxBytes;
+  const maxBytes = integerInRange(options.maxBytes, 1, MAX_CHILD_OUTPUT_BYTES, defaultMaxBytes);
   const execName = options.execName || 'git';
   const child = Bun.spawn({ cmd: [execName, ...args], stdout: 'pipe', stderr: 'pipe' });
   let bytes = 0;
@@ -124,9 +128,6 @@ export async function spawnGitStream(
   args: string[],
   options: SpawnGitOptions = {},
 ): Promise<SpawnGitStreamResult> {
-  // Default maxBytes for stream is higher
-  if (options.maxBytes === undefined) options.maxBytes = 50 * 1024 * 1024;
-
   let text = '';
   const { truncated } = await spawnCore(
     args,
@@ -134,6 +135,7 @@ export async function spawnGitStream(
       text += chunk;
     },
     options,
+    50 * 1024 * 1024,
   );
   return { text, truncated };
 }
