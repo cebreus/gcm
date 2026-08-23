@@ -2,7 +2,7 @@ export function buildAtomicSplitProposal(stagedFiles: readonly string[]): string
   const groups = new Map<string, string[]>();
   for (const file of stagedFiles) {
     const scope = detectAtomicGroup(file);
-    const list = groups.get(scope) || [];
+    const list = groups.get(scope) ?? [];
     list.push(file);
     groups.set(scope, list);
   }
@@ -56,7 +56,7 @@ export function detectAtomicGroup(file: string): string {
 }
 
 function isDependencyMetadataFile(file: string): boolean {
-  const base = file.split('/').pop() || '';
+  const base = file.split('/').pop() ?? '';
   if (base === 'package.json') return true;
   if (/^(pnpm-lock\.yaml|bun\.lockb?|package-lock\.json|yarn\.lock)$/.test(base)) return true;
   if (base === 'pnpm-workspace.yaml') return true;
@@ -65,7 +65,7 @@ function isDependencyMetadataFile(file: string): boolean {
 
 function isDocsOrFormattingFile(file: string): boolean {
   if (/\.(md|mdx|rst|txt)$/i.test(file)) return true;
-  const base = file.split('/').pop() || '';
+  const base = file.split('/').pop() ?? '';
   if (/^(\.prettierrc(\..+)?|\.editorconfig|prettier\.config\.(js|ts|cjs|mjs))$/i.test(base)) {
     return true;
   }
@@ -102,9 +102,10 @@ function buildSuggestedSplitCommitSubject(scope: string, files: string[]): strin
     ci: 'ci',
     tooling: 'chore',
   };
-  const type = typeByScope[scope] || 'refactor';
+  const type = typeByScope[scope] ?? 'refactor';
   const normalizedScope = scope === 'docs-formatting' ? 'docs' : scope;
-  const fileHint = files.length === 1 ? files[0].split('/').pop() || 'changes' : 'changes';
+  let fileHint = 'changes';
+  if (files.length === 1) fileHint = files[0].split('/').pop() ?? 'changes';
   return `${type}(${normalizedScope}): split ${fileHint} updates`;
 }
 

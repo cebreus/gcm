@@ -31,12 +31,17 @@ export function buildRequestBody(
     ? `${opts.systemInstructions}${markerInstruction ? '\n\n' + markerInstruction : ''}`
     : markerInstruction;
 
+  let maxOutputTokens = opts.maxOutputTokens;
+  if (maxOutputTokens === undefined || !Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) {
+    maxOutputTokens = config.MAX_OUTPUT_TOKENS;
+  }
+
   const body: RequestBody = {
     contents: [{ role: 'user', parts: [{ text: wrappedUserContent }] }],
     systemInstruction: { parts: [{ text: systemInstruction }] },
     generationConfig: {
       temperature: config.TEMP,
-      maxOutputTokens: opts.maxOutputTokens || config.MAX_OUTPUT_TOKENS,
+      maxOutputTokens,
     },
   };
   return body;

@@ -3,6 +3,8 @@ import { executeCommitMessageGeneration as runnerRun } from '../src/runner.js';
 import { createGitService } from '../src/services/git-service.js';
 import { createGeminiService } from '../src/services/gemini-service.js';
 import { createContextService } from '../src/services/context-service.js';
+import type { GeminiClient } from '../src/gemini-client.js';
+import type { Logger } from '../src/logger.js';
 
 // Mock @clack/prompts
 const mockIntro = mock();
@@ -47,7 +49,7 @@ const mockConfirm = mock(rejectUnexpectedConfirmPrompt);
 const mockIsCancel = mock(() => false);
 const mockCancel = mock();
 
-mock.module('@clack/prompts', () => ({
+await mock.module('@clack/prompts', () => ({
   intro: mockIntro,
   outro: mockOutro,
   spinner: mockSpinner,
@@ -64,12 +66,12 @@ const mockCallGemini = mock(async () => ({
   text: 'BRANCH: feat/test\nCOMMIT_MESSAGE: feat(test): initial commit\nPR_TITLE: Feat: initial commit\nPR_DESCRIPTION: Initial commit description.',
   usage: { promptTokens: 100, outputTokens: 50, thinkingTokens: 0 },
 }));
-const mockGeminiClient = { callGemini: mockCallGemini };
+const mockGeminiClient = { callGemini: mockCallGemini } satisfies GeminiClient;
 const mockCreateGeminiClient = mock(() => mockGeminiClient);
 
 const mockLoggerInstance = {
   log: mock(() => {}),
-};
+} satisfies Logger;
 const mockCreateLogger = mock(() => mockLoggerInstance);
 
 const mockGetCommitContextHints = mock(async () => ({
@@ -78,7 +80,7 @@ const mockGetCommitContextHints = mock(async () => ({
 }));
 
 // Mock only the scope-detector to avoid polluting other tests
-mock.module('../src/scope-detector', () => ({
+await mock.module('../src/scope-detector', () => ({
   getCommitContextHints: mockGetCommitContextHints,
 }));
 
@@ -87,7 +89,7 @@ const mockSummarizeLargeDiff = mock(async () => ({
   numHunks: 1,
   totalTruncated: 0,
 }));
-mock.module('../src/summarizer', () => ({ summarizeLargeDiff: mockSummarizeLargeDiff }));
+await mock.module('../src/summarizer', () => ({ summarizeLargeDiff: mockSummarizeLargeDiff }));
 
 // DO NOT mock CLI or Logger globally - that causes issues in other tests.
 // Instead, we'll pass mocks through dependency injection where needed.
@@ -145,16 +147,16 @@ async function mockSpawnStreamImpl(args: string[]): Promise<{ text: string; trun
 // --- Integration Tests ---
 test('integration: end-to-end - stage files -> generate commit message', async () => {
   process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
-  const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl as any });
+  const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl });
   const geminiService = createGeminiService({
-    client: mockGeminiClient as any,
-    logger: mockLoggerInstance as any,
+    client: mockGeminiClient,
+    logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
   const contextService = createContextService(); // Use real context service
 
   await runnerRun([], {
-    logger: mockLoggerInstance as any,
+    logger: mockLoggerInstance,
     gitService,
     geminiService,
     contextService,
@@ -165,16 +167,16 @@ test('integration: end-to-end - stage files -> generate commit message', async (
 });
 
 test('integration: end-to-end - analyze specific commit', async () => {
-  const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl as any });
+  const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl });
   const geminiService = createGeminiService({
-    client: mockGeminiClient as any,
-    logger: mockLoggerInstance as any,
+    client: mockGeminiClient,
+    logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
   const contextService = createContextService();
 
   await runnerRun(['-c', 'a1b2c3d'], {
-    logger: mockLoggerInstance as any,
+    logger: mockLoggerInstance,
     gitService,
     geminiService,
     contextService,
@@ -191,16 +193,16 @@ test('integration: token limit scenario - should trigger fallback', async () => 
     usage: { promptTokens: 10, outputTokens: 5, thinkingTokens: 0 },
   }); // Second call succeeds
 
-  const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl as any });
+  const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl });
   const geminiService = createGeminiService({
-    client: mockGeminiClient as any,
-    logger: mockLoggerInstance as any,
+    client: mockGeminiClient,
+    logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
   const contextService = createContextService();
 
   await runnerRun([], {
-    logger: mockLoggerInstance as any,
+    logger: mockLoggerInstance,
     gitService,
     geminiService,
     contextService,
@@ -226,16 +228,16 @@ test('integration: should handle various file types', async () => {
     return { text: '', truncated: false };
   }
 
-  const gitService = createGitService({ gitCommandRunner: customSpawnStreamImpl as any });
+  const gitService = createGitService({ gitCommandRunner: customSpawnStreamImpl });
   const geminiService = createGeminiService({
-    client: mockGeminiClient as any,
-    logger: mockLoggerInstance as any,
+    client: mockGeminiClient,
+    logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
   const contextService = createContextService();
 
   await runnerRun([], {
-    logger: mockLoggerInstance as any,
+    logger: mockLoggerInstance,
     gitService,
     geminiService,
     contextService,
@@ -250,23 +252,23 @@ test('integration: should handle various file types', async () => {
 });
 
 test('integration: should handle concurrent execution safety', async () => {
-  const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl as any });
+  const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl });
   const geminiService = createGeminiService({
-    client: mockGeminiClient as any,
-    logger: mockLoggerInstance as any,
+    client: mockGeminiClient,
+    logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
   const contextService = createContextService();
 
   const results = await Promise.all([
     runnerRun([], {
-      logger: mockLoggerInstance as any,
+      logger: mockLoggerInstance,
       gitService,
       geminiService,
       contextService,
     }),
     runnerRun([], {
-      logger: mockLoggerInstance as any,
+      logger: mockLoggerInstance,
       gitService,
       geminiService,
       contextService,
@@ -294,10 +296,10 @@ test('integration: should not send whitespace-only staged changes to AI', async 
     return { text: '', truncated: false };
   }
 
-  const gitService = createGitService({ gitCommandRunner: whitespaceOnlyStagedSpawn as any });
+  const gitService = createGitService({ gitCommandRunner: whitespaceOnlyStagedSpawn });
   const geminiService = createGeminiService({
-    client: mockGeminiClient as any,
-    logger: mockLoggerInstance as any,
+    client: mockGeminiClient,
+    logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
   const contextService = createContextService();
@@ -306,7 +308,7 @@ test('integration: should not send whitespace-only staged changes to AI', async 
 
   try {
     await runnerRun([], {
-      logger: mockLoggerInstance as any,
+      logger: mockLoggerInstance,
       gitService,
       geminiService,
       contextService,
@@ -344,16 +346,16 @@ test('integration: should handle real git repository state', async () => {
     return { text: '', truncated: false };
   }
 
-  const gitService = createGitService({ gitCommandRunner: realGitSpawnStreamImpl as any });
+  const gitService = createGitService({ gitCommandRunner: realGitSpawnStreamImpl });
   const geminiService = createGeminiService({
-    client: mockGeminiClient as any,
-    logger: mockLoggerInstance as any,
+    client: mockGeminiClient,
+    logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
   const contextService = createContextService();
 
   await runnerRun([], {
-    logger: mockLoggerInstance as any,
+    logger: mockLoggerInstance,
     gitService,
     geminiService,
     contextService,

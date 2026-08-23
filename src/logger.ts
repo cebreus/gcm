@@ -1,4 +1,5 @@
 import { redactSensitiveText } from './utils.js';
+import { stringOrDefault } from './config-values.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -93,7 +94,7 @@ function createLogFunction(
 ): (level: LogLevel, message: string, meta?: LogMetadata) => void {
   return function log(level: LogLevel, message: string, meta?: LogMetadata): void {
     if (!shouldLogLevel(state, level)) return;
-    const metaLocal = meta || {};
+    const metaLocal = meta ?? {};
     writeRuntimeLog(
       level,
       formatLogLine(new Date().toISOString(), level, sanitiseTextForLogs(message, Infinity)),
@@ -104,7 +105,7 @@ function createLogFunction(
 
 function createLoggerState(config?: LoggerConfig): LoggerState {
   return {
-    LOG_LEVEL: config?.LOG_LEVEL || DEFAULT_LEVEL,
+    LOG_LEVEL: stringOrDefault(config?.LOG_LEVEL, DEFAULT_LEVEL),
   };
 }
 

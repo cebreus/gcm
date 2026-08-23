@@ -67,8 +67,9 @@ test('git service: warns when a pre-commit hook stages an extra path', async fun
       },
     });
     const staged = await service.retrieveStagedChanges(null, logger);
+    if (!staged?.snapshot) throw new Error('Expected staged snapshot.');
 
-    await service.commitChanges('feat: analysed change', logger, { snapshot: staged!.snapshot! });
+    await service.commitChanges('feat: analysed change', logger, { snapshot: staged.snapshot });
 
     expect((await runGit(repository, ['show', '--format=', '--name-only', 'HEAD'])).text).toContain(
       'hook-added.txt',

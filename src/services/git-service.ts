@@ -151,7 +151,7 @@ function logNoChanges(logger: Logger | null, commitHash: string | null): void {
  * Creates a GitService instance
  */
 export function createGitService(opts: GitServiceOptions = {}): GitService {
-  const deps: GitServiceDeps = { gitCommandRunner: opts.gitCommandRunner || spawnGitStream };
+  const deps: GitServiceDeps = { gitCommandRunner: opts.gitCommandRunner ?? spawnGitStream };
   return {
     retrieveStagedChanges: function (
       commitHash: string | null,

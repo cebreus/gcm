@@ -47,7 +47,7 @@ interface HunkAccumulator {
 }
 
 function getBasename(filePath: string): string {
-  return filePath.split(/[\\/]/).pop() || '';
+  return filePath.split(/[\\/]/).pop() ?? '';
 }
 
 function isConfigFile(filePath: string): boolean {
@@ -131,7 +131,7 @@ function buildSkippedFilesSection(skippedFiles: string[]): string {
   for (const file of skippedFiles) {
     const parts = file.split(/[\\/]/);
     const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
-    const filesInDir = grouped.get(dir) || [];
+    const filesInDir = grouped.get(dir) ?? [];
     filesInDir.push(file);
     grouped.set(dir, filesInDir);
   }
@@ -209,9 +209,9 @@ export async function summarizeLargeDiff(
   stagedFiles: string[],
   options?: SummarizeLargeDiffOptions,
 ): Promise<SummarizeLargeDiffResult> {
-  const opts = options || {};
-  const spawnLinesImpl = opts.spawnLinesImpl || spawnGitLines;
-  const spawnStreamImpl = opts.spawnStreamImpl || spawnGitStream;
+  const opts = options ?? {};
+  const spawnLinesImpl = opts.spawnLinesImpl ?? spawnGitLines;
+  const spawnStreamImpl = opts.spawnStreamImpl ?? spawnGitStream;
   if (!Array.isArray(stagedFiles)) throw new Error('stagedFiles must be an array');
   const statsResp = await spawnStreamImpl(['diff', '--staged', '-w', '--stat', '--stat-width=80']);
   const stats = statsResp.text;

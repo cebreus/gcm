@@ -306,26 +306,24 @@ test('exclude-files: real GitService reads root, ordinary, merge, octopus, and r
       gitCommandRunner: args => spawnGitStream(['-C', repository, ...args]),
     });
 
-    await expect(service.retrieveStagedChanges(rootHash, null)).resolves.toMatchObject({
-      stagedFiles: [rootPath],
-      stagedDiff: expect.stringContaining('+root'),
-    });
-    await expect(service.retrieveStagedChanges(ordinaryHash, null)).resolves.toMatchObject({
-      stagedFiles: ['main.txt'],
-      stagedDiff: expect.stringContaining('+main'),
-    });
-    await expect(service.retrieveStagedChanges(mergeHash, null)).resolves.toMatchObject({
-      stagedFiles: ['feature.txt'],
-      stagedDiff: expect.stringContaining('+feature'),
-    });
-    await expect(service.retrieveStagedChanges(octopusHash, null)).resolves.toMatchObject({
-      stagedFiles: ['a.txt', 'b.txt'],
-      stagedDiff: expect.stringContaining('+a'),
-    });
-    await expect(service.retrieveStagedChanges(renameHash, null)).resolves.toMatchObject({
-      stagedFiles: [renamedPath],
-      stagedDiff: expect.stringContaining('+root'),
-    });
+    const rootResult = await service.retrieveStagedChanges(rootHash, null);
+    const ordinaryResult = await service.retrieveStagedChanges(ordinaryHash, null);
+    const mergeResult = await service.retrieveStagedChanges(mergeHash, null);
+    const octopusResult = await service.retrieveStagedChanges(octopusHash, null);
+    const renameResult = await service.retrieveStagedChanges(renameHash, null);
+    if (!rootResult || !ordinaryResult || !mergeResult || !octopusResult || !renameResult) {
+      throw new Error('Expected commit diffs');
+    }
+    expect(rootResult.stagedFiles).toEqual([rootPath]);
+    expect(rootResult.stagedDiff).toContain('+root');
+    expect(ordinaryResult.stagedFiles).toEqual(['main.txt']);
+    expect(ordinaryResult.stagedDiff).toContain('+main');
+    expect(mergeResult.stagedFiles).toEqual(['feature.txt']);
+    expect(mergeResult.stagedDiff).toContain('+feature');
+    expect(octopusResult.stagedFiles).toEqual(['a.txt', 'b.txt']);
+    expect(octopusResult.stagedDiff).toContain('+a');
+    expect(renameResult.stagedFiles).toEqual([renamedPath]);
+    expect(renameResult.stagedDiff).toContain('+root');
   } finally {
     await rm(repository, { recursive: true, force: true });
   }

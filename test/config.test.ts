@@ -22,7 +22,7 @@ async function readConfig(env: Record<string, string>): Promise<unknown> {
       "import { CONFIG } from './gcm.config.ts'; console.log(JSON.stringify({ model: CONFIG.MODEL, temp: CONFIG.TEMP, maxBuffer: CONFIG.CHILD_PROCESS_MAX_BUFFER, maxHunks: CONFIG.MAX_HUNKS, perFileBuffer: CONFIG.PER_FILE_BUFFER, tokenRatio: CONFIG.TOKEN_BYTES_RATIO, maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS, debugBytes: CONFIG.DEBUG_MAX_BODY_LOG_BYTES, retries: CONFIG.GEMINI_MAX_RETRIES, retryBase: CONFIG.GEMINI_RETRY_BASE_MS, retryMax: CONFIG.GEMINI_RETRY_MAX_MS }));",
     ],
     cwd: process.cwd(),
-    env: { PATH: Bun.env.PATH || '/usr/bin:/bin', ...env },
+    env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', ...env },
     stdout: 'pipe',
     stderr: 'pipe',
   });

@@ -163,10 +163,10 @@ async function callGeminiAPIWithDeps(params: {
     meta,
     opts,
   } = params;
-  const maxAttempts = Math.max(1, CONFIG.GEMINI_MAX_RETRIES || 3);
+  const maxAttempts = CONFIG.GEMINI_MAX_RETRIES;
   let attempt = 0;
   const loopState: CallLoopState = {
-    promptParts: promptParts || {
+    promptParts: promptParts ?? {
       prefix: '',
       diffHeading: '',
       diffBody: promptContext,

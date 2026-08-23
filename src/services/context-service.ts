@@ -18,13 +18,15 @@ export interface PromptContextParts {
   suffix: string;
 }
 
-export interface RetryReductionResult {
-  promptContext: string;
-  promptParts: PromptContextParts;
-  mode: 'summary' | 'truncation' | 'unreducible';
-  summaryAttempted: boolean;
-  summaryUsed: boolean;
-}
+export type RetryReductionResult =
+  | { mode: 'unreducible' }
+  | {
+      promptContext: string;
+      promptParts: PromptContextParts;
+      mode: 'summary' | 'truncation';
+      summaryAttempted: boolean;
+      summaryUsed: boolean;
+    };
 
 interface ContextServiceDeps {
   summarizeLargeDiff?: typeof summarizeLargeDiff;
@@ -261,8 +263,7 @@ function truncateRetryPrompt(
   summaryAttempted: boolean,
 ): RetryReductionResult {
   const truncatedParts = hardTruncateForRetry(promptParts);
-  if (!truncatedParts)
-    return Object.create(null, { mode: { value: 'unreducible', enumerable: true } });
+  if (!truncatedParts) return { mode: 'unreducible' };
   return {
     promptContext: renderPromptContext(truncatedParts),
     promptParts: truncatedParts,

@@ -7,11 +7,16 @@ import type { GeminiClient, GeminiResponse } from '../src/gemini-client';
 import { parseCandidates } from '../src/gemini-client/parsers';
 import type { Logger } from '../src/logger';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 async function geminiClientSuccessTest(): Promise<void> {
   let called = false;
+  let requestedUrl = '';
   const origFetch = globalThis.fetch;
   async function fetchStub(input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
-    void input;
+    requestedUrl = String(input);
     void _init;
     called = true;
     return {
@@ -41,10 +46,12 @@ async function geminiClientSuccessTest(): Promise<void> {
       userContent: 'hello',
       telemetryMeta: {},
       callOptions: { maxOutputTokens: 512, systemInstructions: 'instr' },
+      modelOverride: '',
     });
     expect(called).toBe(true);
     expect(res?.text).toContain('BRANCH:');
     expect(res?.usage.promptTokens).toBe(10);
+    expect(requestedUrl).toContain('/gemini-3.7-flash:generateContent');
   } finally {
     globalThis.fetch = origFetch;
   }
@@ -423,8 +430,9 @@ async function geminiClientRetryOnTruncatedTest(): Promise<void> {
     void _input;
     callCount += 1;
     try {
-      const body = init?.body ? JSON.parse(String(init.body)) : {};
-      const maxOut = (body?.generationConfig as any)?.maxOutputTokens;
+      const body: unknown = init?.body ? JSON.parse(String(init.body)) : {};
+      const generationConfig = isRecord(body) ? body.generationConfig : undefined;
+      const maxOut = isRecord(generationConfig) ? generationConfig.maxOutputTokens : undefined;
       if (typeof maxOut === 'number') seenMaxOutput.push(maxOut);
     } catch {
       // ignore
@@ -455,7 +463,7 @@ async function geminiClientRetryOnTruncatedTest(): Promise<void> {
   try {
     const client: GeminiClient = createGeminiClient({
       fetchImpl: fetchStub as typeof fetch,
-      config: { MAX_OUTPUT_TOKENS: 256 } as any,
+      config: { MAX_OUTPUT_TOKENS: 256 },
     });
     const res = await client.callGemini({
       apiKey: 'fake-key',
