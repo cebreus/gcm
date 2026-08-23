@@ -18,10 +18,7 @@ async function selectIntegrationPrompt(options: {
   const values = options.options.map(function (option) {
     return option.value;
   });
-  if (
-    options.message.startsWith('Settings:') &&
-    values.join(',') === 'generate,configure,exit'
-  ) {
+  if (options.message.startsWith('Settings:') && values.join(',') === 'generate,configure,exit') {
     return 'generate';
   }
   if (

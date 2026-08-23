@@ -113,7 +113,11 @@ describe('interactive generation dialogue', () => {
     });
 
     expect(notes).toEqual([['No staged changes.', 'Commit unavailable']]);
-    expect(selectOptions[0]?.map(function (option) { return option.label; })).toEqual([
+    expect(
+      selectOptions[0]?.map(function (option) {
+        return option.label;
+      }),
+    ).toEqual([
       'Copy to clipboard',
       'Edit message',
       'Regenerate (same model)',
@@ -227,7 +231,12 @@ describe('interactive generation dialogue', () => {
     const { dialogue, copied, notes, selectOptions } = createScriptedDialogue(['copy', 'commit']);
 
     await expect(
-      dialogue.review({ state: createState(), result, apiKey: 'key', commitCapability: createCapability() }),
+      dialogue.review({
+        state: createState(),
+        result,
+        apiKey: 'key',
+        commitCapability: createCapability(),
+      }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
     expect(copied).toEqual(['original message']);
     expect(result.COMMIT_MESSAGE).toBe('original message');
@@ -258,10 +267,19 @@ describe('interactive generation dialogue', () => {
 
   test('edits the message and returns to the menu', async () => {
     const result = { COMMIT_MESSAGE: 'original message' };
-    const { dialogue, selectOptions } = createScriptedDialogue(['edit', 'edited message', 'commit']);
+    const { dialogue, selectOptions } = createScriptedDialogue([
+      'edit',
+      'edited message',
+      'commit',
+    ]);
 
     await expect(
-      dialogue.review({ state: createState(), result, apiKey: 'key', commitCapability: createCapability() }),
+      dialogue.review({
+        state: createState(),
+        result,
+        apiKey: 'key',
+        commitCapability: createCapability(),
+      }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
     expect(result.COMMIT_MESSAGE).toBe('edited message');
     expect(selectOptions).toHaveLength(2);
@@ -272,7 +290,12 @@ describe('interactive generation dialogue', () => {
     const { dialogue, notes, selectOptions } = createScriptedDialogue(['edit', '', 'commit']);
 
     await expect(
-      dialogue.review({ state: createState(), result, apiKey: 'key', commitCapability: createCapability() }),
+      dialogue.review({
+        state: createState(),
+        result,
+        apiKey: 'key',
+        commitCapability: createCapability(),
+      }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
     expect(result.COMMIT_MESSAGE).toBe('');
     expect(notes).toEqual([['', 'Updated Commit Message']]);
@@ -284,7 +307,12 @@ describe('interactive generation dialogue', () => {
     const { dialogue, notes, selectOptions } = createScriptedDialogue(['edit', escape, 'commit']);
 
     await expect(
-      dialogue.review({ state: createState(), result, apiKey: 'key', commitCapability: createCapability() }),
+      dialogue.review({
+        state: createState(),
+        result,
+        apiKey: 'key',
+        commitCapability: createCapability(),
+      }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
     expect(result.COMMIT_MESSAGE).toBe('original message');
     expect(notes).toEqual([]);
@@ -347,7 +375,11 @@ describe('interactive generation dialogue', () => {
 
   test('continues after escaping the regeneration hint prompt', async () => {
     const state = createState();
-    const { dialogue, selectOptions } = createScriptedDialogue(['regenerate-hint', escape, 'commit']);
+    const { dialogue, selectOptions } = createScriptedDialogue([
+      'regenerate-hint',
+      escape,
+      'commit',
+    ]);
 
     await expect(
       dialogue.review({
@@ -395,12 +427,25 @@ describe('interactive generation dialogue', () => {
   });
 
   test.each([
-    ['when listing models rejects', async function () { throw new Error('offline'); }],
-    ['when listing models is empty', async function () { return []; }],
+    [
+      'when listing models rejects',
+      async function () {
+        throw new Error('offline');
+      },
+    ],
+    [
+      'when listing models is empty',
+      async function () {
+        return [];
+      },
+    ],
   ])('falls back to known models %s', async (_, listModels) => {
-    const { dialogue, listModelApiKeys, selectOptions } = createScriptedDialogue(['switch', 'gemini-3.1-pro-preview'], {
-      listModels,
-    });
+    const { dialogue, listModelApiKeys, selectOptions } = createScriptedDialogue(
+      ['switch', 'gemini-3.1-pro-preview'],
+      {
+        listModels,
+      },
+    );
 
     await expect(
       dialogue.review({
@@ -409,7 +454,11 @@ describe('interactive generation dialogue', () => {
         apiKey: 'api-key',
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({ type: 'regenerate', modelName: 'gemini-3.1-pro-preview', userHint: undefined });
+    ).resolves.toEqual({
+      type: 'regenerate',
+      modelName: 'gemini-3.1-pro-preview',
+      userHint: undefined,
+    });
     expect(listModelApiKeys).toEqual(['api-key']);
     expect(selectOptions[1]).toEqual(
       KNOWN_MODELS.map(function (model) {
@@ -458,7 +507,12 @@ describe('interactive generation dialogue', () => {
 
   test('changes the configured output mode before returning to the main menu', async () => {
     const state = createState();
-    const { dialogue, selectOptions } = createScriptedDialogue(['configure', 'mode', 'full', 'generate']);
+    const { dialogue, selectOptions } = createScriptedDialogue([
+      'configure',
+      'mode',
+      'full',
+      'generate',
+    ]);
 
     await expect(dialogue.configure(state, 'key')).resolves.toBe('continue');
     expect(state).toEqual({ ...createState(), outputMode: 'full' });
@@ -477,23 +531,27 @@ describe('interactive generation dialogue', () => {
   test('declining a multi-group atomic split returns false', async () => {
     const { dialogue, outros } = createScriptedDialogue(['cancel', 'continue']);
 
-    await expect(dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], null)).resolves.toBe(
-      false,
-    );
+    await expect(
+      dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], null),
+    ).resolves.toBe(false);
     expect(outros).toEqual(['Commit cancelled.']);
   });
 
   test('escaping a multi-group atomic split returns false', async () => {
     const { dialogue, outros } = createScriptedDialogue([escape, 'continue']);
 
-    await expect(dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], null)).resolves.toBe(false);
+    await expect(
+      dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], null),
+    ).resolves.toBe(false);
     expect(outros).toEqual(['Commit cancelled.']);
   });
 
   test('continuing a multi-group atomic split returns true', async () => {
     const { dialogue } = createScriptedDialogue(['continue']);
 
-    await expect(dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], null)).resolves.toBe(true);
+    await expect(
+      dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], null),
+    ).resolves.toBe(true);
   });
 
   test('shows the split proposal then prompts again', async () => {
@@ -516,9 +574,9 @@ describe('interactive generation dialogue', () => {
   test('a target commit bypasses the atomicity prompt', async () => {
     const { dialogue, selectOptions } = createScriptedDialogue([]);
 
-    await expect(dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], 'abc123')).resolves.toBe(
-      true,
-    );
+    await expect(
+      dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], 'abc123'),
+    ).resolves.toBe(true);
     expect(selectOptions).toEqual([]);
   });
 });

@@ -201,7 +201,8 @@ test('gemini-service: retries after emptying a diff below an unreachable proport
     sleep: async () => {},
   });
 
-  const initialPrompt = promptParts.prefix + promptParts.diffHeading + promptParts.diffBody + promptParts.suffix;
+  const initialPrompt =
+    promptParts.prefix + promptParts.diffHeading + promptParts.diffBody + promptParts.suffix;
   await service.callGeminiAPI({
     promptContext: initialPrompt,
     promptParts,

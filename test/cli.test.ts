@@ -185,10 +185,34 @@ test('cli: ignores flags after the option terminator', () => {
 });
 
 const valueTakingFlagCases = [
-  { aliases: ['--commit', '-c'], longAlias: '--commit', option: 'commit', value: 'a1b2c3d4', expected: 'a1b2c3d4' },
-  { aliases: ['--exclude', '-e'], longAlias: '--exclude', option: 'exclude', value: '*.lock', expected: Array.of('*.lock') },
-  { aliases: ['--model'], longAlias: '--model', option: 'model', value: 'gemini-pro', expected: 'gemini-pro' },
-  { aliases: ['--mode', '-m'], longAlias: '--mode', option: 'mode', value: 'commit-only', expected: 'commit-only' },
+  {
+    aliases: ['--commit', '-c'],
+    longAlias: '--commit',
+    option: 'commit',
+    value: 'a1b2c3d4',
+    expected: 'a1b2c3d4',
+  },
+  {
+    aliases: ['--exclude', '-e'],
+    longAlias: '--exclude',
+    option: 'exclude',
+    value: '*.lock',
+    expected: Array.of('*.lock'),
+  },
+  {
+    aliases: ['--model'],
+    longAlias: '--model',
+    option: 'model',
+    value: 'gemini-pro',
+    expected: 'gemini-pro',
+  },
+  {
+    aliases: ['--mode', '-m'],
+    longAlias: '--mode',
+    option: 'mode',
+    value: 'commit-only',
+    expected: 'commit-only',
+  },
 ] as const;
 
 for (const flagCase of valueTakingFlagCases) {
@@ -199,6 +223,8 @@ for (const flagCase of valueTakingFlagCases) {
       expect(parseArgs([alias, flagCase.value])[flagCase.option]).toEqual(flagCase.expected);
     }
 
-    expect(() => parseArgs([`${flagCase.longAlias}=`])).toThrow(`Missing value for flag: ${flagCase.longAlias}`);
+    expect(() => parseArgs([`${flagCase.longAlias}=`])).toThrow(
+      `Missing value for flag: ${flagCase.longAlias}`,
+    );
   });
 }

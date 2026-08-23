@@ -105,7 +105,10 @@ test('exclude-files: diff requests only include non-excluded paths', async () =>
   const service = createGitService({
     gitCommandRunner: async args => {
       calls.push(args);
-      return { text: args.includes('--name-only') ? 'src/app.ts\n.env.local\n' : 'diff', truncated: false };
+      return {
+        text: args.includes('--name-only') ? 'src/app.ts\n.env.local\n' : 'diff',
+        truncated: false,
+      };
     },
   });
 
@@ -117,9 +120,14 @@ test('exclude-files: diff requests only include non-excluded paths', async () =>
 test('exclude-files: carries excluded staged paths alongside the analysed snapshot', async () => {
   const service = createGitService({
     gitCommandRunner: async args => {
-      if (args.includes('--name-only')) return { text: 'src/app.ts\nsecrets.txt\n', truncated: false };
+      if (args.includes('--name-only'))
+        return { text: 'src/app.ts\nsecrets.txt\n', truncated: false };
       if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
-      if (args[0] === 'ls-files') return { text: '100644 1111111111111111111111111111111111111111 0\tsrc/app.ts\0', truncated: false };
+      if (args[0] === 'ls-files')
+        return {
+          text: '100644 1111111111111111111111111111111111111111 0\tsrc/app.ts\0',
+          truncated: false,
+        };
       return { text: 'diff', truncated: false };
     },
   });
@@ -193,7 +201,10 @@ test('exclude-files: keeps a truncated staged diff as a warning', async () => {
       if (args.includes('--name-only')) return { text: 'source.ts\0', truncated: false };
       if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
       if (args[0] === 'ls-files') {
-        return { text: '100644 1111111111111111111111111111111111111111 0\tsource.ts\0', truncated: false };
+        return {
+          text: '100644 1111111111111111111111111111111111111111 0\tsource.ts\0',
+          truncated: false,
+        };
       }
       return { text: 'diff', truncated: true };
     },
@@ -278,7 +289,14 @@ test('exclude-files: real GitService reads root, ordinary, merge, octopus, and r
     await runGitInRepository(repository, ['add', 'b.txt']);
     await runGitInRepository(repository, ['commit', '-qm', 'b']);
     await runGitInRepository(repository, ['checkout', 'main']);
-    await runGitInRepository(repository, ['merge', '--no-ff', 'octopus-a', 'octopus-b', '-m', 'octopus']);
+    await runGitInRepository(repository, [
+      'merge',
+      '--no-ff',
+      'octopus-a',
+      'octopus-b',
+      '-m',
+      'octopus',
+    ]);
     const octopusHash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
 
     await runGitInRepository(repository, ['mv', rootPath, renamedPath]);
@@ -366,7 +384,9 @@ test('exclude-files: a real commit includes excluded paths only after acknowledg
     await expect(actions.apply(capability, 'feat: add source')).rejects.toThrow(
       'Explicit confirmation is required before committing excluded staged paths',
     );
-    expect((await runGitInRepository(repository, ['rev-list', '--count', 'HEAD'])).trim()).toBe('1');
+    expect((await runGitInRepository(repository, ['rev-list', '--count', 'HEAD'])).trim()).toBe(
+      '1',
+    );
 
     await actions.apply({ ...capability, exclusionsAcknowledged: true }, 'feat: add source');
     expect(await runGitInRepository(repository, ['show', 'HEAD:secrets.txt'])).toBe(

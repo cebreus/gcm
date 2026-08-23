@@ -87,6 +87,52 @@ function createActionService(gitService: GitService) {
 }
 
 describe('commit action service', () => {
+  test('refuses an observed snapshot that is already stale', async () => {
+    const fake = createFakeGitService({ trees: ['current-tree', 'current-tree'] });
+    const actions = createActionService(fake.service);
+
+    const inspection = await actions.inspect(null, {
+      tree: 'read-tree',
+      entries: entries('first.ts'),
+    });
+
+    expect(inspection.capability.allowed).toBe(false);
+    expect(inspection.capability.reason).toContain('index changed');
+  });
+
+  test('reports stale observed snapshot even when a Git operation started', async () => {
+    const fake = createFakeGitService({
+      states: [{ ...CLEAN, inProgressOperation: 'rebase' }],
+      trees: ['current-tree'],
+    });
+    const actions = createActionService(fake.service);
+
+    const inspection = await actions.inspect(null, {
+      tree: 'read-tree',
+      entries: entries('first.ts'),
+    });
+
+    expect(inspection.observedSnapshotInvalid).toBe(true);
+  });
+
+  test('stops when an observed snapshot cannot be verified and refreshes conflicts', async () => {
+    const fake = createFakeGitService({
+      states: [CLEAN, { ...CLEAN, hasUnmergedPaths: true }],
+    });
+    fake.service.getIndexTree = async function () {
+      throw new Error('write-tree failed');
+    };
+    const actions = createActionService(fake.service);
+
+    const inspection = await actions.inspect(null, {
+      tree: 'read-tree',
+      entries: entries('first.ts'),
+    });
+
+    expect(inspection.observedSnapshotInvalid).toBe(true);
+    expect(inspection.repositoryState?.hasUnmergedPaths).toBe(true);
+  });
+
   test('commits an unchanged staged snapshot', async () => {
     const fake = createFakeGitService({});
     const actions = createActionService(fake.service);
@@ -179,10 +225,7 @@ describe('commit action service', () => {
   });
 
   test('refuses drift before amend and reword writes', async () => {
-    for (const target of [
-      { ...TARGET, isHead: true, isPublished: false },
-      TARGET,
-    ]) {
+    for (const target of [{ ...TARGET, isHead: true, isPublished: false }, TARGET]) {
       const fake = createFakeGitService({
         states: [{ ...CLEAN, hasStagedChanges: false }, CLEAN],
         trees: ['first-tree', 'first-tree', 'second-tree', 'second-tree'],
@@ -203,7 +246,10 @@ describe('commit action service', () => {
     const oldHead = 'b'.repeat(40);
     const newHead = 'c'.repeat(40);
     const fake = createFakeGitService({
-      states: [{ ...CLEAN, hasStagedChanges: false }, { ...CLEAN, hasStagedChanges: false }],
+      states: [
+        { ...CLEAN, hasStagedChanges: false },
+        { ...CLEAN, hasStagedChanges: false },
+      ],
       targets: [
         { ...TARGET, headHash: oldHead },
         { ...TARGET, headHash: newHead },
@@ -219,7 +265,11 @@ describe('commit action service', () => {
   });
 
   test('keeps all existing refusal guards at the commit-action seam', async () => {
-    const cases: Array<{ state: RepositoryState; targetHash: string | null; target: CommitTarget | null }> = [
+    const cases: Array<{
+      state: RepositoryState;
+      targetHash: string | null;
+      target: CommitTarget | null;
+    }> = [
       { state: { ...CLEAN, inProgressOperation: 'rebase' }, targetHash: null, target: null },
       { state: { ...CLEAN, hasUnmergedPaths: true }, targetHash: null, target: null },
       { state: CLEAN, targetHash: 'missing', target: null },
@@ -249,7 +299,12 @@ describe('commit action service', () => {
 });
 
 async function runGit(repository: string, args: string[]): Promise<string> {
-  const child = Bun.spawn({ cmd: ['git', ...args], cwd: repository, stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn({
+    cmd: ['git', ...args],
+    cwd: repository,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   const [exitCode, stdout, stderr] = await Promise.all([
     child.exited,
     new Response(child.stdout).text(),
@@ -285,7 +340,10 @@ test('integration: refuses staging drift without creating a commit', async () =>
     await runGit(repository, ['add', 'second.ts']);
     const inspection = await actions.inspect(null, staged.snapshot);
 
-    await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow('Added: "second.ts"');
+    expect(inspection.capability.reason).toContain('the index changed after its diff was read');
+    await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow(
+      'the index changed after its diff was read',
+    );
     expect((await runGit(repository, ['rev-list', '--count', 'HEAD'])).trim()).toBe('1');
     expect(writeEntered).toBe(false);
   } finally {

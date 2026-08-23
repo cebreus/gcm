@@ -10,8 +10,7 @@ import { getCommitContextHints } from './scope-detector.js';
 import type { CommitContextHints } from './scope-detector.js';
 import { listGeminiModels } from './gemini-client/listModels.js';
 import { createGitService } from './services/git-service.js';
-import type { GitService } from './services/git-service.js';
-import type { RepositoryState } from './services/git-service.js';
+import type { GitService, RepositoryState } from './services/git-service.js';
 import {
   createCommitActionService,
   isCommitActionRefusal,
@@ -24,7 +23,17 @@ import type { GeminiService } from './services/gemini-service.js';
 import { generateFallbackCommitDetails } from './runner-utils.js';
 import { buildAtomicSplitProposal } from './atomic-commit-planner.js';
 import { loadSession, saveSession } from './session.js';
-import { intro, outro, spinner, note, select, text, confirm, isCancel, cancel } from '@clack/prompts';
+import {
+  intro,
+  outro,
+  spinner,
+  note,
+  select,
+  text,
+  confirm,
+  isCancel,
+  cancel,
+} from '@clack/prompts';
 import { KNOWN_MODELS, getModelSpec } from './model-registry.js';
 import { sanitizeForDisplay, stripTerminalControlSequences } from './utils.js';
 import clipboardy from 'clipboardy';
@@ -252,7 +261,8 @@ function createRunnerServices(opts: RunnerOptions, logger: Logger, apiKey: strin
   const contextService = opts.contextService || createContextService();
   const geminiClient = createGeminiClient({ config: CONFIG, logger });
   const geminiService =
-    opts.geminiService || createGeminiService({ client: geminiClient, logger, apiKey, contextService });
+    opts.geminiService ||
+    createGeminiService({ client: geminiClient, logger, apiKey, contextService });
   const listModelsFn = opts.listModels || listGeminiModels;
   const dialogue = createRunnerDialogue(logger, listModelsFn);
   return { gitService, contextService, geminiService, dialogue };
@@ -324,15 +334,23 @@ async function runGenerationSafely(params: {
   const { opts, parsedArgs, logger, apiKey, targetCommit, state, s } = params;
   try {
     const services = createRunnerServices(opts, logger, apiKey || '');
-    return await runGenerationWorkflow({ services, parsedArgs, logger, apiKey, targetCommit, state, s });
+    return await runGenerationWorkflow({
+      services,
+      parsedArgs,
+      logger,
+      apiKey,
+      targetCommit,
+      state,
+      s,
+    });
   } catch (error: unknown) {
     s.stop('An error occurred');
     const errStr = String(error);
     if (/Not a git repository/i.test(errStr)) {
       cancel('Error: Not inside a git repository.');
       return 'failure';
-    }
-    else if (/unknown revision/i.test(errStr)) cancel(`Error: Invalid commit SHA: ${targetCommit}`);
+    } else if (/unknown revision/i.test(errStr))
+      cancel(`Error: Invalid commit SHA: ${targetCommit}`);
     else if (isGeminiApiError(error)) {
       const metadata = error.metadata || {};
       let msg = `API Error (${metadata.status || 'Unknown'})`;
@@ -412,10 +430,16 @@ async function runGenerationWorkflow(params: {
   const inspection = await commitActions.inspect(targetCommit, staged.snapshot);
   const preflightRepositoryState = inspection.repositoryState ?? repositoryState;
   if (reportUnresolvedConflicts(preflightRepositoryState)) return 'failure';
+  if (inspection.observedSnapshotInvalid) {
+    cancel(inspection.capability.reason ?? 'Staged changes could not be verified. Run gcm again.');
+    return 'failure';
+  }
 
   showRepositoryWarnings(preflightRepositoryState, targetCommit, inspection.capability);
   const preflight =
-    parsedArgs.model && parsedArgs.mode ? 'continue' : await services.dialogue.configure(state, apiKey);
+    parsedArgs.model && parsedArgs.mode
+      ? 'continue'
+      : await services.dialogue.configure(state, apiKey);
   if (preflight === 'exit') return 'success';
   const commitCapability = {
     ...inspection.capability,
@@ -455,7 +479,7 @@ async function resolveReadyRepositoryState(params: {
   staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>;
 } | null> {
   const { services, parsedArgs, targetCommit, logger, s } = params;
-  let repositoryState = await getRepositoryStateSafe(services.gitService, logger);
+  let repositoryState = await services.gitService.getRepositoryState(logger);
   if (reportUnresolvedConflicts(repositoryState)) return null;
   let staged = await loadStagedChanges({
     services,
@@ -463,7 +487,7 @@ async function resolveReadyRepositoryState(params: {
     targetCommit,
     logger,
     s,
-    suppressNoChangesMessage: true,
+    suppressNoChangesMessage: process.stdin.isTTY,
   });
 
   if (!staged && !process.stdin.isTTY) return null;
@@ -475,7 +499,7 @@ async function resolveReadyRepositoryState(params: {
       stagedFilesFromWorktree: repositoryState.changedFiles,
     });
     if (nextStep === 'cancel') return null;
-    repositoryState = await getRepositoryStateSafe(services.gitService, logger);
+    repositoryState = await services.gitService.getRepositoryState(logger);
     if (reportUnresolvedConflicts(repositoryState)) return null;
     staged = await loadStagedChanges({
       services,
@@ -511,9 +535,6 @@ function showRepositoryWarnings(
     warnings.push(
       'Target is not an amendable HEAD: the commit action will add an `amend!` commit instead of rewriting history.',
     );
-  }
-  if (repositoryState.hasUnmergedPaths) {
-    warnings.push('Unresolved merge conflicts detected in index.');
   }
   if (repositoryState.inProgressOperation) {
     warnings.push(
@@ -565,21 +586,8 @@ async function handleEmptyStaging(params: {
       note(buildAtomicSplitProposal(stagedFilesFromWorktree), 'Atomic split proposal');
       continue;
     }
-    if (repositoryState.hasUnmergedPaths) {
-      note(
-        'Unresolved conflicts are present. Resolve them before staging and committing.',
-        'Warning',
-      );
-    }
     return 'retry';
   }
-}
-
-async function getRepositoryStateSafe(
-  gitService: GitService,
-  logger: Logger,
-): Promise<RepositoryState> {
-  return gitService.getRepositoryState(logger);
 }
 
 function buildLogMetadata(
@@ -815,7 +823,10 @@ async function handleSuccessfulGeneration(params: {
   if (actionResult.type === 'regenerate') return 'regenerate';
   return commitGeneratedMessage({
     commitMessage: parsedOut.COMMIT_MESSAGE,
-    commitCapability: { ...commitCapability, exclusionsAcknowledged: actionResult.exclusionsAcknowledged },
+    commitCapability: {
+      ...commitCapability,
+      exclusionsAcknowledged: actionResult.exclusionsAcknowledged,
+    },
     services,
     state,
     logger,

@@ -122,7 +122,10 @@ function decodeGitQuotedPath(path: string): string {
 
 function parseFileList(text: string): string[] {
   if (text.includes('\0')) return text.split('\0').filter(path => path.length > 0);
-  return text.split('\n').filter(path => path.length > 0).map(decodeGitQuotedPath);
+  return text
+    .split('\n')
+    .filter(path => path.length > 0)
+    .map(decodeGitQuotedPath);
 }
 
 function logExcludedFiles(
@@ -255,7 +258,9 @@ async function readStableStagedDiff(params: {
     const afterDiff = await getIndexTreeWithDeps({ deps, logger });
     if (beforeDiff === afterDiff) return { result, snapshot: { tree: afterDiff, entries } };
   }
-  throw new Error('Staged changes changed while their diff was being read. Regenerate the message, then try again.');
+  throw new Error(
+    'Staged changes changed while their diff was being read. Regenerate the message, then try again.',
+  );
 }
 
 async function commitChangesWithDeps(params: {
@@ -355,7 +360,15 @@ async function warnIfCommittedTreeChanged(params: {
     ).text.trim();
     if (committedTree === safety.snapshot.tree) return;
     const changedPaths = parseFileList(
-      (await deps.gitCommandRunner(['diff', '--name-only', '-z', safety.snapshot.tree, committedTree])).text,
+      (
+        await deps.gitCommandRunner([
+          'diff',
+          '--name-only',
+          '-z',
+          safety.snapshot.tree,
+          committedTree,
+        ])
+      ).text,
     ).map(function (path) {
       return JSON.stringify(path);
     });
@@ -388,12 +401,16 @@ async function assertCommitWriteSafety(params: {
   if (!safety) return;
   const tree = await getIndexTreeWithDeps({ deps, logger });
   if (tree !== safety.snapshot.tree) {
-    throw commitSafetyRefusal('Staged changes changed before the commit could be written. Regenerate the message, then try again.');
+    throw commitSafetyRefusal(
+      'Staged changes changed before the commit could be written. Regenerate the message, then try again.',
+    );
   }
   if (!safety.target) return;
   const target = await inspectCommitTargetWithDeps({ deps, hash: safety.target.hash, logger });
   if (target.hash !== safety.target.hash || target.headHash !== safety.target.headHash) {
-    throw commitSafetyRefusal('HEAD or target commit moved before the commit could be written. Regenerate the message, then try again.');
+    throw commitSafetyRefusal(
+      'HEAD or target commit moved before the commit could be written. Regenerate the message, then try again.',
+    );
   }
 }
 

@@ -5,6 +5,23 @@ import type { Hunk } from './utils.js';
 import { CONFIG } from '../gcm.config.js';
 import { BINARY_EXTENSIONS } from './constants.js';
 
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+function truncateUtf8(text: string, maxBytes: number): string {
+  const bytes = encoder.encode(text);
+  if (bytes.byteLength <= maxBytes) return text;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
+  return decoder.decode(bytes.subarray(0, end));
+}
+
+function appendWithinLimit(text: string, suffix: string, maxBytes: number): string {
+  const fittedSuffix = truncateUtf8(suffix, maxBytes);
+  const remaining = maxBytes - encoder.encode(fittedSuffix).byteLength;
+  return truncateUtf8(text, remaining) + fittedSuffix;
+}
+
 interface SummarizeLargeDiffOptions {
   spawnLinesImpl?: (
     args: string[],
@@ -76,12 +93,11 @@ function parseDiffLinesToHunks(file: string, lines: string[], acc: HunkAccumulat
     const line = rawLine.replace(/\r?\n$/, '');
     if (line.startsWith('@@')) {
       finalizeHunk(acc, current);
-      current = { file, header: line, content: '', added: 0, removed: 0, bytes: 0, score: 0 };
+      current = { file, header: line, content: '', added: 0, removed: 0, score: 0 };
       continue;
     }
     if (!current) continue;
     current.content += line + '\n';
-    current.bytes += Buffer.byteLength(line, 'utf8');
     if (line.startsWith('+') && !line.startsWith('+++')) current.added += 1;
     if (line.startsWith('-') && !line.startsWith('---')) current.removed += 1;
   }
@@ -177,13 +193,16 @@ function buildSummaryOutput(
 
   for (const hunk of topHunks) {
     const hunkText = `File: ${hunk.file}\n${hunk.header}\n${hunk.content}\n`;
-    if (output.length + hunkText.length > limitBytes) {
-      output += `\n... (${topHunks.length} hunks, ${totalTruncated} files truncated by per-file buffer) ...`;
-      break;
+    if (encoder.encode(output + hunkText).byteLength > limitBytes) {
+      return appendWithinLimit(
+        output,
+        `\n... (${topHunks.length} hunks, ${totalTruncated} files truncated by per-file buffer) ...`,
+        limitBytes,
+      );
     }
     output += hunkText;
   }
-  return output;
+  return truncateUtf8(output, limitBytes);
 }
 
 export async function summarizeLargeDiff(

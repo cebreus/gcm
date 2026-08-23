@@ -13,9 +13,15 @@ export interface SpawnGitStreamResult {
   truncated: boolean;
 }
 
-async function killSpawnedChild(child: ReturnType<typeof Bun.spawn>, state: { killed: boolean }): Promise<void> {
+async function killSpawnedChild(
+  child: ReturnType<typeof Bun.spawn>,
+  state: { killed: boolean },
+): Promise<void> {
   if (state.killed || child.exitCode !== null) return;
-  const alreadyExited = await Promise.race([child.exited.then(() => true), Bun.sleep(1).then(() => false)]);
+  const alreadyExited = await Promise.race([
+    child.exited.then(() => true),
+    Bun.sleep(1).then(() => false),
+  ]);
   if (alreadyExited) return;
   state.killed = true;
   try {
@@ -40,7 +46,6 @@ async function spawnCore(
   const maxBytes = options.maxBytes === undefined ? 1024 * 1024 : options.maxBytes;
   const execName = options.execName || 'git';
   const child = Bun.spawn({ cmd: [execName, ...args], stdout: 'pipe', stderr: 'pipe' });
-  const dec = new TextDecoder();
   let bytes = 0;
   let truncated = false;
   const killState = { killed: false };
@@ -48,32 +53,39 @@ async function spawnCore(
   const stdoutTask = (async (): Promise<void> => {
     const reader = child.stdout?.getReader();
     if (!reader) return;
+    const decoder = new TextDecoder();
     for (;;) {
       const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = dec.decode(value);
-      bytes += chunk.length;
+      if (done) {
+        const tail = decoder.decode();
+        if (tail) onChunk(tail);
+        break;
+      }
+      bytes += value.byteLength;
       if (bytes > maxBytes) {
         truncated = true;
         await killSpawnedChild(child, killState);
         break;
       }
-      onChunk(chunk);
+      onChunk(decoder.decode(value, { stream: true }));
     }
   })();
 
   const stderrTask = (async (): Promise<string> => {
     const reader = child.stderr?.getReader();
     if (!reader) return '';
+    const decoder = new TextDecoder();
     let stderr = '';
     let stderrBytes = 0;
     const maxStderrBytes = 64 * 1024;
     for (;;) {
       const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = dec.decode(value);
-      stderrBytes += chunk.length;
-      if (stderrBytes <= maxStderrBytes) stderr += chunk;
+      if (done) {
+        if (stderrBytes <= maxStderrBytes) stderr += decoder.decode();
+        break;
+      }
+      stderrBytes += value.byteLength;
+      if (stderrBytes <= maxStderrBytes) stderr += decoder.decode(value, { stream: true });
     }
     return stderr;
   })();

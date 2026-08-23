@@ -47,16 +47,14 @@ interface GeminiServiceRuntimeDeps extends GeminiServiceDeps {
   sleep: (milliseconds: number) => Promise<unknown>;
 }
 
-async function handleContextOverflow(
-  params: {
-    deps: GeminiServiceRuntimeDeps;
-    stagedFiles: string[];
-    promptParts: PromptContextParts;
-    maxOutputTokens: number;
-    attempt: number;
-    summaryAttempted: boolean;
-  },
-): Promise<{
+async function handleContextOverflow(params: {
+  deps: GeminiServiceRuntimeDeps;
+  stagedFiles: string[];
+  promptParts: PromptContextParts;
+  maxOutputTokens: number;
+  attempt: number;
+  summaryAttempted: boolean;
+}): Promise<{
   input: string;
   promptParts: PromptContextParts;
   maxOutputTokens: number;
@@ -157,12 +155,26 @@ async function callGeminiAPIWithDeps(params: {
   meta: LogMetadata;
   opts?: CallGeminiOptions;
 }): Promise<GeminiResponse | null> {
-  const { deps, promptContext, promptParts, summaryAttempted, systemPrompt, stagedFiles, meta, opts } = params;
+  const {
+    deps,
+    promptContext,
+    promptParts,
+    summaryAttempted,
+    systemPrompt,
+    stagedFiles,
+    meta,
+    opts,
+  } = params;
   const maxAttempts = Math.max(1, CONFIG.GEMINI_MAX_RETRIES || 3);
   const enableThinking = CONFIG.ENABLE_THINKING;
   let attempt = 0;
   const loopState: CallLoopState = {
-    promptParts: promptParts || { prefix: '', diffHeading: '', diffBody: promptContext, suffix: '' },
+    promptParts: promptParts || {
+      prefix: '',
+      diffHeading: '',
+      diffBody: promptContext,
+      suffix: '',
+    },
     input: promptContext,
     maxOutputOverride: CONFIG.MAX_OUTPUT_TOKENS,
     summaryAttempted: summaryAttempted ?? false,

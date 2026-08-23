@@ -55,7 +55,9 @@ test('atomic commit planner: groups matching files and orders groups determinist
     'src/services/auth.ts',
   ]);
 
-  expect(proposal).toContain('Found 5 changed file(s) in the worktree, proposed 4 atomic group(s).');
+  expect(proposal).toContain(
+    'Found 5 changed file(s) in the worktree, proposed 4 atomic group(s).',
+  );
   expect(proposal).toContain('Commit 1: deps');
   expect(proposal).toContain('Commit 2: services');
   expect(proposal).toContain('Commit 3: runner');
@@ -226,7 +228,9 @@ git add -- 'test/two.test.ts'`);
     const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
     if (exitCode !== 0) throw new Error(stderr);
 
-    expect(await runGit(repository, ['diff', '--cached', '--name-only'])).toBe('test/two.test.ts\n');
+    expect(await runGit(repository, ['diff', '--cached', '--name-only'])).toBe(
+      'test/two.test.ts\n',
+    );
   } finally {
     await rm(repository, { recursive: true, force: true });
   }

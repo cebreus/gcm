@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
 import { summarizeLargeDiff } from '../src/summarizer.ts';
 import type { SpawnGitStreamResult, SpawnGitLinesResult } from '../src/git-utils.ts';
+import { CONFIG } from '../gcm.config.ts';
 
 async function spawnStreamImpl(): Promise<SpawnGitStreamResult> {
   return { text: ' 2 files changed\n', truncated: false };
@@ -91,4 +92,25 @@ test('summarizer: accepts GCM_MAX_HUNKS=0', async () => {
   });
 
   expect(await child.exited).toBe(0);
+});
+
+test('summarizer: caps Unicode output by UTF-8 bytes', async () => {
+  const originalLimit = CONFIG.CHILD_PROCESS_MAX_BUFFER;
+  CONFIG.CHILD_PROCESS_MAX_BUFFER = 180;
+  try {
+    const result = await summarizeLargeDiff(['a.ts'], {
+      spawnStreamImpl: async function () {
+        return { text: '', truncated: false };
+      },
+      spawnLinesImpl: async function () {
+        return { lines: ['@@ -1 +1 @@\n', `+${'ě'.repeat(40)}\n`], truncated: false };
+      },
+    });
+
+    expect(result.text).not.toContain('ě');
+    expect(result.text).toContain('files truncated by per-file buffer');
+    expect(new TextEncoder().encode(result.text).byteLength).toBeLessThanOrEqual(90);
+  } finally {
+    CONFIG.CHILD_PROCESS_MAX_BUFFER = originalLimit;
+  }
 });

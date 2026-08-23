@@ -87,7 +87,12 @@ interface DebugFileApi {
 
 const DEBUG_FILE_MODE = 0o600;
 
-function createDebugFileApi(): { api: DebugFileApi; noFollowFlag: number; nonBlockFlag: number; loopError: number } {
+function createDebugFileApi(): {
+  api: DebugFileApi;
+  noFollowFlag: number;
+  nonBlockFlag: number;
+  loopError: number;
+} {
   if (process.platform === 'darwin') {
     return {
       api: dlopen('/usr/lib/libSystem.B.dylib', {
@@ -118,7 +123,9 @@ function debugFileRefusal(path: string, reason: string): Error {
   return new Error(`Refusing to write debug log ${JSON.stringify(path)}: ${reason}.`);
 }
 
-async function openDebugWriter(path: string): Promise<ReturnType<ReturnType<typeof Bun.file>['writer']>> {
+async function openDebugWriter(
+  path: string,
+): Promise<ReturnType<ReturnType<typeof Bun.file>['writer']>> {
   const { api, noFollowFlag, nonBlockFlag, loopError } = createDebugFileApi();
   const fileDescriptor = api.open(
     path,
@@ -219,7 +226,10 @@ function logDebugRequest(params: {
     bodyLength: bodyStr.length,
     body: bodyPreview,
   });
-  deps.writeDebug('API REQUEST BODY (pretty-printed)', capDebugBody(unescapeNewlinesInText(body), maxLog));
+  deps.writeDebug(
+    'API REQUEST BODY (pretty-printed)',
+    capDebugBody(unescapeNewlinesInText(body), maxLog),
+  );
   if (
     (body as { contents?: Array<{ parts?: Array<{ text?: string }> }> })?.contents?.[0]?.parts?.[0]
       ?.text
@@ -253,7 +263,10 @@ function logDebugResponse(
   });
   try {
     const jsonRes: unknown = JSON.parse(textRes);
-    deps.writeDebug('API RESPONSE BODY (pretty-printed)', capDebugBody(unescapeNewlinesInText(jsonRes), maxLog));
+    deps.writeDebug(
+      'API RESPONSE BODY (pretty-printed)',
+      capDebugBody(unescapeNewlinesInText(jsonRes), maxLog),
+    );
   } catch {
     // Not JSON
   }
@@ -391,9 +404,15 @@ async function handleSuccessfulResponse(
   if (!(parsed.truncated && opts.retryIfTruncated && truncRetries < truncMaxRetries)) {
     return { retry: false, response: parsed, truncRetries, currentMaxOutputTokens };
   }
-  const nextMaxOutputTokens = Math.min(currentMaxOutputTokens + truncIncrease, params.maxOutputTokensLimit);
+  const nextMaxOutputTokens = Math.min(
+    currentMaxOutputTokens + truncIncrease,
+    params.maxOutputTokensLimit,
+  );
   if (nextMaxOutputTokens === currentMaxOutputTokens) {
-    deps.logger.log('warn', "Gemini response was truncated because the model's output limit was reached.");
+    deps.logger.log(
+      'warn',
+      "Gemini response was truncated because the model's output limit was reached.",
+    );
     return { retry: false, response: parsed, truncRetries, currentMaxOutputTokens };
   }
   const nextTruncRetries = truncRetries + 1;

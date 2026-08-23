@@ -70,7 +70,9 @@ test('gemini-client: refuses a symlinked debug log without touching its target',
 
     await Bun.sleep(10);
     expect(await readFile(victim, 'utf8')).toBe('keep this content intact\n');
-    expect(stderr).toContain(`Refusing to write debug log ${JSON.stringify(debugPath)}: it is a symbolic link.`);
+    expect(stderr).toContain(
+      `Refusing to write debug log ${JSON.stringify(debugPath)}: it is a symbolic link.`,
+    );
   } finally {
     process.stderr.write = originalWrite;
     await rm(directory, { recursive: true, force: true });
@@ -495,7 +497,11 @@ async function geminiClientTruncationRetryRespectsModelOutputLimitTest(): Promis
     void _input;
     callCount += 1;
     const requestBody: unknown = init?.body ? JSON.parse(String(init.body)) : null;
-    if (typeof requestBody === 'object' && requestBody !== null && 'generationConfig' in requestBody) {
+    if (
+      typeof requestBody === 'object' &&
+      requestBody !== null &&
+      'generationConfig' in requestBody
+    ) {
       const generationConfig = requestBody.generationConfig;
       if (
         typeof generationConfig === 'object' &&
@@ -533,7 +539,9 @@ async function geminiClientTruncationRetryRespectsModelOutputLimitTest(): Promis
 
   expect(result?.truncated).toBe(true);
   expect(seenMaxOutput).toEqual([8192]);
-  expect(warnings).toContain("Gemini response was truncated because the model's output limit was reached.");
+  expect(warnings).toContain(
+    "Gemini response was truncated because the model's output limit was reached.",
+  );
 }
 test(
   'gemini-client: stops truncation retries at the selected model output limit',

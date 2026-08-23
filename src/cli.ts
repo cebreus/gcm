@@ -91,7 +91,12 @@ function findValueFlag(aliases: string[]): string | undefined {
   return aliases.find(alias => flagsByAlias.get(alias)?.takesValue);
 }
 
-function validateValueFlag(flag: string, aliases: string[], valueFlag: string, value: string | undefined): void {
+function validateValueFlag(
+  flag: string,
+  aliases: string[],
+  valueFlag: string,
+  value: string | undefined,
+): void {
   if (aliases.at(-1) !== valueFlag) {
     throw new ArgumentValidationError(`Value-taking flag must be last in cluster: ${flag}`);
   }
@@ -105,7 +110,11 @@ function validateValueFlag(flag: string, aliases: string[], valueFlag: string, v
   }
 }
 
-function validateValueDefinition(valueFlag: string, value: string, seenValueFlags: Set<string>): void {
+function validateValueDefinition(
+  valueFlag: string,
+  value: string,
+  seenValueFlags: Set<string>,
+): void {
   const definition = flagsByAlias.get(valueFlag);
   if (!definition) return;
   definition.validateValue?.(value);
@@ -155,11 +164,14 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
   validateArgs(argv);
   const normalisedArgv = normaliseExcludeValues(argv);
   const optionTerminator = normalisedArgv.indexOf('--');
-  const parsed: Args = minimist(optionTerminator === -1 ? normalisedArgv : normalisedArgv.slice(0, optionTerminator), {
-    alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug', e: 'exclude', m: 'mode' },
-    boolean: ['help', 'version', 'verbose', 'debug', 'list-models'],
-    string: ['commit', 'model', 'mode', 'exclude'],
-  });
+  const parsed: Args = minimist(
+    optionTerminator === -1 ? normalisedArgv : normalisedArgv.slice(0, optionTerminator),
+    {
+      alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug', e: 'exclude', m: 'mode' },
+      boolean: ['help', 'version', 'verbose', 'debug', 'list-models'],
+      string: ['commit', 'model', 'mode', 'exclude'],
+    },
+  );
 
   // Parse exclude patterns - can be comma-separated or multiple --exclude flags
   let excludePatterns: string[] = [];

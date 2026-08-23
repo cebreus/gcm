@@ -66,62 +66,7 @@ The easiest way to use `gcm` is to stage your changes and run the script.
 
 ### Process
 
-```mermaid
-flowchart TD
-  A[Run gcm with options] --> B{Arguments valid?}
-  B -- No --> X[Show reason and stop<br/>with non-zero exit]
-  B -- Yes --> C{Help or version?}
-  C -- Yes --> Y[Print result and exit]
-  C -- No --> C2{List models?}
-  C2 -- Yes --> C3{API key and request OK?}
-  C3 -- Yes --> Y
-  C3 -- No --> X
-  C2 -- No --> D{Unresolved conflicts?}
-  D -- Yes --> X
-  D -- No --> D2[Read staged changes<br/>or target commit]
-  D2 --> E{Changes available?}
-  E -- No, non-interactive<br/>or target commit --> X
-  E -- No, interactive --> F{Re-check, show split<br/>proposal, or cancel}
-  F -- Re-check --> D
-  F -- Split proposal --> F
-  F -- Cancel --> X
-  E -- Yes --> G{Whitespace-only changes<br/>or missing API key?}
-  G -- Yes --> X
-  G -- No --> H[Refresh repository state<br/>and available Git action]
-  H --> H2{Conflicts appeared?}
-  H2 -- Yes --> X
-  H2 -- No --> H3[Show repository warnings]
-  H3 --> I{Both model and mode fixed<br/>on command line?}
-  I -- No --> J{Generate, configure,<br/>or exit}
-  J -- Configure --> J
-  J -- Exit --> Z
-  I -- Yes --> L
-  J -- Generate --> L{Multiple staged scopes?}
-  L -- Yes --> M{Show split proposal,<br/>continue, or cancel}
-  M -- Split proposal --> M
-  M -- Cancel --> Z
-  M -- Continue --> N[Generate with Gemini]
-  L -- No or target commit --> N
-  N --> O{Result}
-  O -- Empty --> P[Print fallback and exit]
-  O -- Error or malformed --> X
-  O -- Valid --> Q[Review generated message]
-  Q --> R{User action}
-  R -- Copy or edit --> Q
-  R -- Regenerate, hint,<br/>or switch model --> N
-  R -- Cancel --> Z
-  R -- Available Git action --> S{Excluded staged paths?}
-  S -- Yes --> T{Commit all staged<br/>paths confirmed?}
-  T -- No --> Z
-  T -- Yes --> U
-  S -- No --> U[Revalidate index, HEAD,<br/>target and action]
-  U --> V{Still safe and unchanged?}
-  V -- No --> X
-  V -- Yes --> W{Confirmed action}
-  W -- Commit or amend HEAD --> W1[Write action and save session]
-  W -- Create amend! --> W2[Create amend! and save session]
-  W2 --> W3[Later, user runs the printed<br/>rebase command manually]
-```
+There are two generation use cases: analyse staged changes with `gcm`, or analyse an existing commit with `gcm --commit <hash>`. See the separate [user flow diagrams](docs/user-flow.md) for their inputs, decisions and outcomes. Informational commands such as `--help`, `--version` and `--list-models` exit before generation.
 
 Common paths:
 
@@ -134,6 +79,10 @@ gcm --mode full
 
 # Review a new message for HEAD; amend is offered only when safe
 gcm --commit HEAD
+
+# Review an older reachable commit; amend! is created only after confirmation
+# and gcm prints, but never runs, the required rebase command
+gcm --commit a1b2c3d
 
 # Keep generated files out of the Gemini prompt
 gcm --exclude 'dist/*'
@@ -182,7 +131,7 @@ COMMIT_MESSAGE:
 docs(core): align documentation with current behaviour
 
 - Document the default commit-only mode and optional full output
-- Add the end-to-end binary process diagram
+- Document the staged-change and target-commit user flows
 - Remove stale commands and unsupported project links
 
 PR_TITLE:
@@ -192,7 +141,7 @@ PR_DESCRIPTION:
 This updates the project documentation to match the current CLI.
 
 - The default and full output modes are described accurately.
-- A Mermaid diagram shows the user journey from invocation to a safe Git action.
+- Separate diagrams show the staged-change and target-commit journeys.
 - Obsolete commands, links, and build notes have been removed.
 ```
 
@@ -266,27 +215,11 @@ After generation, the review menu offers:
 
 - Amend is offered only for a HEAD that no remote branch contains, so published history is never rewritten behind your back. When that cannot be determined, the additive path is taken instead.
 - That answer comes from the remote-tracking refs in your clone, and no fetch is made. A commit that reached the remote another way, or whose remote-tracking ref was pruned or deleted, reads as unpublished and can be amended. Run `git fetch` first when the branch may have moved elsewhere.
-- Every other target gets an `amend!` commit. That is an ordinary commit: nothing is rewritten until you fold it in yourself.
-
-  ```bash
-  git rebase --autosquash <target>~1
-  ```
-
 - Nothing is offered when the index has staged changes. Both amend and `amend!` would carry them into the target commit, which the generated message does not describe.
 - Nothing is offered for a commit that HEAD cannot reach, or while HEAD is detached. The `amend!` commit is created where HEAD points, so it would never reach a target on another branch, and a commit made on a detached HEAD is orphaned by the next checkout.
 - The reword result prints the exact rebase base to use. When an older commit shares the target's subject, that base is mandatory: `--autosquash` folds into the first subject match in its range, so a wider base hands the new message to the wrong commit.
 - The decision is taken again immediately before the action, so a repository that moved during regeneration stops the run instead of writing into the wrong commit.
 - All actions are disabled when the index has unresolved conflicts, or while a merge, rebase, cherry-pick, revert or bisect is in progress.
-
-### Target a Past Commit
-
-To regenerate the message of a commit that has already been made:
-
-```bash
-bun run ./gcm.ts -c a1b2c3d
-```
-
-When the hash is the current HEAD, the menu offers a direct amend. Otherwise it offers an `amend!` commit that a later `git rebase --autosquash` folds in.
 
 ### Debugging
 
@@ -323,6 +256,7 @@ The tool can be configured using environment variables. These are defined in `gc
 ## Development
 
 Follow these steps to set up a local development environment.
+The [architecture and engineering audit](docs/architecture-audit.md) records the current domain boundaries, design-principle assessment, test discipline and accepted consistency limit.
 
 1.  **Setup:**
     Follow the [Installation](#installation) steps to clone the repository and install dependencies.
