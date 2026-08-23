@@ -10,7 +10,7 @@ afterAll(async function (): Promise<void> {
 test('session: rejects persisted values outside its schema', async function () {
   await Bun.write(
     `${directory}/.gcm-session.json`,
-    JSON.stringify({ modelName: 42, outputMode: 'garbage' }),
+    JSON.stringify({ modelName: 'garbage', outputMode: 'commit-only' }),
   );
   const child = Bun.spawn({
     cmd: [
