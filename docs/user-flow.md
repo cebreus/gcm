@@ -16,23 +16,32 @@ flowchart TD
   E -- Re-check --> B
   E -- Cancel --> X
   D -- No, non-interactive --> X
-  D -- Yes --> F{Content, API key and<br/>analysed index valid?}
+  D -- Yes --> D1{Meaningful non-whitespace<br/>changes?}
+  D1 -- No --> X
+  D1 -- Yes --> D2{API key set?}
+  D2 -- No --> X
+  D2 -- Yes --> F{Conflicts absent and<br/>analysed snapshot verifiable?}
   F -- No --> X
-  F -- Yes --> G[Configure unless model<br/>and mode are both fixed]
-  G --> H{Multiple atomic scopes?}
+  F -- Yes --> F2{Git operation<br/>in progress?}
+  F2 -- Yes --> R[Keep snapshot;<br/>disable Git write]
+  F2 -- No --> G[Write capability available]
+  R --> G2[Configure unless model<br/>and mode are both fixed]
+  G --> G2
+  G2 --> H{Multiple atomic scopes?}
   H -- Yes --> I[Show split proposal;<br/>continue or cancel]
   I -- Cancel --> X
   I -- Continue --> J[Generate with Gemini]
   H -- No --> J
-  J --> K{Generated result valid?}
-  K -- No --> X
-  K -- Yes --> L{Review action}
+  J --> K{Generated result?}
+  K -- No text --> Y[Show four-artifact deterministic fallback;<br/>exit without write or session save]
+  K -- Invalid --> X
+  K -- Valid --> L{Review action}
   L -- Copy or edit --> L
   L -- Regenerate, hint,<br/>or switch model --> J
   L -- Cancel --> Z[Exit without writing]
   L -- Commit --> M{Excluded staged paths<br/>confirmed?}
   M -- No --> Z
-  M -- Yes or none --> N{Index and action<br/>still unchanged?}
+  M -- Yes or none --> N{Repository state, index<br/>and capability unchanged?}
   N -- No --> X
   N -- Yes --> O[Create commit and save session]
 ```
@@ -46,21 +55,25 @@ flowchart TD
   B -- Yes --> C[Read target diff]
   C --> C2{Changes and<br/>API key valid?}
   C2 -- No --> X
-  C2 -- Yes --> C3{Inspect Git capability}
-  C3 -- Amend HEAD or amend! --> D[Configure unless model<br/>and mode are both fixed]
-  C3 -- No safe write action --> D
+  C2 -- Yes --> C3{Conflicts absent and<br/>snapshot verifiable?}
+  C3 -- No --> X
+  C3 -- Yes --> C4{Inspect Git capability}
+  C4 -- Amend HEAD or amend! --> D[Configure unless model<br/>and mode are both fixed]
+  C4 -- In-progress operation,<br/>unreachable or unresolved target,<br/>detached HEAD or staged index --> R[Disable Git write]
+  R --> D
   D --> E[Generate with Gemini]
-  E --> F{Generated result valid?}
-  F -- No --> X
-  F -- Yes --> G{Review action}
+  E --> F{Generated result?}
+  F -- No text --> Y[Show four-artifact deterministic fallback;<br/>exit without write or session save]
+  F -- Invalid --> X
+  F -- Valid --> G{Review action}
   G -- Copy or edit --> G
   G -- Regenerate, hint,<br/>or switch model --> E
   G -- Cancel --> Z[Exit without writing]
   G -- Available Git action --> H{Capability found<br/>during inspection}
-  H -- Unpublished HEAD --> I{HEAD, target and index<br/>still unchanged?}
+  H -- Unpublished HEAD --> I{Repository state, mode,<br/>HEAD, target and index unchanged?}
   I -- Yes --> J[Amend HEAD and save session]
   I -- No --> X
-  H -- Published HEAD or<br/>reachable older commit --> K{Target, HEAD and index<br/>still unchanged?}
+  H -- Published HEAD or<br/>reachable older commit --> K{Repository state, mode,<br/>target, HEAD and index unchanged?}
   K -- Yes --> L[Create amend! and save session]
   L --> M[Print manual rebase command;<br/>never run it]
   K -- No --> X
@@ -68,3 +81,9 @@ flowchart TD
 
 The exact write-action matrix and edge cases remain in the
 [Commit Safety](../README.md#commit-safety) table.
+
+Immediately before a selected write, the action service re-reads repository
+state, conflicts, the index snapshot and capability. Target actions also
+revalidate HEAD and the resolved target. The delegated Git write boundary then
+checks the index and HEAD/target once more. Session model and mode are saved
+only after that Git action succeeds.

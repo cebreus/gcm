@@ -33,6 +33,7 @@ function createScriptedDialogue(
   const copied: string[] = [];
   const listModelApiKeys: string[] = [];
   const confirmations: string[] = [];
+  const cancellations: string[] = [];
   const selectOptions: Array<Array<{ value: string; label: string; hint?: string }>> = [];
   const prompts: PromptAdapter = {
     select: async function (options) {
@@ -52,7 +53,9 @@ function createScriptedDialogue(
     outro: function (message) {
       outros.push(message);
     },
-    cancel: function () {},
+    cancel: function (message) {
+      cancellations.push(message);
+    },
     isCancel: function (value) {
       return value === escape;
     },
@@ -72,7 +75,16 @@ function createScriptedDialogue(
     },
     logger: { log: function () {} },
   });
-  return { dialogue, notes, outros, copied, selectOptions, listModelApiKeys, confirmations };
+  return {
+    dialogue,
+    notes,
+    outros,
+    copied,
+    selectOptions,
+    listModelApiKeys,
+    confirmations,
+    cancellations,
+  };
 }
 
 describe('interactive generation dialogue', () => {
@@ -526,6 +538,66 @@ describe('interactive generation dialogue', () => {
     await expect(dialogue.configure(state, 'key')).resolves.toBe('continue');
     expect(state).toEqual(createState());
     expect(selectOptions).toHaveLength(3);
+  });
+
+  test.each([
+    {
+      name: 'clean worktree',
+      changedFiles: [],
+      expectedTip: 'Worktree is clean',
+      expectedLabels: ['Re-check changes', 'Cancel'],
+    },
+    {
+      name: 'dirty worktree',
+      changedFiles: ['src/a.ts'],
+      expectedTip: 'git add <files>',
+      expectedLabels: ['Re-check changes', 'Show split proposal', 'Cancel'],
+    },
+  ])('retries empty staging for a $name', async ({ changedFiles, expectedTip, expectedLabels }) => {
+    const { dialogue, notes, selectOptions } = createScriptedDialogue(['retry']);
+
+    await expect(dialogue.handleEmptyStaging(null, changedFiles)).resolves.toBe('retry');
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.[0]).toContain(expectedTip);
+    expect(notes[0]?.[1]).toBe('TIP');
+    expect(
+      selectOptions[0]?.map(function (option) {
+        return option.label;
+      }),
+    ).toEqual([...expectedLabels]);
+  });
+
+  test('shows an empty-staging split proposal then prompts again', async () => {
+    const { dialogue, notes, selectOptions } = createScriptedDialogue(['split', 'retry']);
+
+    await expect(dialogue.handleEmptyStaging(null, ['src/a.ts'])).resolves.toBe('retry');
+    expect(
+      notes.map(function (entry) {
+        return entry[1];
+      }),
+    ).toEqual(['TIP', 'Atomic split proposal']);
+    expect(notes[1]?.[0]).toContain('git reset');
+    expect(selectOptions).toHaveLength(2);
+  });
+
+  test.each([
+    ['visible Cancel', 'cancel'],
+    ['escape', escape],
+  ])('cancels empty staging on %s', async (_, choice) => {
+    const { dialogue, selectOptions, cancellations } = createScriptedDialogue([choice]);
+
+    await expect(dialogue.handleEmptyStaging(null, [])).resolves.toBe('cancel');
+    expect(selectOptions).toHaveLength(1);
+    expect(cancellations).toEqual([]);
+  });
+
+  test('cancels an empty target commit without prompting', async () => {
+    const { dialogue, notes, selectOptions, cancellations } = createScriptedDialogue([]);
+
+    await expect(dialogue.handleEmptyStaging('abc123', ['src/a.ts'])).resolves.toBe('cancel');
+    expect(cancellations).toEqual(['No changes found in commit abc123.']);
+    expect(selectOptions).toEqual([]);
+    expect(notes).toEqual([]);
   });
 
   test('declining a multi-group atomic split returns false', async () => {

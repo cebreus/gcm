@@ -209,21 +209,3 @@ export function formatCommitMessage(message: string): string {
 
   return subject;
 }
-
-/**
- * Detects the repository type based on common monorepo indicators.
- */
-export async function detectRepoType(): Promise<'monorepo' | 'single'> {
-  const [hasLerna, hasPnpmWorkspace, hasPackagesDir, hasAppsDir] = await Promise.all([
-    Bun.file('lerna.json').exists(),
-    Bun.file('pnpm-workspace.yaml').exists(),
-    Bun.file('packages').exists(),
-    Bun.file('apps').exists(),
-  ]);
-
-  if (hasLerna || hasPnpmWorkspace || (hasPackagesDir && hasAppsDir)) {
-    return 'monorepo';
-  }
-
-  return 'single';
-}

@@ -51,6 +51,22 @@ test('logger: redacts current GitHub and Google keys in messages', () => {
   expect(output).not.toContain(googleKey);
 });
 
+test('logger: sanitises terminal controls and nested metadata secrets', () => {
+  stdoutWriteMock.mockClear();
+  const secret = 'sk-abcdef1234567890';
+  const logger = createLogger({ LOG_LEVEL: 'info' });
+
+  logger.log('info', `model\x1B]0;owned\x07 output`, {
+    error: { message: `request failed with ${secret}\x1B[31m` },
+  });
+
+  const output = stdoutWriteMock.mock.calls.map(call => String(call[0])).join('');
+  expect(output).toContain('model output');
+  expect(output).toContain('[REDACTED-KEY]');
+  expect(output).not.toContain(secret);
+  expect(output).not.toContain('\x1B');
+});
+
 test('logger: keeps full redacted messages while truncating metadata', () => {
   stdoutWriteMock.mockClear();
   const logger = createLogger({ LOG_LEVEL: 'info' });

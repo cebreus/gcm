@@ -1,9 +1,8 @@
-import { test, expect, mock, afterAll } from 'bun:test';
+import { test, expect } from 'bun:test';
 import {
   fileImportanceWeight,
   pushHunkToTop,
   unescapeNewlinesInText,
-  detectRepoType,
   formatCommitMessage,
   shouldExcludeFile,
   filterExcludedFiles,
@@ -108,41 +107,6 @@ test('utils: unescapeNewlinesInText - should handle nested objects and arrays', 
   expect(typed.a[1].c?.text).toBe('c\nd');
 });
 
-// --- Tests for detectRepoType ---
-const existsMock = mock(async (_path?: string) => false);
-const fileMock = mock((path: string) => ({
-  exists: () => existsMock(path),
-}));
-const originalBunFile = Bun.file;
-Bun.file = fileMock as unknown as typeof Bun.file;
-
-afterAll(() => {
-  Bun.file = originalBunFile;
-});
-
-test('utils: detectRepoType - should detect monorepo with lerna.json', async () => {
-  existsMock.mockImplementation(async path => path === 'lerna.json');
-  const result = await detectRepoType();
-  expect(result).toBe('monorepo');
-});
-
-test('utils: detectRepoType - should detect monorepo with pnpm-workspace.yaml', async () => {
-  existsMock.mockImplementation(async path => path === 'pnpm-workspace.yaml');
-  const result = await detectRepoType();
-  expect(result).toBe('monorepo');
-});
-
-test('utils: detectRepoType - should detect monorepo with packages/ and apps/ dirs', async () => {
-  existsMock.mockImplementation(async path => path === 'packages' || path === 'apps');
-  const result = await detectRepoType();
-  expect(result).toBe('monorepo');
-});
-
-test('utils: detectRepoType - should return single for regular repo', async () => {
-  existsMock.mockImplementation(async () => false);
-  const result = await detectRepoType();
-  expect(result).toBe('single');
-});
 // --- Tests for formatCommitMessage ---
 test('utils: formatCommitMessage - should preserve short messages', () => {
   const msg = 'feat: add new feature';

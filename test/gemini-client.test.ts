@@ -133,6 +133,89 @@ test('gemini-client: caps every debug body payload', async () => {
   }
 });
 
+test('gemini-client: redacts secrets from every debug response body', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'gcm-debug-response-redaction-'));
+  const debugPath = join(directory, '.debug.log');
+  const githubKey = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';
+  const googleKey = 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O';
+  const ordinaryText = 'ordinary response text stays visible';
+  async function fetchStub(): Promise<Response> {
+    return new Response(
+      JSON.stringify({
+        candidates: [
+          { content: { parts: [{ text: `${ordinaryText} ${githubKey} ${googleKey}` }] } },
+        ],
+      }),
+    );
+  }
+
+  try {
+    const client = createGeminiClient({
+      fetchImpl: fetchStub as unknown as typeof fetch,
+      config: { DEBUG_API: true, DEBUG_FILE: debugPath, DEBUG_MAX_BODY_LOG_BYTES: 65_536 },
+    });
+    await client.callGemini({
+      apiKey: 'fake-key',
+      userContent: 'safe request',
+      telemetryMeta: {},
+      callOptions: {},
+    });
+    await Bun.sleep(10);
+    const debugLog = await readFile(debugPath, 'utf8');
+    expect(debugLog).toContain('API RESPONSE:');
+    expect(debugLog).toContain('API RESPONSE BODY (pretty-printed):');
+    expect(debugLog.match(new RegExp(ordinaryText, 'g'))).toHaveLength(2);
+    expect(debugLog.match(/\[REDACTED-KEY\]/g)).toHaveLength(4);
+    expect(debugLog).not.toContain(githubKey);
+    expect(debugLog).not.toContain(googleKey);
+    expect(debugLog).not.toContain('[TRUNCATED]');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('gemini-client: redacts debug response secrets before applying the byte cap', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'gcm-debug-response-cap-redaction-'));
+  const debugPath = join(directory, '.debug.log');
+  const githubKey = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';
+  const maxBodyBytes = 55;
+  async function fetchStub(): Promise<Response> {
+    return new Response(
+      JSON.stringify({ candidates: [{ content: { parts: [{ text: githubKey }] } }] }),
+    );
+  }
+
+  try {
+    const client = createGeminiClient({
+      fetchImpl: fetchStub as unknown as typeof fetch,
+      config: {
+        DEBUG_API: true,
+        DEBUG_FILE: debugPath,
+        DEBUG_MAX_BODY_LOG_BYTES: maxBodyBytes,
+      },
+    });
+    await client.callGemini({
+      apiKey: 'fake-key',
+      userContent: 'safe request',
+      telemetryMeta: {},
+      callOptions: {},
+    });
+    await Bun.sleep(10);
+    const debugLog = await readFile(debugPath, 'utf8');
+    const cappedBody =
+      /API RESPONSE BODY \(pretty-printed\):\n([\s\S]*?\.\.\.\[TRUNCATED\])\n\n/.exec(
+        debugLog,
+      )?.[1];
+    expect(cappedBody).toBeDefined();
+    expect(debugLog).not.toContain('ghp_012');
+    const payload = (cappedBody ?? '').replace(/\.\.\.\[TRUNCATED\]$/, '');
+    expect(new TextEncoder().encode(payload).byteLength).toBeLessThanOrEqual(maxBodyBytes);
+    expect(payload).not.toContain('\uFFFD');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('gemini-client: caps debug bodies at UTF-8 character boundaries', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'gcm-debug-utf8-body-'));
   const debugPath = join(directory, '.debug.log');

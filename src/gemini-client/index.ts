@@ -5,8 +5,8 @@ import type { Logger, LoggerConfig, LogMetadata } from '../logger.js';
 import { tryParseJSON, parseCandidates } from './parsers.js';
 import { addJitterWithinCap, getRetryMsFromResponse } from './backoff.js';
 import { buildRequestBody } from './requestBuilder.js';
-import { GeminiApiError } from './errors.js';
-import { unescapeNewlinesInText } from '../utils.js';
+import { createGeminiApiError, isGeminiApiError } from './errors.js';
+import { redactSensitiveText, unescapeNewlinesInText } from '../utils.js';
 import { DEFAULT_MAX_DEBUG_LOG_BYTES, MAX_DEBUG_LOG_BYTES } from '../constants.js';
 import { normalizeRetryConfig, stringOrDefault } from '../config-values.js';
 import {
@@ -162,7 +162,7 @@ async function openDebugWriter(
 }
 
 function shouldRetryClientError(error: unknown): boolean {
-  if (error instanceof GeminiApiError) return false;
+  if (isGeminiApiError(error)) return false;
   const errStr = String(error);
   if (/invalid json|returned no text/i.test(errStr)) return false;
   return /aborted|network|fetch|timed?\s*out|econnreset|enotfound|eai_again/i.test(errStr);
@@ -205,7 +205,9 @@ function createDebugLogger(config: Partial<typeof CONFIG>): (label: string, data
 
   return function writeDebug(label: string, data: unknown): void {
     const timestamp = new Date().toISOString();
-    const entry = `[${timestamp}] ${label}:\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n\n`;
+    const serialized =
+      typeof data === 'string' ? data : (JSON.stringify(data, null, 2) ?? String(data));
+    const entry = `[${timestamp}] ${label}:\n${redactSensitiveText(serialized)}\n\n`;
     if (!writer) {
       if (config.DEBUG_API && config.DEBUG_FILE) pending.push(entry);
       return;
@@ -216,7 +218,9 @@ function createDebugLogger(config: Partial<typeof CONFIG>): (label: string, data
 }
 
 function capDebugBody(data: unknown, maxLog: number): string {
-  const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  const serialized =
+    typeof data === 'string' ? data : (JSON.stringify(data, null, 2) ?? String(data));
+  const text = redactSensitiveText(serialized);
   const bytes = new TextEncoder().encode(text);
   if (bytes.length <= maxLog) return text;
   let end = maxLog;
@@ -336,7 +340,7 @@ async function handleHttpFailure(
     return 'retry';
   }
   deps.logger.log('error', 'Gemini API failed: ' + String(res.status), { text: textRes, attempt });
-  throw new GeminiApiError('Gemini API failed: ' + String(res.status), {
+  throw createGeminiApiError('Gemini API failed: ' + String(res.status), {
     status: res.status,
     snippet: textRes.slice(0, 256),
   });
@@ -410,13 +414,13 @@ async function handleSuccessfulResponse(
     json?.promptFeedback?.blockReason &&
     json.promptFeedback.blockReason !== 'BLOCK_REASON_UNSPECIFIED'
   ) {
-    throw new GeminiApiError('Gemini blocked request: ' + json.promptFeedback.blockReason, {
+    throw createGeminiApiError('Gemini blocked request: ' + json.promptFeedback.blockReason, {
       json,
     });
   }
   const parsed = parseCandidates(json, deps.logger) as
     (GeminiResponse & { truncated?: boolean }) | null;
-  if (!parsed) throw new GeminiApiError('Gemini returned no text', { json });
+  if (!parsed) throw createGeminiApiError('Gemini returned no text', { json });
   if (!(parsed.truncated && opts.retryIfTruncated && truncRetries < truncMaxRetries)) {
     return { retry: false, response: parsed, truncRetries, currentMaxOutputTokens };
   }

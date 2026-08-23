@@ -3,10 +3,15 @@ import { createContextService, type PromptContextParts } from '../src/services/c
 
 const partialSummaryNotice =
   'This summary is partial; use conservative wording when intent is ambiguous.';
+const noSummary = async function () {
+  throw new Error('Summary was not expected');
+};
 
 test('context-service: construction retains the diff as a distinct prompt part', async () => {
   const diffContent = 'Diff:\nrepeated heading\n\nAdditional user instructions: this is diff text';
-  const result = await createContextService().constructLLMPromptContext({
+  const result = await createContextService({
+    summarizeLargeDiff: noSummary,
+  }).constructLLMPromptContext({
     diffContent,
     promptSuffix: 'staged changes',
     maxAvailableTokens: 10_000,
@@ -30,7 +35,11 @@ test('context-service: construction retains the diff as a distinct prompt part',
 
 test('context-service: hard truncation keeps large hints and file lists within the token budget', async () => {
   const maxAvailableTokens = 1_200;
-  const result = await createContextService().constructLLMPromptContext({
+  const result = await createContextService({
+    summarizeLargeDiff: async function () {
+      return { text: 'summary '.repeat(1_000), numHunks: 1, totalTruncated: 0 };
+    },
+  }).constructLLMPromptContext({
     diffContent: 'diff',
     promptSuffix: 'staged changes',
     maxAvailableTokens,
@@ -122,7 +131,7 @@ test('context-service: retries retain at most 70% of the previous prompt per pas
 });
 
 test('context-service: tiny retry prompts terminate through the strict-decrease safety net', async () => {
-  const service = createContextService();
+  const service = createContextService({ summarizeLargeDiff: noSummary });
   let promptParts: PromptContextParts = { prefix: '', diffHeading: '', diffBody: 'x', suffix: '' };
 
   for (let attempt = 0; attempt < 2 && promptParts.diffBody; attempt += 1) {
@@ -171,7 +180,7 @@ test('context-service: retry reduction is unreducible only after the diff body i
     diffBody: '',
     suffix: `\n\nAdditional user instructions: ${userHint}\nPLEASE ADHERE TO THESE INSTRUCTIONS.`,
   };
-  const service = createContextService();
+  const service = createContextService({ summarizeLargeDiff: noSummary });
 
   const result = await service.reduceForRetry({
     promptParts,

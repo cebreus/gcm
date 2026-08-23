@@ -114,7 +114,7 @@ test('exclude-files: diff requests only include non-excluded paths', async () =>
 
   await service.retrieveStagedChanges(null, null, ['.env*']);
 
-  expect(calls).toContainEqual(['diff', '--staged', '-w', '--', 'src/app.ts']);
+  expect(calls).toContainEqual(['diff', '--staged', '-w', '--', ':(literal)src/app.ts']);
 });
 
 test('exclude-files: carries excluded staged paths alongside the analysed snapshot', async () => {
@@ -249,6 +249,34 @@ test('exclude-files: real GitService excludes Unicode paths and keeps newline pa
     expect(committed?.excludedPaths).toEqual([excludedPath]);
     expect(committed?.stagedDiff).toContain('included');
     expect(committed?.stagedDiff).not.toContain('secret');
+  } finally {
+    await rm(repository, { recursive: true, force: true });
+  }
+});
+
+test('exclude-files: real GitService treats staged filenames as literal pathspecs', async () => {
+  const repository = await mkdtemp(join(tmpdir(), 'gcm-literal-pathspec-'));
+  const magicPath = ':(exclude)*';
+  try {
+    await runGitInRepository(repository, ['init', '-q']);
+    await writeFile(join(repository, 'source.ts'), 'ordinary content\n');
+    await writeFile(join(repository, magicPath), 'magic filename content\n');
+    await runGitInRepository(repository, [
+      '--literal-pathspecs',
+      'add',
+      '--',
+      'source.ts',
+      magicPath,
+    ]);
+
+    const service = createGitService({
+      gitCommandRunner: args => spawnGitStream(['-C', repository, ...args]),
+    });
+    const staged = await service.retrieveStagedChanges(null, null);
+
+    expect(staged?.stagedFiles).toEqual([magicPath, 'source.ts']);
+    expect(staged?.stagedDiff).toContain('ordinary content');
+    expect(staged?.stagedDiff).toContain('magic filename content');
   } finally {
     await rm(repository, { recursive: true, force: true });
   }

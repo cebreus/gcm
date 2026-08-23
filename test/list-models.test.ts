@@ -42,3 +42,35 @@ test('cli: --list-models without API key exits with code 1', async () => {
   if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
   else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
 });
+
+test('cli: --list-models uses the injected model list failure contract', async () => {
+  const { executeCommitMessageGeneration } = await import('../src/runner.js');
+  const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+  const originalExitCode = process.exitCode;
+  const originalStdoutWrite = process.stdout.write;
+  const injectedListModels = mock(() => Promise.reject(new Error('boom')));
+  const stdoutChunks: string[] = [];
+  let exitCode: number | undefined;
+
+  process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
+  process.exitCode = undefined;
+  process.stdout.write = mock((chunk: string | Uint8Array) => {
+    stdoutChunks.push(String(chunk));
+    return true;
+  }) as unknown as typeof process.stdout.write;
+  try {
+    await expect(
+      executeCommitMessageGeneration(['--list-models'], { listModels: injectedListModels }),
+    ).resolves.toBeUndefined();
+    exitCode = Number(process.exitCode);
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+    process.exitCode = originalExitCode;
+    if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+    else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+  }
+
+  expect(injectedListModels).toHaveBeenCalledWith('test-key');
+  expect(stdoutChunks.join('')).toContain('Failed to fetch models: Error: boom');
+  expect(exitCode).toBe(2);
+});

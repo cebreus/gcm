@@ -87,6 +87,10 @@ function buildDiffArgs(commitHash: string | null): string[] {
   return commitHash ? ['show', '--first-parent', '-w', commitHash] : ['diff', '--staged', '-w'];
 }
 
+function literalPathspec(path: string): string {
+  return `:(literal)${path}`;
+}
+
 function decodeGitQuotedPath(path: string): string {
   if (!(path.startsWith('"') && path.endsWith('"'))) return path;
   const escapes: Record<string, string> = {
@@ -230,7 +234,13 @@ async function retrieveStagedChangesWithDeps(params: {
     return null;
   }
   const diff = commitHash
-    ? { result: await deps.gitCommandRunner([...buildDiffArgs(commitHash), '--', ...files]) }
+    ? {
+        result: await deps.gitCommandRunner([
+          ...buildDiffArgs(commitHash),
+          '--',
+          ...files.map(literalPathspec),
+        ]),
+      }
     : await readStableStagedDiff({ deps, files, logger });
   const diffRes = diff.result;
   if (diffRes.truncated) logger?.log('warn', 'Diff output was truncated due to size limits.');
@@ -254,7 +264,11 @@ async function readStableStagedDiff(params: {
     const entries = await getIndexEntriesWithDeps({ deps, logger });
     const beforeDiff = await getIndexTreeWithDeps({ deps, logger });
     if (beforeEntries !== beforeDiff) continue;
-    const result = await deps.gitCommandRunner([...buildDiffArgs(null), '--', ...files]);
+    const result = await deps.gitCommandRunner([
+      ...buildDiffArgs(null),
+      '--',
+      ...files.map(literalPathspec),
+    ]);
     const afterDiff = await getIndexTreeWithDeps({ deps, logger });
     if (beforeDiff === afterDiff) return { result, snapshot: { tree: afterDiff, entries } };
   }
@@ -611,6 +625,9 @@ async function getRepositoryStateWithDeps(params: {
 }): Promise<RepositoryState> {
   const { deps, logger } = params;
   const status = await deps.gitCommandRunner(['status', '--porcelain']);
+  if (status.truncated) {
+    throw new Error('Repository status output was truncated. Reduce the worktree size, then try again.');
+  }
   const parsed = parsePorcelainStatus(status.text);
   const inProgressOperation = await detectInProgressOperation(deps);
   const result: RepositoryState = { ...parsed, inProgressOperation };

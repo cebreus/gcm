@@ -55,6 +55,10 @@ interface CommitMessageResult {
 
 export interface InteractiveGenerationDialogue {
   configure(state: GenerationState, apiKey: string): Promise<'continue' | 'exit'>;
+  handleEmptyStaging(
+    targetCommit: string | null,
+    stagedFilesFromWorktree: readonly string[],
+  ): Promise<'retry' | 'cancel'>;
   review(params: {
     state: GenerationState;
     result: CommitMessageResult;
@@ -279,6 +283,44 @@ export function createInteractiveGenerationDialogue(
 ): InteractiveGenerationDialogue {
   const { prompts } = dependencies;
   return {
+    handleEmptyStaging: async function (targetCommit, stagedFilesFromWorktree) {
+      if (targetCommit) {
+        prompts.cancel(`No changes found in commit ${targetCommit}.`);
+        return 'cancel';
+      }
+
+      const hasWorktreeChanges = stagedFilesFromWorktree.length > 0;
+      const warningLines = hasWorktreeChanges
+        ? [
+            'No files are selected for commit (stage).',
+            'Add files with `git add <files>`, then choose "Re-check changes".',
+            'Or choose "Show split proposal" for a commit split suggestion.',
+          ]
+        : [
+            'No files are selected for commit (stage).',
+            'Worktree is clean. Create or change files, then add them with `git add`.',
+          ];
+      prompts.note(warningLines.join('\n'), 'TIP');
+
+      for (;;) {
+        const action = await prompts.select({
+          message: 'How do you want to proceed?',
+          options: [
+            { value: 'retry', label: 'Re-check changes' },
+            ...(hasWorktreeChanges
+              ? [{ value: 'split', label: 'Show split proposal' as const }]
+              : []),
+            { value: 'cancel', label: 'Cancel' },
+          ],
+        });
+        if (prompts.isCancel(action) || action === 'cancel') return 'cancel';
+        if (action === 'split') {
+          prompts.note(buildAtomicSplitProposal(stagedFilesFromWorktree), 'Atomic split proposal');
+          continue;
+        }
+        return 'retry';
+      }
+    },
     configure: async function (state, apiKey) {
       for (;;) {
         const modeLabel = state.outputMode === 'full' ? 'Full Report' : 'Commit Msg Only';
