@@ -131,7 +131,9 @@ async function getModelSelectionOptions(
 function commitActionLabel(commitCapability: CommitCapability): string {
   const subject = stripTerminalControlSequences(commitCapability.target?.subject ?? '');
   if (commitCapability.mode === 'amend') return `Amend HEAD (${subject})`;
-  if (commitCapability.mode === 'reword') return `Reword via amend! commit (${subject})`;
+  if (commitCapability.mode === 'reword') {
+    return `Reword via amend! commit; manual rebase required (${subject})`;
+  }
   return 'Commit';
 }
 

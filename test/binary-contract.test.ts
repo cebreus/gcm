@@ -11,6 +11,7 @@ let gitRepository = '';
 let nonRepository = '';
 let whitespaceRepository = '';
 let excludeRepository = '';
+let conflictRepository = '';
 
 interface BinaryResult {
   exitCode: number;
@@ -107,6 +108,7 @@ beforeAll(async () => {
   nonRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-not-a-repository-`);
   whitespaceRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-whitespace-`);
   excludeRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-exclude-`);
+  conflictRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-conflict-`);
 
   await runCommand(
     ['bun', 'build', './gcm.ts', '--outfile', binaryPath, '--target=bun', '--minify'],
@@ -115,6 +117,9 @@ beforeAll(async () => {
   for (const repository of [gitRepository, whitespaceRepository, excludeRepository]) {
     await runCommand(['git', 'init', '--quiet'], repository);
   }
+  await runCommand(['git', 'init', '--quiet', '--initial-branch=main'], conflictRepository);
+  await runCommand(['git', 'config', 'user.email', 'test@gcm.local'], conflictRepository);
+  await runCommand(['git', 'config', 'user.name', 'GCM Test'], conflictRepository);
 
   await Bun.write(`${whitespaceRepository}/document.txt`, 'first line\n');
   await runCommand(['git', 'add', 'document.txt'], whitespaceRepository);
@@ -126,6 +131,18 @@ beforeAll(async () => {
   await Bun.write(`${excludeRepository}/-generated/sentinel.txt`, 'do not send\n');
   await Bun.write(`${excludeRepository}/included.txt`, 'send this\n');
   await runCommand(['git', 'add', '--', '-generated/sentinel.txt', 'included.txt'], excludeRepository);
+
+  await Bun.write(`${conflictRepository}/file.txt`, 'base\n');
+  await runCommand(['git', 'add', 'file.txt'], conflictRepository);
+  await runCommand(['git', 'commit', '-qm', 'base'], conflictRepository);
+  await runCommand(['git', 'checkout', '-qb', 'other'], conflictRepository);
+  await Bun.write(`${conflictRepository}/file.txt`, 'other\n');
+  await runCommand(['git', 'commit', '-am', 'other', '--quiet'], conflictRepository);
+  await runCommand(['git', 'checkout', '-q', 'main'], conflictRepository);
+  await Bun.write(`${conflictRepository}/file.txt`, 'main\n');
+  await runCommand(['git', 'commit', '-am', 'main', '--quiet'], conflictRepository);
+  const merge = await runSubprocess(['git', 'merge', 'other'], conflictRepository);
+  if (merge.exitCode === 0) throw new Error('Expected test repository merge to conflict.');
 }, 60_000);
 
 afterAll(async () => {
@@ -135,6 +152,7 @@ afterAll(async () => {
     rm(nonRepository, { recursive: true, force: true }),
     rm(whitespaceRepository, { recursive: true, force: true }),
     rm(excludeRepository, { recursive: true, force: true }),
+    rm(conflictRepository, { recursive: true, force: true }),
   ]);
 });
 
@@ -179,6 +197,17 @@ test('binary contract: reports a missing Gemini API key', async () => {
 
   expect(result.exitCode).not.toBe(0);
   expect(result.stdout).toContain('GOOGLE_GEMINI_API_KEY');
+  expect(result.stderr).toBe('');
+});
+
+test('binary contract: reports conflicts before showing settings', async () => {
+  const result = await runBinary([], conflictRepository, 'not-a-real-key');
+
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stdout).toContain(
+    'Git index has unresolved conflicts. Resolve conflicts before generating or committing.',
+  );
+  expect(result.stdout).not.toContain('Settings:');
   expect(result.stderr).toBe('');
 });
 

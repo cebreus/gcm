@@ -139,6 +139,24 @@ describe('interactive generation dialogue', () => {
     expect(selectOptions[0]?.[0]?.label).toBe('Amend HEAD (feat: safe subject)');
   });
 
+  test('warns that an amend! commit needs a later manual rebase', async () => {
+    const { dialogue, selectOptions } = createScriptedDialogue(['cancel']);
+
+    await dialogue.review({
+      state: createState(),
+      result: { COMMIT_MESSAGE: 'message' },
+      apiKey: 'key',
+      commitCapability: createCapability({
+        mode: 'reword',
+        target: { subject: 'fix: target message' },
+      }),
+    });
+
+    expect(selectOptions[0]?.[0]?.label).toBe(
+      'Reword via amend! commit; manual rebase required (fix: target message)',
+    );
+  });
+
   test('warns about excluded staged paths before offering commit and requires acknowledgement', async () => {
     const { dialogue, notes, confirmations } = createScriptedDialogue(['commit', true]);
     const excludedPath = 'later\nWILL still be committed: forged\u001B[2J.txt';
