@@ -1,8 +1,7 @@
 import type { GeminiClient, GeminiResponse } from '../gemini-client.js';
 import type { Logger, LogMetadata } from '../logger.js';
-import { createContextService } from './context-service.js';
 import { renderPromptContext } from './context-service.js';
-import type { ContextService, PromptContextParts } from './context-service.js';
+import type { PromptContextParts, RetryReductionResult } from './context-service.js';
 import { CONFIG } from '../../gcm.config.js';
 
 export interface GeminiService {
@@ -13,7 +12,6 @@ export interface GeminiServiceDeps {
   client: GeminiClient;
   logger: Logger;
   apiKey: string;
-  contextService?: ContextService;
   sleep?: (milliseconds: number) => Promise<unknown>;
 }
 
@@ -30,7 +28,10 @@ interface CallGeminiApiParams {
   promptParts?: PromptContextParts;
   summaryAttempted?: boolean;
   systemPrompt: string;
-  stagedFiles: string[];
+  reduceForRetry(params: {
+    promptParts: PromptContextParts;
+    summaryAttempted: boolean;
+  }): Promise<RetryReductionResult>;
   meta: LogMetadata;
   opts?: CallGeminiOptions;
 }
@@ -43,13 +44,12 @@ interface CallLoopState {
 }
 
 interface GeminiServiceRuntimeDeps extends GeminiServiceDeps {
-  contextService: ContextService;
   sleep: (milliseconds: number) => Promise<unknown>;
 }
 
 async function handleContextOverflow(params: {
   deps: GeminiServiceRuntimeDeps;
-  stagedFiles: string[];
+  reduceForRetry: CallGeminiApiParams['reduceForRetry'];
   promptParts: PromptContextParts;
   maxOutputTokens: number;
   attempt: number;
@@ -60,10 +60,9 @@ async function handleContextOverflow(params: {
   maxOutputTokens: number;
   summaryAttempted: boolean;
 } | null> {
-  const { deps, stagedFiles, promptParts, maxOutputTokens, attempt, summaryAttempted } = params;
-  const result = await deps.contextService.reduceForRetry({
+  const { deps, reduceForRetry, promptParts, maxOutputTokens, attempt, summaryAttempted } = params;
+  const result = await reduceForRetry({
     promptParts,
-    stagedFiles,
     summaryAttempted,
   });
   if (result.mode === 'unreducible') return null;
@@ -120,16 +119,16 @@ async function maybeHandleOverflow(params: {
   err: unknown;
   attempt: number;
   maxAttempts: number;
-  stagedFiles: string[];
+  reduceForRetry: CallGeminiApiParams['reduceForRetry'];
   loopState: CallLoopState;
 }): Promise<boolean> {
-  const { deps, err, attempt, maxAttempts, stagedFiles, loopState } = params;
+  const { deps, err, attempt, maxAttempts, reduceForRetry, loopState } = params;
   const errStr = String(err);
   const isMaxTokens = /MAX_TOKENS/i.test(errStr) || /returned no text/i.test(errStr);
   if (!(isMaxTokens && attempt < maxAttempts)) return false;
   const result = await handleContextOverflow({
     deps,
-    stagedFiles,
+    reduceForRetry,
     promptParts: loopState.promptParts,
     maxOutputTokens: loopState.maxOutputOverride,
     attempt,
@@ -149,7 +148,7 @@ async function callGeminiAPIWithDeps(params: {
   promptParts?: PromptContextParts;
   summaryAttempted?: boolean;
   systemPrompt: string;
-  stagedFiles: string[];
+  reduceForRetry: CallGeminiApiParams['reduceForRetry'];
   meta: LogMetadata;
   opts?: CallGeminiOptions;
 }): Promise<GeminiResponse | null> {
@@ -159,7 +158,7 @@ async function callGeminiAPIWithDeps(params: {
     promptParts,
     summaryAttempted,
     systemPrompt,
-    stagedFiles,
+    reduceForRetry,
     meta,
     opts,
   } = params;
@@ -194,7 +193,7 @@ async function callGeminiAPIWithDeps(params: {
         err,
         attempt,
         maxAttempts,
-        stagedFiles,
+        reduceForRetry,
         loopState,
       });
       if (handled) continue;
@@ -207,14 +206,12 @@ export function createGeminiService({
   client,
   logger,
   apiKey,
-  contextService = createContextService(),
   sleep = Bun.sleep,
 }: GeminiServiceDeps): GeminiService {
   const deps: GeminiServiceRuntimeDeps = {
     client,
     logger,
     apiKey,
-    contextService,
     sleep,
   };
   return {

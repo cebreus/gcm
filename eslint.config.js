@@ -64,4 +64,56 @@ export default [
       ],
     },
   },
+  {
+    files: [
+      'src/atomic-commit-planner.ts',
+      'src/config-values.ts',
+      'src/constants.ts',
+      'src/diff-summary.ts',
+      'src/model-registry.ts',
+      'src/scope-detector.ts',
+      'src/parser.ts',
+      'src/runner-utils.ts',
+      'src/utils.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['fs', 'fs/*', 'node:fs', 'node:fs/*', 'child_process', 'node:child_process'],
+              message: 'Use Bun.file, Bun.write, or Bun.spawn instead.',
+            },
+            {
+              group: [
+                './services/*',
+                '../services/*',
+                './git-utils',
+                './git-utils.*',
+                '../git-utils',
+                '../git-utils.*',
+                './session',
+                './session.*',
+                '../session',
+                '../session.*',
+                '../gcm.config',
+                '../gcm.config.*',
+                '../../gcm.config',
+                '../../gcm.config.*',
+                '@clack/prompts',
+                'bun:*',
+              ],
+              message: 'Pure core modules cannot import I/O or adapter modules.',
+            },
+          ],
+        },
+      ],
+      'no-restricted-globals': [
+        'error',
+        { name: 'Bun', message: 'Pure core modules cannot use Bun I/O.' },
+        { name: 'fetch', message: 'Pure core modules cannot use HTTP.' },
+      ],
+    },
+  },
 ];

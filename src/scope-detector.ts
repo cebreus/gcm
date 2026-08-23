@@ -1,97 +1,45 @@
-import { spawnGitStream } from './git-utils.js';
-import { detectRepoType } from './utils.js';
-
 export interface CommitContextHints {
   scopeSuggestions: string[];
   recentCommitSubjects: string[];
 }
 
-async function getScopesFromHistory(files: string[], depth = 50): Promise<string[]> {
-  if (!files.length) return [];
-  try {
-    const { text } = await spawnGitStream([
-      'log',
-      `-n`,
-      `${depth}`,
-      '--pretty=format:%s',
-      '--',
-      ...files,
-    ]);
-
-    const scopes = new Set<string>();
-    const regex = /^[a-z]+\(([^)]+)\):/;
-
-    for (const line of text.split('\n')) {
-      const match = line.match(regex);
-      if (match?.[1]) {
-        scopes.add(match[1].trim());
-      }
-    }
-    return Array.from(scopes);
-  } catch {
-    return [];
-  }
+export interface CommitContextFacts {
+  scopeHistorySubjects: string[];
+  recentSubjects: string[];
+  repoType: 'monorepo' | 'single';
 }
 
-async function getRecentCommitSubjects(files: string[], depth = 20, limit = 10): Promise<string[]> {
-  if (!files.length) return [];
-  try {
-    const { text } = await spawnGitStream([
-      'log',
-      `-n`,
-      `${depth}`,
-      '--pretty=format:%s',
-      '--',
-      ...files,
-    ]);
-
-    const subjects = new Set<string>();
-    for (const line of text.split('\n')) {
-      const subject = line.trim();
-      if (subject) subjects.add(subject);
-      if (subjects.size >= limit) break;
-    }
-    return Array.from(subjects);
-  } catch {
-    return [];
-  }
-}
-
-function getPathBasedScope(file: string, repoType: 'monorepo' | 'single'): string | null {
+function getPathScope(file: string, repoType: CommitContextFacts['repoType']): string | null {
   if (repoType === 'monorepo') {
-    const workspaceMatch = /^(apps|packages|sites|tools)\/([^/]+)/.exec(file);
-    if (workspaceMatch?.[2]) return workspaceMatch[2];
+    const workspace = /^(apps|packages|sites|tools)\/([^/]+)/.exec(file);
+    if (workspace?.[2]) return workspace[2];
   }
-
-  if (/^\.github\//.test(file)) return 'ci';
+  if (file.startsWith('.github/')) return 'ci';
   if (/^(infra|scripts)\//.test(file)) return 'dx';
   if (/^(package\.json|pnpm-lock\.yaml|bun\.lock|tsconfig\.json)$/.test(file)) return 'build';
-
   const parts = file.split('/');
-  if (parts.length > 1 && parts[0] === 'src') return parts[1];
-  return null;
+  return parts[0] === 'src' && parts.length > 1 ? (parts[1] ?? null) : null;
 }
 
-function getScopesFromPaths(changedFiles: string[], repoType: 'monorepo' | 'single'): string[] {
+export function getCommitContextHints(
+  changedFiles: string[],
+  facts: CommitContextFacts,
+): CommitContextHints {
+  if (changedFiles.length === 0) return { scopeSuggestions: [], recentCommitSubjects: [] };
   const scopes = new Set<string>();
-  for (const file of changedFiles) {
-    const scope = getPathBasedScope(file, repoType);
+  for (const subject of facts.scopeHistorySubjects) {
+    const scope = /^[a-z]+\(([^)]+)\):/.exec(subject)?.[1]?.trim();
     if (scope) scopes.add(scope);
   }
-  return Array.from(scopes);
-}
-
-export async function getCommitContextHints(changedFiles: string[]): Promise<CommitContextHints> {
-  const allScopes = new Set<string>();
-
-  const historicalScopes = await getScopesFromHistory(changedFiles, 50);
-  historicalScopes.forEach(scope => allScopes.add(scope));
-
-  const repoType = await detectRepoType();
-  getScopesFromPaths(changedFiles, repoType).forEach(scope => allScopes.add(scope));
-
-  return {
-    scopeSuggestions: Array.from(allScopes),
-    recentCommitSubjects: await getRecentCommitSubjects(changedFiles),
-  };
+  for (const file of changedFiles) {
+    const scope = getPathScope(file, facts.repoType);
+    if (scope) scopes.add(scope);
+  }
+  const subjects = new Set<string>();
+  for (const line of facts.recentSubjects) {
+    const subject = line.trim();
+    if (subject) subjects.add(subject);
+    if (subjects.size === 10) break;
+  }
+  return { scopeSuggestions: [...scopes], recentCommitSubjects: [...subjects] };
 }

@@ -153,7 +153,7 @@ test('integration: end-to-end - stage files -> generate commit message', async (
     logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
-  const contextService = createContextService(); // Use real context service
+  const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
   await runnerRun([], {
     logger: mockLoggerInstance,
@@ -163,7 +163,10 @@ test('integration: end-to-end - stage files -> generate commit message', async (
   });
 
   expect(mockCallGemini).toHaveBeenCalled();
-  expect(mockGetCommitContextHints).toHaveBeenCalledWith(['file1.ts', 'file2.js']);
+  expect(mockGetCommitContextHints).toHaveBeenCalledWith(
+    ['file1.ts', 'file2.js'],
+    expect.any(Object),
+  );
 });
 
 test('integration: end-to-end - analyze specific commit', async () => {
@@ -173,7 +176,7 @@ test('integration: end-to-end - analyze specific commit', async () => {
     logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
-  const contextService = createContextService();
+  const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
   await runnerRun(['-c', 'a1b2c3d'], {
     logger: mockLoggerInstance,
@@ -183,7 +186,7 @@ test('integration: end-to-end - analyze specific commit', async () => {
   });
 
   expect(mockCallGemini).toHaveBeenCalled();
-  expect(mockGetCommitContextHints).toHaveBeenCalledWith(['src/index.js']);
+  expect(mockGetCommitContextHints).toHaveBeenCalledWith(['src/index.js'], expect.any(Object));
 });
 
 test('integration: token limit scenario - should trigger fallback', async () => {
@@ -199,7 +202,7 @@ test('integration: token limit scenario - should trigger fallback', async () => 
     logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
-  const contextService = createContextService();
+  const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
   await runnerRun([], {
     logger: mockLoggerInstance,
@@ -234,7 +237,7 @@ test('integration: should handle various file types', async () => {
     logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
-  const contextService = createContextService();
+  const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
   await runnerRun([], {
     logger: mockLoggerInstance,
@@ -243,11 +246,10 @@ test('integration: should handle various file types', async () => {
     contextService,
   });
 
-  expect(mockGetCommitContextHints).toHaveBeenCalledWith([
-    'src/component.tsx',
-    'styles/main.css',
-    'README.md',
-  ]);
+  expect(mockGetCommitContextHints).toHaveBeenCalledWith(
+    ['src/component.tsx', 'styles/main.css', 'README.md'],
+    expect.any(Object),
+  );
   expect(mockCallGemini).toHaveBeenCalled();
 });
 
@@ -258,7 +260,7 @@ test('integration: should handle concurrent execution safety', async () => {
     logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
-  const contextService = createContextService();
+  const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
   const results = await Promise.all([
     runnerRun([], {
@@ -302,7 +304,7 @@ test('integration: should not send whitespace-only staged changes to AI', async 
     logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
-  const contextService = createContextService();
+  const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
   const originalExitCode = process.exitCode;
   process.exitCode = undefined;
 
@@ -352,7 +354,7 @@ test('integration: should handle real git repository state', async () => {
     logger: mockLoggerInstance,
     apiKey: 'test-key',
   });
-  const contextService = createContextService();
+  const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
   await runnerRun([], {
     logger: mockLoggerInstance,

@@ -29,11 +29,14 @@ export interface ParsedOptions {
   exclude: string[];
 }
 
-export class ArgumentValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ArgumentValidationError';
-  }
+function createArgumentValidationError(message: string): Error {
+  const error = new Error(message);
+  error.name = 'ArgumentValidationError';
+  return error;
+}
+
+export function isArgumentValidationError(error: unknown): error is Error {
+  return error instanceof Error && error.name === 'ArgumentValidationError';
 }
 
 function isOutputMode(value: string): value is OutputMode {
@@ -42,7 +45,7 @@ function isOutputMode(value: string): value is OutputMode {
 
 function validateOutputMode(value: string): void {
   if (!isOutputMode(value)) {
-    throw new ArgumentValidationError(
+    throw createArgumentValidationError(
       `Invalid value for --mode: ${value}. Expected one of: ${outputModes.join(', ')}`,
     );
   }
@@ -98,7 +101,7 @@ function validateValueFlag(
   value: string | undefined,
 ): void {
   if (aliases.at(-1) !== valueFlag) {
-    throw new ArgumentValidationError(`Value-taking flag must be last in cluster: ${flag}`);
+    throw createArgumentValidationError(`Value-taking flag must be last in cluster: ${flag}`);
   }
   const isExcludePattern = flagsByAlias.get(valueFlag)?.name === 'exclude';
   if (
@@ -106,7 +109,7 @@ function validateValueFlag(
     value === '--' ||
     (value.startsWith('-') && (!isExcludePattern || flagsByAlias.has(value)))
   ) {
-    throw new ArgumentValidationError(`Missing value for flag: ${valueFlag}`);
+    throw createArgumentValidationError(`Missing value for flag: ${valueFlag}`);
   }
 }
 
@@ -119,7 +122,7 @@ function validateValueDefinition(
   if (!definition) return;
   definition.validateValue?.(value);
   if (!definition.allowsRepeat && seenValueFlags.has(definition.name)) {
-    throw new ArgumentValidationError(`Flag may only be specified once: --${definition.name}`);
+    throw createArgumentValidationError(`Flag may only be specified once: --${definition.name}`);
   }
   seenValueFlags.add(definition.name);
 }
@@ -132,10 +135,10 @@ function validateArgs(argv: string[]): void {
     if (argument === '-' || !argument.startsWith('-')) continue;
     const equalsIndex = argument.indexOf('=');
     const flag = equalsIndex === -1 ? argument : argument.slice(0, equalsIndex);
-    if (flag === '-') throw new ArgumentValidationError('Unknown flag: -');
+    if (flag === '-') throw createArgumentValidationError('Unknown flag: -');
     const aliases = aliasesForFlag(flag);
     const unknownFlag = findUnknownFlag(aliases);
-    if (unknownFlag) throw new ArgumentValidationError(`Unknown flag: ${unknownFlag}`);
+    if (unknownFlag) throw createArgumentValidationError(`Unknown flag: ${unknownFlag}`);
     const valueFlag = findValueFlag(aliases);
     if (!valueFlag) continue;
     const value = equalsIndex === -1 ? argv[index + 1] : argument.slice(equalsIndex + 1);

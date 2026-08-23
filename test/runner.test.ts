@@ -8,7 +8,12 @@ const mockIntro = mock();
 const mockOutro = mock();
 const mockSpinner = mock(() => ({ start: mock(), stop: mock() }));
 const mockNote = mock();
-const mockSelect = mock((arg: { message: string }) => {
+interface MockSelectRequest {
+  message: string;
+  options?: { value: string }[];
+}
+
+const mockSelect = mock((arg: MockSelectRequest) => {
   console.log('Unexpected Select:', arg.message);
   return Promise.resolve('cancel');
 });
@@ -113,7 +118,7 @@ describe('Refactored Runner', () => {
     mockSpinner.mockClear();
     mockNote.mockClear();
     mockSelect.mockReset();
-    mockSelect.mockImplementation((arg: { message: string }) => {
+    mockSelect.mockImplementation((arg: MockSelectRequest) => {
       console.log('Unexpected Select:', arg.message);
       return Promise.resolve('cancel');
     });
@@ -589,6 +594,73 @@ describe('Refactored Runner', () => {
     }
   });
 
+  test('Should keep generation read-only while a rebase is in progress', async () => {
+    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    mockGitService.commitChanges.mockClear();
+    mockGitService.amendCommit.mockClear();
+    mockGitService.rewordCommit.mockClear();
+    mockSaveSession.mockClear();
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['file.ts'],
+      truncated: false,
+      snapshot: { tree: 'index-tree', entries: [] },
+    });
+    mockGitService.getRepositoryState.mockResolvedValue({
+      hasStagedChanges: true,
+      hasUnstagedChanges: false,
+      hasUntrackedFiles: false,
+      hasUnmergedPaths: false,
+      inProgressOperation: 'rebase',
+      changedFiles: ['file.ts'],
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.callGeminiAPI.mockResolvedValue({
+      text: 'COMMIT_MESSAGE: test message',
+      usage: {},
+    });
+    mockSelect.mockResolvedValueOnce('cancel');
+
+    try {
+      await executeCommitMessageGeneration(
+        ['--mode', 'commit-only', '--model', 'gemini-3.7-flash'],
+        {
+          logger: mockLogger,
+          gitService: mockGitService,
+          contextService: mockContextService,
+          geminiService: mockGeminiService,
+          listModels: mockListModels,
+        },
+      );
+
+      expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledTimes(1);
+      expect(mockNote).toHaveBeenCalledWith(
+        'Commit is disabled while a git rebase is in progress. Finish or abort the operation first.',
+        'Commit unavailable',
+      );
+      const reviewRequest = mockSelect.mock.calls
+        .map(function ([request]) {
+          return request;
+        })
+        .find(function (request) {
+          return request.message === 'What would you like to do?';
+        });
+      expect(reviewRequest?.options?.some(({ value }) => value === 'commit')).toBe(false);
+      expect(mockGitService.commitChanges).not.toHaveBeenCalled();
+      expect(mockGitService.amendCommit).not.toHaveBeenCalled();
+      expect(mockGitService.rewordCommit).not.toHaveBeenCalled();
+      expect(mockSaveSession).not.toHaveBeenCalled();
+    } finally {
+      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+    }
+  });
+
   test('Should stop before settings when the staged snapshot changed', async () => {
     const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
@@ -893,7 +965,7 @@ describe('Refactored Runner', () => {
     );
   });
 
-  test('Should migrate legacy session flash model to faster default', async () => {
+  test('Should use the session model without legacy migration', async () => {
     mockLoadSession.mockResolvedValueOnce({ modelName: 'gemini-2.5-flash', outputMode: null });
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
@@ -921,7 +993,7 @@ describe('Refactored Runner', () => {
 
     expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledWith(
       expect.objectContaining({
-        opts: expect.objectContaining({ modelOverride: 'gemini-3.7-flash' }) as unknown,
+        opts: expect.objectContaining({ modelOverride: 'gemini-2.5-flash' }) as unknown,
       }),
     );
   });

@@ -1,4 +1,4 @@
-import { redactSensitiveText } from './utils.js';
+import { redactSensitiveText, stripTerminalControlSequences } from './utils.js';
 import { stringOrDefault } from './config-values.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -31,14 +31,16 @@ function writeStderrLine(text: string): void {
 
 function sanitiseTextForLogs(text: string, maxLen = 256): string {
   if (!text || typeof text !== 'string') return text;
-  const out = redactSensitiveText(text);
+  const out = stripTerminalControlSequences(
+    redactSensitiveText(text).replace(/(key|token|pass|secret)=[^&\s]+/gi, '$1=[REDACTED]'),
+  );
   if (out.length > maxLen) return out.substring(0, maxLen) + '...[TRUNCATED]';
   return out;
 }
 
 function redactForLogs(value: unknown): unknown {
   if (typeof value === 'string') {
-    return value.replace(/(key|token|pass|secret)=[^&\s]+/gi, '$1=[REDACTED]');
+    return sanitiseTextForLogs(value);
   }
   if (typeof value === 'object' && value !== null) {
     const output: LogMetadata = {};

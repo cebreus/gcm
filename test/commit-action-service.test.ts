@@ -1,10 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { createCommitActionService, type IndexEntry } from '../src/commit-action-service.js';
-import type { CommitTarget, GitService, RepositoryState } from '../src/services/git-service.js';
+import { createCommitActionService } from '../src/commit-action-service.js';
+import type {
+  CommitTarget,
+  GitService,
+  IndexEntry,
+  RepositoryState,
+} from '../src/services/git-service.js';
 import { createGitService } from '../src/services/git-service.js';
 import { spawnGitStream } from '../src/git-utils.js';
 
@@ -113,6 +118,21 @@ describe('commit action service', () => {
     });
 
     expect(inspection.observedSnapshotInvalid).toBe(true);
+  });
+
+  test('keeps a stable snapshot and the exact rebase capability reason', async () => {
+    const repositoryState = { ...CLEAN, inProgressOperation: 'rebase' as const };
+    const fake = createFakeGitService({ states: [repositoryState, repositoryState] });
+    const actions = createActionService(fake.service);
+    const snapshot = { tree: 'tree', entries: entries('first.ts') };
+
+    const inspection = await actions.inspect(null, snapshot);
+
+    expect(inspection.capability.snapshot).toEqual(snapshot);
+    expect(inspection.capability.allowed).toBe(false);
+    expect(inspection.capability.reason).toBe(
+      'Commit is disabled while a git rebase is in progress. Finish or abort the operation first.',
+    );
   });
 
   test('stops when an observed snapshot cannot be verified and refreshes conflicts', async () => {
@@ -367,6 +387,50 @@ test('integration: refuses staging drift without creating a commit', async () =>
     expect((await runGit(repository, ['rev-list', '--count', 'HEAD'])).trim()).toBe('1');
     expect(writeEntered).toBe(false);
   } finally {
+    await rm(repository, { recursive: true, force: true });
+  }
+});
+
+test('integration: keeps a stable snapshot read-only during a rebase', async () => {
+  const repository = await mkdtemp(join(tmpdir(), 'gcm-rebase-action-'));
+  const previousDirectory = process.cwd();
+  let writeEntered = false;
+  try {
+    await runGit(repository, ['init', '-q']);
+    await runGit(repository, ['config', 'user.email', 'test@gcm.local']);
+    await runGit(repository, ['config', 'user.name', 'GCM Test']);
+    await writeFile(join(repository, 'base.ts'), 'export const base = true;\n');
+    await runGit(repository, ['add', 'base.ts']);
+    await runGit(repository, ['commit', '-qm', 'chore: base']);
+    await writeFile(join(repository, 'first.ts'), 'export const first = true;\n');
+    await runGit(repository, ['add', 'first.ts']);
+    process.chdir(repository);
+
+    const gitService = createGitService({
+      gitCommandRunner: function (args) {
+        if (args[0] === 'commit') writeEntered = true;
+        return spawnGitStream(args);
+      },
+    });
+    const actions = createActionService(gitService);
+    const staged = await gitService.retrieveStagedChanges(null, null);
+    if (!staged?.snapshot) throw new Error('Expected a stable staged snapshot');
+    await mkdir(join(repository, '.git', 'rebase-merge'));
+
+    const inspection = await actions.inspect(null, staged.snapshot);
+
+    expect(inspection.repositoryState?.inProgressOperation).toBe('rebase');
+    expect(inspection.capability.snapshot).toEqual(staged.snapshot);
+    expect(inspection.capability.reason).toBe(
+      'Commit is disabled while a git rebase is in progress. Finish or abort the operation first.',
+    );
+    await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow(
+      'Commit is disabled while a git rebase is in progress.',
+    );
+    expect((await runGit(repository, ['rev-list', '--count', 'HEAD'])).trim()).toBe('1');
+    expect(writeEntered).toBe(false);
+  } finally {
+    process.chdir(previousDirectory);
     await rm(repository, { recursive: true, force: true });
   }
 });

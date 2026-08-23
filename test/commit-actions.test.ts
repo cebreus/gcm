@@ -29,6 +29,21 @@ const TARGET: CommitTarget = {
 };
 
 describe('commit actions', () => {
+  test('refuses a truncated repository status', async () => {
+    const gitService = createGitService({
+      gitCommandRunner: async function (args) {
+        if (args[0] === 'status') {
+          return { text: 'M  visible.ts\n', truncated: true };
+        }
+        throw new Error(`unexpected git command: ${args.join(' ')}`);
+      },
+    });
+
+    await expect(gitService.getRepositoryState(null)).rejects.toThrow(
+      'Repository status output was truncated',
+    );
+  });
+
   test('binds a staged diff to a stable index snapshot after one retry', async () => {
     let treeRead = 0;
     let diffRead = 0;

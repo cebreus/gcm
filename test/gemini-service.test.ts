@@ -2,8 +2,15 @@ import { test, expect } from 'bun:test';
 import { createGeminiService } from '../src/services/gemini-service';
 import type { GeminiClient, GeminiResponse } from '../src/gemini-client';
 import { createContextService } from '../src/services/context-service';
-import type { ContextService, PromptContextParts } from '../src/services/context-service';
+import type { PromptContextParts, RetryReductionResult } from '../src/services/context-service';
 import type { Logger } from '../src/logger';
+
+type RetryReductionInput = {
+  promptParts: PromptContextParts;
+  summaryAttempted: boolean;
+};
+
+type ReduceForRetry = (params: RetryReductionInput) => Promise<RetryReductionResult>;
 
 const silentLogger: Logger = { log: () => undefined };
 const noSleep = async function (): Promise<void> {
@@ -48,7 +55,9 @@ async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
   const res = await service.callGeminiAPI({
     promptContext: 'ctx',
     systemPrompt: 'sys',
-    stagedFiles: [],
+    reduceForRetry: async function () {
+      return { mode: 'unreducible' };
+    },
     meta: {},
     opts: {
       retryIfTruncated: true,
@@ -62,7 +71,7 @@ async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
 
 test('gemini-service: retry passthrough on truncated responses', geminiServiceRetryOnTruncatedTest);
 
-test('gemini-service: retry delegates context reduction to ContextService', async () => {
+test('gemini-service: retry delegates context reduction to the call boundary', async () => {
   const promptParts: PromptContextParts = {
     prefix: 'Changed files:\n- src/service.ts\n\n',
     diffHeading: 'Diff:\n',
@@ -71,27 +80,8 @@ test('gemini-service: retry delegates context reduction to ContextService', asyn
   };
   const reductions: Array<{
     promptParts: PromptContextParts;
-    stagedFiles?: string[];
     summaryAttempted: boolean;
   }> = [];
-  const contextService: ContextService = {
-    constructLLMPromptContext: async () => ({
-      promptContext: '',
-      promptParts,
-      processedDiffContent: '',
-      tokens: 0,
-    }),
-    reduceForRetry: async params => {
-      reductions.push(params);
-      return {
-        promptContext: 'reduced context',
-        promptParts: { prefix: '', diffHeading: '', diffBody: 'reduced context', suffix: '' },
-        mode: 'truncation',
-        summaryAttempted: true,
-        summaryUsed: false,
-      };
-    },
-  };
   const userContent: string[] = [];
   let calls = 0;
   const client: GeminiClient = {
@@ -109,20 +99,26 @@ test('gemini-service: retry delegates context reduction to ContextService', asyn
     client,
     logger: silentLogger,
     apiKey: 'fake',
-    contextService,
   });
 
   await service.callGeminiAPI({
     promptContext: 'full context',
     promptParts,
     systemPrompt: 'system',
-    stagedFiles: ['src/service.ts'],
     meta: {},
+    reduceForRetry: async (params: RetryReductionInput) => {
+      reductions.push(params);
+      return {
+        promptContext: 'reduced context',
+        promptParts: { prefix: '', diffHeading: '', diffBody: 'reduced context', suffix: '' },
+        mode: 'truncation',
+        summaryAttempted: true,
+        summaryUsed: false,
+      };
+    },
   });
 
-  expect(reductions).toEqual([
-    { promptParts, stagedFiles: ['src/service.ts'], summaryAttempted: false },
-  ]);
+  expect(reductions).toEqual([{ promptParts, summaryAttempted: false }]);
   expect(userContent).toEqual([
     'Changed files:\n- src/service.ts\n\nDiff:\nfull diff\n\nAdditional user instructions: preserve this',
     'reduced context',
@@ -161,7 +157,6 @@ test('gemini-service: keeps a construction summary and structured context on ove
     },
     logger: silentLogger,
     apiKey: 'fake',
-    contextService,
     sleep: noSleep,
   });
 
@@ -170,8 +165,9 @@ test('gemini-service: keeps a construction summary and structured context on ove
     promptParts: contextResult.promptParts,
     summaryAttempted: contextResult.summaryAttempted,
     systemPrompt: 'system',
-    stagedFiles: ['src/service.ts'],
     meta: {},
+    reduceForRetry: (params: RetryReductionInput) =>
+      contextService.reduceForRetry({ ...params, stagedFiles: ['src/service.ts'] }),
   });
 
   expect(summaryCalls).toBe(1);
@@ -203,7 +199,6 @@ test('gemini-service: retries after emptying a diff below an unreachable proport
     },
     logger: silentLogger,
     apiKey: 'fake',
-    contextService: createContextService(),
     sleep: noSleep,
   });
 
@@ -214,8 +209,12 @@ test('gemini-service: retries after emptying a diff below an unreachable proport
     promptParts,
     summaryAttempted: true,
     systemPrompt: 'system',
-    stagedFiles: [],
     meta: {},
+    reduceForRetry: createContextService({
+      summarizeLargeDiff: async function () {
+        throw new Error('Summary was not expected');
+      },
+    }).reduceForRetry,
   });
 
   expect(promptParts.prefix.length + promptParts.suffix.length).toBeGreaterThan(
@@ -237,20 +236,15 @@ test('gemini-service: retry mode selects its original delay and log message', as
     const delays: number[] = [];
     const messages: string[] = [];
     let calls = 0;
-    const contextService: ContextService = {
-      constructLLMPromptContext: async () => ({
-        promptContext: '',
-        promptParts: { prefix: '', diffHeading: '', diffBody: '', suffix: '' },
-        processedDiffContent: '',
-        tokens: 0,
-      }),
-      reduceForRetry: async () => ({
+    const reduceForRetry: ReduceForRetry = async function () {
+      const result: RetryReductionResult = {
         promptContext: 'retry context',
         promptParts: { prefix: '', diffHeading: '', diffBody: 'retry context', suffix: '' },
         mode,
         summaryAttempted: true,
         summaryUsed: mode === 'summary',
-      }),
+      };
+      return result;
     };
     const service = createGeminiService({
       client: {
@@ -264,7 +258,6 @@ test('gemini-service: retry mode selects its original delay and log message', as
         log: (_level, logMessage) => messages.push(logMessage),
       },
       apiKey: 'fake',
-      contextService,
       sleep: async milliseconds => {
         delays.push(milliseconds);
       },
@@ -273,8 +266,8 @@ test('gemini-service: retry mode selects its original delay and log message', as
     await service.callGeminiAPI({
       promptContext: 'context',
       systemPrompt: 'system',
-      stagedFiles: ['src/service.ts'],
       meta: {},
+      reduceForRetry,
     });
 
     expect(delays).toEqual([delay]);

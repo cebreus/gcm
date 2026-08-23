@@ -7,6 +7,7 @@ Start every reply with `cebreus+gcm`.
 
 - Bun (v1.4+), TypeScript, `minimist`, ESLint, Prettier.
 - Use Bun APIs (`Bun.file`, `Bun.spawn`) for file and process I/O; Node utilities such as `path` and `os` are allowed.
+- Use Bun for dependency installation; Never mix npm or pnpm installs into same `node_modules`.
 
 ## Commands
 
@@ -18,11 +19,12 @@ Start every reply with `cebreus+gcm`.
 
 ## Architecture
 
-- `gcm.ts` is argv/exit-code entry point; `src/runner.ts` orchestrates sessions.
+- `gcm.ts` is argv/exit-code entry point; `src/runner.ts` loads initial session state, composes adapters, and dispatches. `src/generation.ts` owns both generation use cases and saves session state only after successful Git action.
 - `src/interactive-generation-dialogue.ts` owns prompts; `src/commit-action-service.ts` authorizes actions.
 - `src/services/` isolates Git, Gemini, and context I/O; `src/gemini-client/` handles requests, retries, and parsing.
 - Core modules include summarization, scope detection, atomic planning, model limits, CLI parsing, Git process boundaries, and log redaction.
 - `gcm.config.ts` exports `CONFIG`, overridable by `GCM_` environment variables. Tests mirror `src/`; binary tests require fresh build.
+- `CONTEXT.md` owns domain glossary; `docs/user-flow.md` owns behavioral flow diagrams; accepted design decisions live in `docs/adr/`.
 
 ## Rules
 
@@ -39,7 +41,7 @@ Start every reply with `cebreus+gcm`.
 
 ## Workflow
 
-1. Read relevant files in `memories/` and owning implementation before editing.
+1. Read owning implementation before editing.
 2. Use `apply_patch` for edits. Keep scope minimal; use sub-agents only when requested.
 3. For each item: failing test, minimal implementation, focused check, then `bun run test`, `bunx tsc --noEmit`, and `bun run lint`. Report actual output and pre-existing lint errors.
 4. Read diff, grep before deleting, run built binary, and test error paths. Run CLI experiments only in temporary repository.
@@ -48,4 +50,6 @@ Start every reply with `cebreus+gcm`.
 
 - Node API migrations/polyfills; changes to `package.json`, config, or linter settings unless explicitly requested.
 - Refactoring multiple files or changing architecture without user approval.
-- State-mutating Git commands (`add`, `checkout`, `stash`, `reset`, `rebase`, `push`, `worktree`) in this repository.
+- Never change stage without explicit user approval; preserve staged changes.
+- Never run destructive operations without explicit user approval and a verified target.
+- Other state-mutating Git commands (`checkout`, `stash`, `rebase`, `push`, `worktree`) in this repository.

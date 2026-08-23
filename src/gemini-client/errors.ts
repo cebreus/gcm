@@ -1,31 +1,24 @@
 export type GeminiErrorMetadata = Record<string, unknown>;
 
-export class GeminiError extends Error {
-  metadata: GeminiErrorMetadata;
+export type GeminiApiError = Error & { metadata: GeminiErrorMetadata };
 
-  constructor(message: string, metadata: GeminiErrorMetadata = {}) {
-    super(message);
-    this.name = 'GeminiError';
-    this.metadata = metadata;
-    Object.setPrototypeOf(this, GeminiError.prototype);
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, GeminiError);
-    }
-  }
+export function createGeminiApiError(
+  message: string,
+  metadata: GeminiErrorMetadata = {},
+): GeminiApiError {
+  const error = new Error(message) as GeminiApiError;
+  error.name = 'GeminiApiError';
+  error.metadata = metadata;
+  return error;
 }
 
-export class GeminiJsonError extends GeminiError {
-  constructor(message: string, metadata: GeminiErrorMetadata = {}) {
-    super(message, metadata);
-    this.name = 'GeminiJsonError';
-    Object.setPrototypeOf(this, GeminiJsonError.prototype);
-  }
-}
-
-export class GeminiApiError extends GeminiError {
-  constructor(message: string, metadata: GeminiErrorMetadata = {}) {
-    super(message, metadata);
-    this.name = 'GeminiApiError';
-    Object.setPrototypeOf(this, GeminiApiError.prototype);
-  }
+export function isGeminiApiError(error: unknown): error is GeminiApiError {
+  return (
+    error instanceof Error &&
+    error.name === 'GeminiApiError' &&
+    'metadata' in error &&
+    typeof error.metadata === 'object' &&
+    error.metadata !== null &&
+    !Array.isArray(error.metadata)
+  );
 }

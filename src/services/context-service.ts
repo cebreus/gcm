@@ -1,6 +1,5 @@
 import { estimateTokenCount } from '../runner-utils.js';
 import type { Logger } from '../logger.js';
-import { summarizeLargeDiff } from '../summarizer.js';
 
 export interface ContextService {
   constructLLMPromptContext(params: ContextParams): Promise<ContextResult>;
@@ -28,8 +27,14 @@ export type RetryReductionResult =
       summaryUsed: boolean;
     };
 
+interface DiffSummary {
+  text: string;
+  numHunks: number;
+  totalTruncated: number;
+}
+
 interface ContextServiceDeps {
-  summarizeLargeDiff?: typeof summarizeLargeDiff;
+  summarizeLargeDiff(stagedFiles: string[]): Promise<DiffSummary>;
 }
 
 interface ContextParams {
@@ -177,7 +182,7 @@ async function constructLLMPromptContext(
     customHeader,
     userHint,
   }: ContextParams,
-  summarize = summarizeLargeDiff,
+  summarize: ContextServiceDeps['summarizeLargeDiff'],
 ): Promise<ContextResult> {
   const header = buildPromptHeader(promptSuffix, customHeader);
   const changedFilesSection = buildListSection('Changed files', stagedFiles);
@@ -223,7 +228,7 @@ async function constructLLMPromptContext(
   });
 }
 
-function buildRetrySummaryBody(summary: Awaited<ReturnType<typeof summarizeLargeDiff>>): string {
+function buildRetrySummaryBody(summary: DiffSummary): string {
   return (
     summary.text +
     '\n\n' +
@@ -283,7 +288,7 @@ async function reduceForRetry(
     stagedFiles?: string[];
     summaryAttempted: boolean;
   },
-  summarize = summarizeLargeDiff,
+  summarize: ContextServiceDeps['summarizeLargeDiff'],
 ): Promise<RetryReductionResult> {
   const currentPrompt = renderPromptContext(promptParts);
   if (!summaryAttempted && Array.isArray(stagedFiles) && stagedFiles.length > 0) {
@@ -310,8 +315,8 @@ async function reduceForRetry(
 }
 
 export function createContextService({
-  summarizeLargeDiff: summarize = summarizeLargeDiff,
-}: ContextServiceDeps = {}): ContextService {
+  summarizeLargeDiff: summarize,
+}: ContextServiceDeps): ContextService {
   return {
     constructLLMPromptContext: params => constructLLMPromptContext(params, summarize),
     reduceForRetry: params => reduceForRetry(params, summarize),

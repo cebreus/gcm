@@ -1,51 +1,95 @@
-import { test, expect, mock } from 'bun:test';
-
-// DO NOT mock modules globally - this causes issues in other tests.
-// Create mock functions that will be used through dependency injection if possible,
-// or just test the module as-is with the real implementation.
-
-// For scope-detector, we can just test it with real git-utils since the tests
-// are focused on the logic, not the git integration.
+import { expect, test } from 'bun:test';
 
 import { getCommitContextHints } from '../src/scope-detector';
 
-test('scope-detector: should return empty array for empty file list', async () => {
-  const { scopeSuggestions: result } = await getCommitContextHints([]);
-  expect(result).toEqual([]);
+test('returns deterministic empty hints without changed files', () => {
+  expect(
+    getCommitContextHints([], {
+      scopeHistorySubjects: ['feat(core): ignored without changed files'],
+      recentSubjects: ['feat(core): ignored without changed files'],
+      repoType: 'monorepo',
+    }),
+  ).toEqual({ scopeSuggestions: [], recentCommitSubjects: [] });
 });
 
-test('scope-detector: should return scopes for given files', async () => {
-  const files = ['src/some/file1.ts', 'src/another/file2.ts'];
-  const { scopeSuggestions: result } = await getCommitContextHints(files);
+test('deduplicates historical and single-repository path scopes in encounter order', async () => {
+  const result = await getCommitContextHints(
+    [
+      'src/api/index.ts',
+      'src/api/other.ts',
+      '.github/workflows/ci.yml',
+      'package.json',
+      'scripts/release.ts',
+    ],
+    {
+      scopeHistorySubjects: [
+        'feat(core): add command',
+        'fix(core): handle retry',
+        'docs(api): explain endpoint',
+        'plain subject',
+      ],
+      recentSubjects: [
+        'feat(core): add command',
+        'fix(core): handle retry',
+        'docs(api): explain endpoint',
+        'plain subject',
+      ],
+      repoType: 'single',
+    },
+  );
 
-  // Result should be an array (may be empty or populated depending on git history)
-  expect(Array.isArray(result)).toBe(true);
-  // Should be unique values
-  expect(result.length).toBeLessThanOrEqual(result.length);
+  expect(result.scopeSuggestions).toEqual(['core', 'api', 'ci', 'build', 'dx']);
+  expect(result.recentCommitSubjects).toEqual([
+    'feat(core): add command',
+    'fix(core): handle retry',
+    'docs(api): explain endpoint',
+    'plain subject',
+  ]);
 });
 
-// Test that filenames are extracted correctly as fallback
-test('scope-detector: should extract directory names as fallback scopes', async () => {
-  const files = ['apps/app-one/src/index.ts', 'packages/lib-two/src/main.ts'];
-  const { scopeSuggestions: result } = await getCommitContextHints(files);
+test('detects app and package scopes in a monorepo', async () => {
+  const result = await getCommitContextHints(
+    ['apps/web/src/index.ts', 'packages/shared/src/index.ts', 'apps/web/src/other.ts'],
+    { scopeHistorySubjects: [], recentSubjects: [], repoType: 'monorepo' },
+  );
 
-  // Result should include detected scopes or fallback scopes
-  expect(Array.isArray(result)).toBe(true);
+  expect(result.scopeSuggestions).toEqual(['web', 'shared']);
+  expect(result.recentCommitSubjects).toEqual([]);
 });
 
-// Test with simple files in src/ directory
-test('scope-detector: should work with src directory structure', async () => {
-  const files = ['src/feature-a/file.ts', 'src/feature-b/file.ts'];
-  const { scopeSuggestions: result } = await getCommitContextHints(files);
+test('keeps the first ten unique non-empty recent subjects in order', async () => {
+  const historySubjects = [
+    '',
+    'feat(one): first',
+    'feat(one): first',
+    'fix(two): second',
+    'docs: third',
+    'test: fourth',
+    'build: fifth',
+    'ci: sixth',
+    'refactor: seventh',
+    'perf: eighth',
+    'style: ninth',
+    'chore: tenth',
+    'fix: eleventh',
+  ];
 
-  // Result should be an array
-  expect(Array.isArray(result)).toBe(true);
-});
+  const result = await getCommitContextHints(['README.md'], {
+    scopeHistorySubjects: [],
+    recentSubjects: historySubjects,
+    repoType: 'single',
+  });
 
-// Test error handling - should not crash even if git commands fail
-test('scope-detector: should handle errors gracefully', async () => {
-  const files = ['some/file.ts'];
-  // Even if there are errors, should return an array
-  const { scopeSuggestions: result } = await getCommitContextHints(files);
-  expect(Array.isArray(result)).toBe(true);
+  expect(result.recentCommitSubjects).toEqual([
+    'feat(one): first',
+    'fix(two): second',
+    'docs: third',
+    'test: fourth',
+    'build: fifth',
+    'ci: sixth',
+    'refactor: seventh',
+    'perf: eighth',
+    'style: ninth',
+    'chore: tenth',
+  ]);
 });

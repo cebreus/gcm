@@ -8,9 +8,6 @@ import type {
   RepositoryState,
 } from './services/git-service.js';
 
-export type { IndexEntry } from './services/git-service.js';
-export type { IndexSnapshot } from './services/git-service.js';
-
 export interface CommitCapability {
   allowed: boolean;
   mode: 'commit' | 'amend' | 'reword';
@@ -267,9 +264,6 @@ async function inspectTargetCapability(
   if (!repositoryState) return cannotInspectRepository();
   if (repositoryState.hasUnmergedPaths) {
     return cannotInspectIndex(repositoryState, 'Git has unresolved conflicts');
-  }
-  if (repositoryState.inProgressOperation) {
-    return cannotInspectIndex(repositoryState, 'Git has an unfinished operation');
   }
   const target = await inspectTarget(gitService, targetHash, logger);
   return {
