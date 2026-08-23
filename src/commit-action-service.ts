@@ -257,6 +257,27 @@ async function cannotVerifyObservedSnapshot(
   };
 }
 
+async function inspectTargetCapability(
+  gitService: GitService,
+  logger: Logger,
+  targetHash: string | null,
+  snapshot: IndexSnapshot,
+): Promise<CommitActionInspection> {
+  const repositoryState = await inspectRepositoryState(gitService, logger);
+  if (!repositoryState) return cannotInspectRepository();
+  if (repositoryState.hasUnmergedPaths) {
+    return cannotInspectIndex(repositoryState, 'Git has unresolved conflicts');
+  }
+  if (repositoryState.inProgressOperation) {
+    return cannotInspectIndex(repositoryState, 'Git has an unfinished operation');
+  }
+  const target = await inspectTarget(gitService, targetHash, logger);
+  return {
+    repositoryState,
+    capability: { ...evaluateCommitCapability(repositoryState, targetHash, target), snapshot },
+  };
+}
+
 async function writeCommitAction(params: {
   gitService: GitService;
   logger: Logger;
@@ -310,14 +331,7 @@ export function createCommitActionService(params: {
     }
     if (!snapshot)
       return cannotInspectIndex(repositoryState, 'the index changed while it was being checked');
-    if (repositoryState.inProgressOperation) {
-      return cannotInspectIndex(repositoryState, 'Git has an unfinished operation');
-    }
-    const target = await inspectTarget(gitService, targetHash, logger);
-    return {
-      repositoryState,
-      capability: { ...evaluateCommitCapability(repositoryState, targetHash, target), snapshot },
-    };
+    return inspectTargetCapability(gitService, logger, targetHash, snapshot);
   }
 
   async function apply(

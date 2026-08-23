@@ -144,6 +144,22 @@ describe('commit action service', () => {
     expect(fake.writes).toEqual(['commit:feat: first']);
   });
 
+  test('uses repository state refreshed after the index snapshot', async () => {
+    const fake = createFakeGitService({
+      states: [
+        { ...CLEAN, hasStagedChanges: false },
+        { ...CLEAN, hasStagedChanges: true },
+      ],
+      target: { ...TARGET, isHead: true },
+    });
+    const actions = createActionService(fake.service);
+
+    const inspection = await actions.inspect(TARGET.hash);
+
+    expect(inspection.capability.allowed).toBe(false);
+    expect(inspection.capability.reason).toContain('Staged changes');
+  });
+
   test('refuses excluded staged paths until they are explicitly acknowledged', async () => {
     const fake = createFakeGitService({});
     const actions = createActionService(fake.service);
@@ -227,7 +243,11 @@ describe('commit action service', () => {
   test('refuses drift before amend and reword writes', async () => {
     for (const target of [{ ...TARGET, isHead: true, isPublished: false }, TARGET]) {
       const fake = createFakeGitService({
-        states: [{ ...CLEAN, hasStagedChanges: false }, CLEAN],
+        states: [
+          { ...CLEAN, hasStagedChanges: false },
+          { ...CLEAN, hasStagedChanges: false },
+          CLEAN,
+        ],
         trees: ['first-tree', 'first-tree', 'second-tree', 'second-tree'],
         indexEntries: [entries(), entries('later.ts')],
         target,

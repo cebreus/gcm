@@ -195,7 +195,7 @@ After generation, the review menu offers:
 
 - **Commit**: Commit the staged changes with the generated message.
 - **Amend HEAD**: Shown instead when `--commit` targets the current HEAD and that commit has not been published. Replaces its message.
-- **Reword via amend! commit; manual rebase required**: Shown for any other `--commit` target. Selecting it confirms creation of an `amend!` commit carrying the new message. `gcm` never runs the required rebase automatically.
+- **Reword via amend! commit; manual rebase required**: Shown for a reachable older commit or published HEAD when the index and repository are write-safe. Selecting it confirms creation of an `amend!` commit carrying the new message. `gcm` never runs the required rebase automatically.
 - **Copy to clipboard**: Copy the commit message to your system clipboard for later use
 - **Edit message**: Manually edit the commit message before committing
 - **Regenerate**: Generate another result with the same model.
@@ -214,7 +214,7 @@ After generation, the review menu offers:
 | Unresolved conflicts                                                                      | No generation                                        | Stops before Gemini and before any write.                                                      |
 
 - Amend is offered only for a HEAD that no remote branch contains, so published history is never rewritten behind your back. When that cannot be determined, the additive path is taken instead.
-- That answer comes from the remote-tracking refs in your clone, and no fetch is made. A commit that reached the remote another way, or whose remote-tracking ref was pruned or deleted, reads as unpublished and can be amended. Run `git fetch` first when the branch may have moved elsewhere.
+- That answer comes from the remote-tracking refs in your clone, and no fetch is made. When a remote exists but has no tracking refs, `gcm` conservatively treats the commit as published. Run `git fetch` first when the branch may have moved elsewhere.
 - Nothing is offered when the index has staged changes. Both amend and `amend!` would carry them into the target commit, which the generated message does not describe.
 - Nothing is offered for a commit that HEAD cannot reach, or while HEAD is detached. The `amend!` commit is created where HEAD points, so it would never reach a target on another branch, and a commit made on a detached HEAD is orphaned by the next checkout.
 - The reword result prints the exact rebase base to use. When an older commit shares the target's subject, that base is mandatory: `--autosquash` folds into the first subject match in its range, so a wider base hands the new message to the wrong commit.
