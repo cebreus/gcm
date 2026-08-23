@@ -11,7 +11,7 @@ test('requestBuilder: should build a basic request structure', () => {
   expect(body.contents[0].role).toBe('user');
   // Expect markers to be present by default
   expect(body.contents[0].parts[0].text).toBe('<<START>>\ntest content\n<<END>>');
-  expect(body.generationConfig.temperature).toBe(testConfig.TEMPERATURE);
+  expect(body.generationConfig.temperature).toBe(testConfig.TEMP);
   expect(body.generationConfig.maxOutputTokens).toBe(testConfig.MAX_OUTPUT_TOKENS);
   expect(body.systemInstruction.parts[0].text).toContain('<<START>>');
 });
@@ -44,12 +44,12 @@ test('requestBuilder: should include system instructions when provided', () => {
   expect(body.systemInstruction.parts[0].text).toContain('<<START>>');
 });
 
-test('requestBuilder: should use temperature from config', () => {
-  testConfig.TEMPERATURE = 0.5;
+test('requestBuilder: should use temp from config', () => {
+  testConfig.TEMP = 0.5;
   const body = buildRequestBody('test content', testConfig, {}, false);
   expect(body.generationConfig.temperature).toBe(0.5);
   // Reset for other tests
-  testConfig.TEMPERATURE = CONFIG.TEMPERATURE;
+  testConfig.TEMP = CONFIG.TEMP;
 });
 
 test('requestBuilder: should build a valid request body with all options', () => {
@@ -67,14 +67,15 @@ test('requestBuilder: should build a valid request body with all options', () =>
   expect(body.systemInstruction.parts[0].text).toContain(instructions);
   expect(body.systemInstruction.parts[0].text).toContain('<<START>>');
   expect(body.generationConfig).toEqual({
-    temperature: testConfig.TEMPERATURE,
+    temperature: testConfig.TEMP,
     maxOutputTokens: 500,
     thinkingConfig: { thinkingMode: 'THINKING_MODE_EXTENDED' },
   });
 });
 
 test('requestBuilder: redacts secrets from staged diff content without changing ordinary content', () => {
-  const stagedDiff = '+ const apiKey = "sk-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890";\n+ const name = "ordinary";';
+  const stagedDiff =
+    '+ const apiKey = "sk-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890";\n+ const name = "ordinary";';
   const body = buildRequestBody(stagedDiff, testConfig, {}, false);
 
   expect(body.contents[0].parts[0].text).toContain('[REDACTED-KEY]');
@@ -95,7 +96,9 @@ test('requestBuilder: only redacts genuine secrets from outbound content', () =>
   expect(outbound).toContain('sk-optional-flag');
   expect(outbound).toContain('AIzaSyExample1234');
   expect(outbound).not.toContain('AIzaSyD3m0K3yAbCdEfGhIjKlMnOpQrStUvWxYz');
-  expect(outbound).not.toContain('github_pat_11AaaBbbCccDddEeeFffGggHhhIiiJjjKkkLllMmmNnnOooPppQqqRrrSssTttUuuVvvWwwXxxYyyZzz');
+  expect(outbound).not.toContain(
+    'github_pat_11AaaBbbCccDddEeeFffGggHhhIiiJjjKkkLllMmmNnnOooPppQqqRrrSssTttUuuVvvWwwXxxYyyZzz',
+  );
   expect(outbound.match(/\[REDACTED-KEY\]/g)).toHaveLength(2);
 });
 
@@ -110,7 +113,8 @@ test('requestBuilder: redacts every supported genuine secret shape outbound', ()
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvZSJ9.c2lnbmF0dXJlVmFsdWUxMjM0NTY3ODkw',
     '-----BEGIN PRIVATE KEY-----\nsecret material\n-----END PRIVATE KEY-----',
   ];
-  const outbound = buildRequestBody(secrets.join('\n'), testConfig, {}, false).contents[0].parts[0].text;
+  const outbound = buildRequestBody(secrets.join('\n'), testConfig, {}, false).contents[0].parts[0]
+    .text;
 
   for (const secret of secrets) expect(outbound).not.toContain(secret);
   expect(outbound.match(/\[REDACTED-(?:KEY|JWT|PEM)\]/g)).toHaveLength(secrets.length);
