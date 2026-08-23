@@ -7,8 +7,12 @@ import { getRetryMsFromResponse } from './backoff.js';
 import { buildRequestBody } from './requestBuilder.js';
 import { GeminiApiError } from './errors.js';
 import { unescapeNewlinesInText } from '../utils.js';
-import { DEFAULT_MAX_DEBUG_LOG_BYTES } from '../constants.js';
-import { getModelSpec } from '../model-registry.js';
+import { DEFAULT_MAX_DEBUG_LOG_BYTES, MAX_DEBUG_LOG_BYTES } from '../constants.js';
+import {
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  getEffectiveMaxOutputTokens,
+  getModelSpec,
+} from '../model-registry.js';
 
 export interface GeminiUsage {
   promptTokens: number;
@@ -434,6 +438,71 @@ async function handleSuccessfulResponse(
   };
 }
 
+function getTruncationIncrease(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isSafeInteger(value) || value <= 0) return fallback;
+  return value;
+}
+
+function getTruncationMaxRetries(value: number | undefined): number {
+  if (value === undefined) return 1;
+  if (!Number.isSafeInteger(value) || value < 0 || value > 10) return 1;
+  return value;
+}
+
+function getTimeoutMs(value: number | undefined): number {
+  if (value === undefined) return 60_000;
+  if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647) return 60_000;
+  return value;
+}
+
+function getClientRetryConfig(config: typeof CONFIG): {
+  maxRetries: number;
+  retryBaseMs: number;
+  retryMaxMs: number;
+} {
+  let retryMaxMs = config.GEMINI_RETRY_MAX_MS;
+  if (!Number.isSafeInteger(retryMaxMs) || retryMaxMs <= 0 || retryMaxMs > 300_000) {
+    retryMaxMs = 60_000;
+  }
+  let retryBaseMs = config.GEMINI_RETRY_BASE_MS;
+  if (!Number.isSafeInteger(retryBaseMs) || retryBaseMs <= 0 || retryBaseMs > retryMaxMs) {
+    retryBaseMs = Math.min(1000, retryMaxMs);
+  }
+  let maxRetries = config.GEMINI_MAX_RETRIES;
+  if (!Number.isSafeInteger(maxRetries) || maxRetries <= 0 || maxRetries > 10) maxRetries = 3;
+  return { maxRetries, retryBaseMs, retryMaxMs };
+}
+
+function normalizeClientConfig(config: typeof CONFIG): typeof CONFIG {
+  let temperature = config.TEMP;
+  if (!Number.isFinite(temperature) || temperature < 0 || temperature > 1) temperature = 1;
+
+  let maxOutputTokens = config.MAX_OUTPUT_TOKENS;
+  if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0) {
+    maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS;
+  }
+
+  let maxDebugBodyLogBytes = config.DEBUG_MAX_BODY_LOG_BYTES;
+  if (
+    !Number.isSafeInteger(maxDebugBodyLogBytes) ||
+    maxDebugBodyLogBytes <= 0 ||
+    maxDebugBodyLogBytes > MAX_DEBUG_LOG_BYTES
+  ) {
+    maxDebugBodyLogBytes = DEFAULT_MAX_DEBUG_LOG_BYTES;
+  }
+
+  const retry = getClientRetryConfig(config);
+  return {
+    ...config,
+    TEMP: temperature,
+    MAX_OUTPUT_TOKENS: maxOutputTokens,
+    DEBUG_MAX_BODY_LOG_BYTES: maxDebugBodyLogBytes,
+    GEMINI_MAX_RETRIES: retry.maxRetries,
+    GEMINI_RETRY_BASE_MS: retry.retryBaseMs,
+    GEMINI_RETRY_MAX_MS: retry.retryMaxMs,
+  };
+}
+
 function buildCallSetup(
   config: typeof CONFIG,
   callOptions: GeminiCallOpts,
@@ -443,12 +512,11 @@ function buildCallSetup(
   const activeModel = modelOverride || config.MODEL;
   const urlBase =
     'https://generativelanguage.googleapis.com/v1beta/models/' + activeModel + ':generateContent';
-  const truncMaxRetries =
-    opts.retryIfTruncatedMaxRetries === undefined ? 1 : opts.retryIfTruncatedMaxRetries;
-  const truncIncrease =
-    opts.retryIfTruncatedIncreaseTokens === undefined
-      ? config.MAX_OUTPUT_TOKENS
-      : opts.retryIfTruncatedIncreaseTokens;
+  const truncMaxRetries = getTruncationMaxRetries(opts.retryIfTruncatedMaxRetries);
+  const truncIncrease = getTruncationIncrease(
+    opts.retryIfTruncatedIncreaseTokens,
+    getEffectiveMaxOutputTokens(activeModel, config.MAX_OUTPUT_TOKENS),
+  );
   return {
     opts,
     start: Date.now(),
@@ -503,7 +571,7 @@ async function runCallAttempt(params: {
     enableThinking,
   );
   try {
-    const timeoutMs = typeof setup.opts.timeoutMs === 'number' ? setup.opts.timeoutMs : 60000;
+    const timeoutMs = getTimeoutMs(setup.opts.timeoutMs);
     const bodyStr = JSON.stringify(body);
     logDebugRequest({ deps, attempt: state.attempt, reqUrl: setup.urlBase, body, bodyStr });
     const { res, textRes } = await fetchWithTimeout(deps, {
@@ -525,7 +593,7 @@ async function runCallAttempt(params: {
 
 export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiClient {
   const options = userOptions || {};
-  const config: typeof CONFIG = { ...CONFIG, ...options.config };
+  const config = normalizeClientConfig({ ...CONFIG, ...options.config });
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const logger = options.logger || createLogger(config);
   const writeDebug = createDebugLogger(config);
@@ -534,9 +602,9 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
     logger,
     writeDebug,
     fetchImpl,
-    maxRetries: config.GEMINI_MAX_RETRIES || 3,
-    retryBaseMs: config.GEMINI_RETRY_BASE_MS || 1000,
-    retryMaxMs: config.GEMINI_RETRY_MAX_MS || 60000,
+    maxRetries: config.GEMINI_MAX_RETRIES,
+    retryBaseMs: config.GEMINI_RETRY_BASE_MS,
+    retryMaxMs: config.GEMINI_RETRY_MAX_MS,
   };
 
   const callGemini = async ({
@@ -559,7 +627,10 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
     const state: CallState = {
       attempt: 0,
       truncRetries: 0,
-      currentMaxOutputTokens: setup.opts.maxOutputTokens || config.MAX_OUTPUT_TOKENS,
+      currentMaxOutputTokens: getEffectiveMaxOutputTokens(
+        modelOverride || config.MODEL,
+        setup.opts.maxOutputTokens ?? config.MAX_OUTPUT_TOKENS,
+      ),
     };
 
     for (;;) {

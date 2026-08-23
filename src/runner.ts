@@ -34,7 +34,7 @@ import {
   isCancel,
   cancel,
 } from '@clack/prompts';
-import { KNOWN_MODELS, getModelSpec } from './model-registry.js';
+import { KNOWN_MODELS, getEffectiveMaxOutputTokens, getModelSpec } from './model-registry.js';
 import { sanitizeForDisplay, stripTerminalControlSequences } from './utils.js';
 import clipboardy from 'clipboardy';
 import pkg from '../package.json';
@@ -717,7 +717,8 @@ async function runSingleGenerationAttempt(params: {
     commitCapability,
   } = params;
   const modelSpec = getModelSpec(state.modelName);
-  const safeMaxTokens = modelSpec.maxInputTokens - CONFIG.MAX_OUTPUT_TOKENS - 1000;
+  const maxOutputTokens = getEffectiveMaxOutputTokens(state.modelName, CONFIG.MAX_OUTPUT_TOKENS);
+  const safeMaxTokens = modelSpec.maxInputTokens - maxOutputTokens - 1000;
   const customHeader =
     state.outputMode === 'full'
       ? 'Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following'
@@ -758,7 +759,7 @@ async function runSingleGenerationAttempt(params: {
       modelOverride: state.modelName,
       retryIfTruncated: true,
       retryIfTruncatedMaxRetries: 1,
-      retryIfTruncatedIncreaseTokens: CONFIG.MAX_OUTPUT_TOKENS,
+      retryIfTruncatedIncreaseTokens: maxOutputTokens,
     },
   });
   s.stop('Gemini response received');

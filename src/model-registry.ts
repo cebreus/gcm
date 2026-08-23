@@ -6,6 +6,8 @@ export interface ModelSpec {
   description?: string;
 }
 
+export const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
+
 // Limits based on public Gemini documentation as of 2026-03.
 // Keep this shortlist small and focused on practical choices for the CLI.
 
@@ -45,4 +47,10 @@ export function getModelSpec(name: string): ModelSpec {
     maxOutputTokens: 8192,
     description: 'Unknown model',
   };
+}
+
+export function getEffectiveMaxOutputTokens(modelName: string, configured: number): number {
+  let requested = configured;
+  if (!Number.isSafeInteger(requested) || requested <= 0) requested = DEFAULT_MAX_OUTPUT_TOKENS;
+  return Math.min(requested, getModelSpec(modelName).maxOutputTokens);
 }
