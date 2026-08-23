@@ -1,5 +1,20 @@
 # gcm
 
+## 0.8.1
+
+> GCM now checks the Git state and its settings before it asks an AI service for text. It stops early when files have merge conflicts or when it cannot read a full and stable Git result.
+
+### Patch Changes
+
+- **Early conflict check:** GCM stops before settings or generation when the Git staging area has unresolved conflicts. It checks again after the user changes which files are staged. It also stops if the staged snapshot changes or cannot be checked before generation.
+- **Read-only use during a Git operation:** GCM can still create text during a merge, rebase, cherry-pick, revert, or bisect when there are no conflicts and the staged files stay the same. It does not run a Git write action during these operations.
+- **Settings menu rule:** GCM skips the settings menu only when both `--model` and `--mode` are given. With only one of them, it still opens settings for the missing choice. Scripts that must avoid the menu need both options.
+- **Clear `amend!` action:** When GCM must make an `amend!` commit for an older or published target, the action label now says that the user must run a rebase later.
+- **Short setting names:** Model and temperature settings now use `GCM_MODEL` and `GCM_TEMP`. GCM no longer reads `GEMINI_MODEL`, `GCM_TEMPERATURE`, or `GEMINI_TEMP`. Rename these variables before upgrade.
+- **Checked number settings:** If a number setting is empty, not finite, outside its allowed range, or unsafe as an integer, GCM uses its safe default. The retry start delay also cannot be longer than the retry maximum.
+- **Safe Git process output:** GCM limits Git output by bytes. It keeps a UTF-8 character correct when its bytes arrive in different data parts. It stops when important output is cut instead of using incomplete repository data.
+- **Bun runtime:** File and process work now uses Bun APIs. Bad saved session data is rejected. The project also removes an unwanted pnpm lockfile and uses the correct Bun lint globals. These changes mainly improve maintenance and runtime safety.
+
 ## 0.8.0
 
 > GCM now links each generated message to the exact files that were ready for the next commit. It checks those files again before it writes to Git. It also protects secrets and terminal output, and stops Git actions that may lose work.
