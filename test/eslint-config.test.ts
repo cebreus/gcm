@@ -3,6 +3,7 @@ import { ESLint } from 'eslint';
 
 test('production code rejects Node I/O imports', async () => {
   const eslint = new ESLint();
+  const resolvedConfig = await eslint.calculateConfigForFile('src/runner.ts');
   const source = [
     "import { readFile } from 'fs/promises';",
     "import { exec } from 'node:child_process';",
@@ -29,4 +30,7 @@ test('production code rejects Node I/O imports', async () => {
       checked?.messages.filter(({ ruleId }) => ruleId === 'no-restricted-syntax'),
     ).toHaveLength(2);
   }
+  expect(resolvedConfig?.languageOptions.globals).toHaveProperty('Bun');
+  expect(resolvedConfig?.languageOptions.globals).not.toHaveProperty('window');
+  expect(resolvedConfig?.languageOptions.globals).not.toHaveProperty('__dirname');
 });

@@ -12,9 +12,7 @@ export default [
       ...love.languageOptions,
       globals: {
         ...love.languageOptions?.globals,
-        ...globals.browser,
-        ...globals.node,
-        Bun: true,
+        ...globals.bunBuiltin,
       },
     },
     rules: {

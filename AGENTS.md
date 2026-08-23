@@ -15,7 +15,6 @@ Start every reply with `cebreus+gcm`.
 - Test: `bun run test` (`--isolate` is required)
 - Typecheck: `bunx tsc --noEmit`
 - Lint: `bun run lint`
-- Dead-code check: `bun run dead-code`
 
 ## Architecture
 
