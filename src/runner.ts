@@ -494,7 +494,6 @@ async function resolveReadyRepositoryState(params: {
 
   while (!staged) {
     const nextStep = await handleEmptyStaging({
-      repositoryState,
       targetCommit,
       stagedFilesFromWorktree: repositoryState.changedFiles,
     });
@@ -549,11 +548,10 @@ function showRepositoryWarnings(
 }
 
 async function handleEmptyStaging(params: {
-  repositoryState: RepositoryState;
   targetCommit: string | null;
   stagedFilesFromWorktree: string[];
 }): Promise<'retry' | 'cancel'> {
-  const { repositoryState, targetCommit, stagedFilesFromWorktree } = params;
+  const { targetCommit, stagedFilesFromWorktree } = params;
   if (targetCommit) {
     cancel(`No changes found in commit ${targetCommit}.`);
     return 'cancel';

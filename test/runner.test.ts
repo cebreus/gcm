@@ -561,6 +561,14 @@ describe('Refactored Runner', () => {
         hasUnmergedPaths: false,
         inProgressOperation: 'rebase',
         changedFiles: ['file.ts'],
+      })
+      .mockResolvedValueOnce({
+        hasStagedChanges: true,
+        hasUnstagedChanges: false,
+        hasUntrackedFiles: false,
+        hasUnmergedPaths: false,
+        inProgressOperation: 'rebase',
+        changedFiles: ['file.ts'],
       });
     mockSelect.mockResolvedValueOnce('exit');
 
