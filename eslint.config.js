@@ -51,6 +51,19 @@ export default [
           ],
         },
       ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.name='require'][arguments.0.type='Literal'][arguments.0.value=/^(node:)?(fs|child_process)(\\/|$)/]",
+          message: 'Use Bun.file, Bun.write, or Bun.spawn instead.',
+        },
+        {
+          selector:
+            "ImportExpression[source.type='Literal'][source.value=/^(node:)?(fs|child_process)(\\/|$)/]",
+          message: 'Use Bun.file, Bun.write, or Bun.spawn instead.',
+        },
+      ],
     },
   },
 ];

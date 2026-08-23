@@ -28,7 +28,6 @@ export const CONFIG = {
   ),
   MODEL: process.env.GCM_MODEL || 'gemini-3.7-flash',
   TEMP: numberInRange(process.env.GCM_TEMP, 0, 1, 1),
-  ENABLE_THINKING: (process.env.GCM_ENABLE_THINKING || 'false') === 'true',
   TOKEN_BYTES_RATIO: numberInRange(process.env.GCM_TOKEN_BYTES_RATIO, 0.1, 100, 3.5),
   MAX_OUTPUT_TOKENS: integerInRange(
     process.env.GCM_MAX_OUTPUT_TOKENS,
@@ -49,7 +48,4 @@ export const CONFIG = {
   GEMINI_MAX_RETRIES: retry.maxRetries,
   GEMINI_RETRY_BASE_MS: retry.retryBaseMs,
   GEMINI_RETRY_MAX_MS: retry.retryMaxMs,
-  // When true, request bodies will include <<START>>/<<END>> markers in the user content
-  // and system instructions will ask the model to emit ONLY the content between markers.
-  ADD_RESPONSE_MARKERS: (process.env.GCM_ADD_RESPONSE_MARKERS || 'true') === 'true',
 };

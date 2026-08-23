@@ -93,17 +93,15 @@ async function handleContextOverflow(params: {
 async function callOnce(params: {
   deps: GeminiServiceRuntimeDeps;
   input: string;
-  enableThinking: boolean;
   meta: LogMetadata;
   systemPrompt: string;
   maxOutputOverride: number;
   opts?: CallGeminiOptions;
 }): Promise<GeminiResponse | null> {
-  const { deps, input, enableThinking, meta, systemPrompt, maxOutputOverride, opts } = params;
+  const { deps, input, meta, systemPrompt, maxOutputOverride, opts } = params;
   return deps.client.callGemini({
     apiKey: deps.apiKey,
     userContent: input,
-    enableThinking,
     telemetryMeta: meta,
     callOptions: {
       maxOutputTokens: maxOutputOverride,
@@ -166,7 +164,6 @@ async function callGeminiAPIWithDeps(params: {
     opts,
   } = params;
   const maxAttempts = Math.max(1, CONFIG.GEMINI_MAX_RETRIES || 3);
-  const enableThinking = CONFIG.ENABLE_THINKING;
   let attempt = 0;
   const loopState: CallLoopState = {
     promptParts: promptParts || {
@@ -186,7 +183,6 @@ async function callGeminiAPIWithDeps(params: {
       return await callOnce({
         deps,
         input: loopState.input,
-        enableThinking,
         meta,
         systemPrompt,
         maxOutputOverride: loopState.maxOutputOverride,

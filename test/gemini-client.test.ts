@@ -39,7 +39,6 @@ async function geminiClientSuccessTest(): Promise<void> {
     const res: GeminiResponse | null = await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: { maxOutputTokens: 512, systemInstructions: 'instr' },
     });
@@ -113,7 +112,6 @@ test('gemini-client: caps every debug body payload', async () => {
     await client.callGemini({
       apiKey: 'fake-key',
       userContent,
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: {},
     });
@@ -145,21 +143,19 @@ test('gemini-client: caps debug bodies at UTF-8 character boundaries', async () 
       config: {
         DEBUG_API: true,
         DEBUG_FILE: debugPath,
-        DEBUG_MAX_BODY_LOG_BYTES: 5,
-        ADD_RESPONSE_MARKERS: false,
+        DEBUG_MAX_BODY_LOG_BYTES: 15,
       },
     });
     await client.callGemini({
       apiKey: 'fake-key',
       userContent,
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: {},
     });
 
     await Bun.sleep(10);
     const debugLog = await readFile(debugPath, 'utf8');
-    expect(debugLog).toContain(`API REQUEST USER CONTENT (text):\né漢...[TRUNCATED]`);
+    expect(debugLog).toContain(`API REQUEST USER CONTENT (text):\n<<START>>\né漢...[TRUNCATED]`);
     expect(debugLog).not.toContain('\uFFFD');
 
     const surrogateDebugPath = join(directory, '.debug-surrogate.log');
@@ -168,20 +164,20 @@ test('gemini-client: caps debug bodies at UTF-8 character boundaries', async () 
       config: {
         DEBUG_API: true,
         DEBUG_FILE: surrogateDebugPath,
-        DEBUG_MAX_BODY_LOG_BYTES: 3,
-        ADD_RESPONSE_MARKERS: false,
+        DEBUG_MAX_BODY_LOG_BYTES: 12,
       },
     });
     await surrogateClient.callGemini({
       apiKey: 'fake-key',
       userContent,
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: {},
     });
     await Bun.sleep(10);
     const surrogateDebugLog = await readFile(surrogateDebugPath, 'utf8');
-    expect(surrogateDebugLog).toContain(`API REQUEST USER CONTENT (text):\né...[TRUNCATED]`);
+    expect(surrogateDebugLog).toContain(
+      `API REQUEST USER CONTENT (text):\n<<START>>\né...[TRUNCATED]`,
+    );
     expect(surrogateDebugLog).not.toContain('\uFFFD');
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -228,7 +224,6 @@ async function geminiClientRetryTest(): Promise<void> {
     const res: GeminiResponse | null = await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: { maxOutputTokens: 512 },
     });
@@ -275,7 +270,6 @@ async function geminiClientNetworkErrorTest(): Promise<void> {
     const res: GeminiResponse | null = await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: { maxOutputTokens: 256 },
     });
@@ -312,7 +306,6 @@ async function geminiClientInvalidJsonTest(): Promise<void> {
       client.callGemini({
         apiKey: 'fake-key',
         userContent: 'hello',
-        enableThinking: false,
         telemetryMeta: {},
         callOptions: { maxOutputTokens: 256 },
       }),
@@ -347,7 +340,6 @@ async function geminiClientTimeoutTest(): Promise<void> {
       client.callGemini({
         apiKey: 'fake-key',
         userContent: 'hello',
-        enableThinking: false,
         telemetryMeta: {},
         callOptions: { maxOutputTokens: 256, timeoutMs: 5 },
       }),
@@ -379,7 +371,6 @@ async function geminiClientTruncatedFlagMissingEndTest(): Promise<void> {
     const res = await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: { maxOutputTokens: 256 },
     });
@@ -411,7 +402,6 @@ async function geminiClientTruncatedFlagEndTruncatedTest(): Promise<void> {
     const res = await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: { maxOutputTokens: 256 },
     });
@@ -470,7 +460,6 @@ async function geminiClientRetryOnTruncatedTest(): Promise<void> {
     const res = await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: {
         maxOutputTokens: 256,
@@ -531,7 +520,6 @@ async function geminiClientTruncationRetryRespectsModelOutputLimitTest(): Promis
   const result = await client.callGemini({
     apiKey: 'fake-key',
     userContent: 'hello',
-    enableThinking: false,
     telemetryMeta: {},
     callOptions: { retryIfTruncated: true },
     modelOverride: 'gemini-3.7-flash',
@@ -576,7 +564,6 @@ test('gemini-client: rejects invalid direct output-token overrides', async () =>
     await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: { maxOutputTokens },
       modelOverride: 'gemini-3.7-flash',
@@ -607,7 +594,6 @@ test('gemini-client: rejects invalid truncation-retry token increments', async (
     await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: {
         maxOutputTokens: 256,
@@ -642,7 +628,6 @@ test('gemini-client: bounds invalid direct truncation-retry counts', async () =>
     await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: {
         maxOutputTokens: 256,
@@ -676,7 +661,6 @@ test('gemini-client: rejects invalid direct timeout values', async () => {
     await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: { timeoutMs },
     });
@@ -707,7 +691,6 @@ test('gemini-client: bounds retry config injected through its public factory', a
     client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: {},
     }),
@@ -732,7 +715,6 @@ test('gemini-client: normalizes invalid injected temperatures', async () => {
     await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'hello',
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: {},
     });
@@ -757,7 +739,6 @@ test('gemini-client: normalizes an unsafe injected debug-body limit', async () =
     await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'x'.repeat(40_000) + tail,
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: {},
     });
@@ -787,7 +768,6 @@ test('gemini-client: preserves a valid debug-body limit above its default', asyn
     await client.callGemini({
       apiKey: 'fake-key',
       userContent: 'x'.repeat(40_000) + tail,
-      enableThinking: false,
       telemetryMeta: {},
       callOptions: {},
     });
@@ -826,7 +806,6 @@ async function geminiClientRetriesMaxTokensWithoutMarkersTest(): Promise<void> {
   const result = await client.callGemini({
     apiKey: 'fake-key',
     userContent: 'hello',
-    enableThinking: false,
     telemetryMeta: {},
     callOptions: {
       maxOutputTokens: 256,

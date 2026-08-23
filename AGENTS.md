@@ -5,7 +5,7 @@ Start every reply with `cebreus+gcm`.
 
 ## Stack
 
-- Bun (v1.0+), TypeScript, `minimist`, ESLint, Prettier.
+- Bun (v1.4+), TypeScript, `minimist`, ESLint, Prettier.
 - Use Bun APIs (`Bun.file`, `Bun.spawn`) for file and process I/O; Node utilities such as `path` and `os` are allowed.
 
 ## Commands
@@ -15,7 +15,7 @@ Start every reply with `cebreus+gcm`.
 - Test: `bun run test` (`--isolate` is required)
 - Typecheck: `bunx tsc --noEmit`
 - Lint: `bun run lint`
-- Dead-code check: `fallow`
+- Dead-code check: `bun run dead-code`
 
 ## Architecture
 
