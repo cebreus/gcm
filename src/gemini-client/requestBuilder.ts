@@ -40,7 +40,7 @@ export function buildRequestBody(
     contents: [{ role: 'user', parts: [{ text: wrappedUserContent }] }],
     systemInstruction: { parts: [{ text: systemInstruction }] },
     generationConfig: {
-      temperature: config.TEMPERATURE,
+      temperature: config.TEMP,
       maxOutputTokens: opts.maxOutputTokens || config.MAX_OUTPUT_TOKENS,
     },
   };

@@ -297,9 +297,9 @@ async function buildGenerationState(parsedArgs: ParsedOptions): Promise<{
   const session = await loadSession();
   const resolvedSessionModel =
     session.modelName === 'gemini-2.5-flash' || session.modelName === 'gemini-2.5-pro'
-      ? CONFIG.MODEL_NAME
+      ? CONFIG.MODEL
       : session.modelName;
-  const initialModelName = parsedArgs.model || resolvedSessionModel || CONFIG.MODEL_NAME;
+  const initialModelName = parsedArgs.model || resolvedSessionModel || CONFIG.MODEL;
   return {
     targetCommit,
     state: {

@@ -421,7 +421,7 @@ function buildCallSetup(
   modelOverride?: string,
 ): CallSetup {
   const opts = callOptions || {};
-  const activeModel = modelOverride || config.MODEL_NAME || 'gemini-3.7-flash';
+  const activeModel = modelOverride || config.MODEL;
   const urlBase =
     'https://generativelanguage.googleapis.com/v1beta/models/' + activeModel + ':generateContent';
   const truncMaxRetries =
