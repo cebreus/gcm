@@ -1,7 +1,7 @@
 # GCM: Gemini Commit Message Helper
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/cebreus/scripts)
-[![Version](https://img.shields.io/badge/version-0.8.0-blue)](https://github.com/cebreus/scripts)
+[![Version](https://img.shields.io/badge/version-0.8.1-blue)](https://github.com/cebreus/scripts)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Bun](https://img.shields.io/badge/Bun-000000.svg?logo=bun&logoColor=white)](https://bun.sh/)
 

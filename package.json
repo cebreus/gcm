@@ -1,6 +1,6 @@
 {
   "name": "gcm",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "scripts": {
     "start": "bun run ./gcm.ts",
     "test": "bun test --isolate",

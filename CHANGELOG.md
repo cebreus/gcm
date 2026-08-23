@@ -1,5 +1,24 @@
 # gcm
 
+## 0.8.1
+
+> Generation now stops when the staged snapshot can no longer be verified, while unfinished
+> Git operations still allow safe read-only use. Runtime limits reject invalid values instead
+> of leaking them into Git or Gemini, and the packaged binary follows the same Bun-native
+> boundaries as the source.
+
+### Patch Changes
+
+- fix(cli): Checked unresolved conflicts and staged-snapshot drift before generation.
+- fix(cli): Allowed read-only generation during conflict-free unfinished Git operations.
+- fix(cli): Documented separate staged-change and target-commit user flows.
+- refactor(core): Kept only the short `GCM_MODEL` and `GCM_TEMP` configuration names.
+- fix(config): Validated numeric environment values and coupled retry limits at their boundary.
+- fix(core): Clamped model output, retry, timeout and debug limits before Gemini calls.
+- fix(git): Bounded process output in bytes and decoded split UTF-8 streams correctly.
+- fix(core): Enforced Bun-native file and process I/O while preserving valid `path` and `os` use.
+- fix(tooling): Updated Bun dependencies and aligned ESLint with Bun runtime globals.
+
 ## 0.8.0
 
 > Secrets are far less likely to leave your machine: the API key now travels in a header
