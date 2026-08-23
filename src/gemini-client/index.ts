@@ -8,7 +8,7 @@ import { buildRequestBody } from './requestBuilder.js';
 import { GeminiApiError } from './errors.js';
 import { unescapeNewlinesInText } from '../utils.js';
 import { DEFAULT_MAX_DEBUG_LOG_BYTES, MAX_DEBUG_LOG_BYTES } from '../constants.js';
-import { normalizeRetryConfig } from '../config-values.js';
+import { normalizeRetryConfig, stringOrDefault } from '../config-values.js';
 import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   getEffectiveMaxOutputTokens,
@@ -64,6 +64,7 @@ interface CallState {
 
 interface CallSetup {
   opts: GeminiCallOpts;
+  activeModel: string;
   start: number;
   urlBase: string;
   truncMaxRetries: number;
@@ -171,6 +172,18 @@ function createDefaultLogger(): Logger {
   return createLogger(CONFIG as LoggerConfig);
 }
 
+function reportDebugFlushError(error: unknown): void {
+  process.stderr.write('Failed to flush debug log: ' + String(error) + '\n');
+}
+
+function flushDebugWriter(writer: ReturnType<ReturnType<typeof Bun.file>['writer']>): void {
+  try {
+    void Promise.resolve(writer.flush()).catch(reportDebugFlushError);
+  } catch (error: unknown) {
+    reportDebugFlushError(error);
+  }
+}
+
 function createDebugLogger(config: Partial<typeof CONFIG>): (label: string, data: unknown) => void {
   let writer: ReturnType<ReturnType<typeof Bun.file>['writer']> | null = null;
   const pending: string[] = [];
@@ -180,9 +193,9 @@ function createDebugLogger(config: Partial<typeof CONFIG>): (label: string, data
     void openDebugWriter(config.DEBUG_FILE)
       .then(function (openedWriter) {
         writer = openedWriter;
-        for (const entry of pending) writer.write(entry);
+        for (const entry of pending) void writer.write(entry);
         pending.length = 0;
-        void writer.flush();
+        flushDebugWriter(writer);
       })
       .catch(function (error: unknown) {
         pending.length = 0;
@@ -197,8 +210,8 @@ function createDebugLogger(config: Partial<typeof CONFIG>): (label: string, data
       if (config.DEBUG_API && config.DEBUG_FILE) pending.push(entry);
       return;
     }
-    writer.write(entry);
-    void writer.flush();
+    void writer.write(entry);
+    flushDebugWriter(writer);
   };
 }
 
@@ -493,8 +506,8 @@ function buildCallSetup(
   callOptions: GeminiCallOpts,
   modelOverride?: string,
 ): CallSetup {
-  const opts = callOptions || {};
-  const activeModel = modelOverride || config.MODEL;
+  const opts = callOptions;
+  const activeModel = stringOrDefault(modelOverride, config.MODEL);
   const urlBase =
     'https://generativelanguage.googleapis.com/v1beta/models/' + activeModel + ':generateContent';
   const truncMaxRetries = getTruncationMaxRetries(opts.retryIfTruncatedMaxRetries);
@@ -504,6 +517,7 @@ function buildCallSetup(
   );
   return {
     opts,
+    activeModel,
     start: Date.now(),
     urlBase,
     truncMaxRetries,
@@ -574,10 +588,10 @@ async function runCallAttempt(params: {
 }
 
 export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiClient {
-  const options = userOptions || {};
+  const options = userOptions ?? {};
   const config = normalizeClientConfig({ ...CONFIG, ...options.config });
-  const fetchImpl = options.fetchImpl || globalThis.fetch;
-  const logger = options.logger || createLogger(config);
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  const logger = options.logger ?? createLogger(config);
   const writeDebug = createDebugLogger(config);
   const deps: GeminiClientDeps = {
     config,
@@ -608,7 +622,7 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
       attempt: 0,
       truncRetries: 0,
       currentMaxOutputTokens: getEffectiveMaxOutputTokens(
-        modelOverride || config.MODEL,
+        setup.activeModel,
         setup.opts.maxOutputTokens ?? config.MAX_OUTPUT_TOKENS,
       ),
     };

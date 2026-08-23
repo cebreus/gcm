@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'fs/promises';
 import pkg from '../package.json';
 
 const ansiEscape = /\x1B\[[0-?]*[ -/]*[@-~]/g;
-const tempRoot = Bun.env.TMPDIR || '/tmp';
+const tempRoot = Bun.env.TMPDIR ?? '/tmp';
 const packageVersion = pkg.version;
 const expectPath = Bun.which('expect');
 let binaryDirectory = '';
@@ -36,13 +36,13 @@ function escapeTclDoubleQuoted(text: string): string {
 
 function controlledEnvironment(apiKey?: string): Record<string, string> {
   return {
-    PATH: Bun.env.PATH || '/usr/bin:/bin',
+    PATH: Bun.env.PATH ?? '/usr/bin:/bin',
     HOME: tempRoot,
     NO_COLOR: '1',
     TERM: 'dumb',
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null',
-    GOOGLE_GEMINI_API_KEY: apiKey || '',
+    GOOGLE_GEMINI_API_KEY: apiKey ?? '',
   };
 }
 
@@ -138,7 +138,9 @@ async function runInteractiveBinary(args: string[], cwd: string): Promise<Binary
 
 function expectCleanInputError(result: BinaryResult, message: string): void {
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout.trim().split('\n')).toEqual([expect.stringContaining(message)]);
+  const lines = result.stdout.trim().split('\n');
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain(message);
   expect(result.stderr).toBe('');
   expect(result.stdout).not.toContain('at ');
   expect(result.stdout).not.toContain('function(');

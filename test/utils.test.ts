@@ -96,15 +96,16 @@ test('utils: pushHunkToTop - ignores zero capacity', () => {
 // --- Tests for unescapeNewlinesInText ---
 test('utils: unescapeNewlinesInText - should unescape newlines in text fields', () => {
   const obj = { a: 1, data: { text: 'hello\nworld' } };
-  const result = unescapeNewlinesInText(obj) as any;
-  expect(result.data.text).toBe('hello\nworld');
+  const result = unescapeNewlinesInText(obj);
+  expect((result as { data: { text: string } }).data.text).toBe('hello\nworld');
 });
 
 test('utils: unescapeNewlinesInText - should handle nested objects and arrays', () => {
   const obj = { a: [{ text: 'a\nb' }, { c: { text: 'c\nd' } }] };
-  const result = unescapeNewlinesInText(obj) as any;
-  expect(result.a[0].text).toBe('a\nb');
-  expect(result.a[1].c.text).toBe('c\nd');
+  const result = unescapeNewlinesInText(obj);
+  const typed = result as { a: Array<{ text?: string; c?: { text: string } }> };
+  expect(typed.a[0].text).toBe('a\nb');
+  expect(typed.a[1].c?.text).toBe('c\nd');
 });
 
 // --- Tests for detectRepoType ---
@@ -113,7 +114,7 @@ const fileMock = mock((path: string) => ({
   exists: () => existsMock(path),
 }));
 const originalBunFile = Bun.file;
-Bun.file = fileMock as any;
+Bun.file = fileMock as unknown as typeof Bun.file;
 
 afterAll(() => {
   Bun.file = originalBunFile;
@@ -199,8 +200,9 @@ test('utils: formatCommitMessage - should handle empty string', () => {
 });
 
 test('utils: formatCommitMessage - should handle null/undefined gracefully', () => {
-  expect((formatCommitMessage as any)(null)).toBe(null);
-  expect((formatCommitMessage as any)(undefined)).toBe(undefined);
+  const formatUnknown = formatCommitMessage as unknown as (value: unknown) => unknown;
+  expect(formatUnknown(null)).toBe(null);
+  expect(formatUnknown(undefined)).toBe(undefined);
 });
 
 // --- Tests for shouldExcludeFile ---

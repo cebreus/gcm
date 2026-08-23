@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test';
 import { tryParseJSON, parseCandidates, getRetryMsFromResponse } from '../src/gemini-client';
 import type { Logger } from '../src/logger';
 
-async function geminiHelpersTryParseJSONTest(): Promise<void> {
+function geminiHelpersTryParseJSONTest(): void {
   let logged = false;
   function loggerLog(): void {
     logged = true;
@@ -15,7 +15,7 @@ async function geminiHelpersTryParseJSONTest(): Promise<void> {
 }
 test('gemini-helpers: tryParseJSON', geminiHelpersTryParseJSONTest);
 
-async function geminiHelpersParseCandidatesTest(): Promise<void> {
+function geminiHelpersParseCandidatesTest(): void {
   const json = {
     candidates: [
       {
@@ -33,7 +33,7 @@ async function geminiHelpersParseCandidatesTest(): Promise<void> {
 }
 test('gemini-helpers: parseCandidates', geminiHelpersParseCandidatesTest);
 
-async function geminiHelpersGetRetryMsFromResponseTest(): Promise<void> {
+function geminiHelpersGetRetryMsFromResponseTest(): void {
   const textRes = JSON.stringify({
     error: {
       details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '0.01s' }],
@@ -74,7 +74,7 @@ async function geminiHelpersGetRetryMsFromResponseTest(): Promise<void> {
 }
 test('gemini-helpers: getRetryMsFromResponse', geminiHelpersGetRetryMsFromResponseTest);
 
-async function geminiHelpersParseCandidatesFencingTest(): Promise<void> {
+function geminiHelpersParseCandidatesFencingTest(): void {
   const json = {
     candidates: [
       {
@@ -89,13 +89,13 @@ async function geminiHelpersParseCandidatesFencingTest(): Promise<void> {
 }
 test('gemini-helpers: parseCandidates strips code fences', geminiHelpersParseCandidatesFencingTest);
 
-async function geminiHelpersParseCandidatesMarkersTest(): Promise<void> {
+function geminiHelpersParseCandidatesMarkersTest(): void {
   let warned = false;
-  const logger = {
-    log: (_: any, message: string) => {
+  const logger: Logger = {
+    log: (_level, message) => {
       if (message.includes('missing <<END>>')) warned = true;
     },
-  } as unknown as Logger;
+  };
 
   const jsonComplete = {
     candidates: [

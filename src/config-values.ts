@@ -6,6 +6,11 @@ const MAX_RETRY_MS = 300_000;
 
 type NumericInput = number | string | undefined;
 
+export function stringOrDefault(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  return value;
+}
+
 function parseNumber(value: NumericInput): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value === 'string' && !value.trim()) return undefined;

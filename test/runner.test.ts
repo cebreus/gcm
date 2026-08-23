@@ -1,13 +1,14 @@
 import { expect, test, mock, describe, beforeEach, afterEach } from 'bun:test';
 import { executeCommitMessageGeneration } from '../src/runner.js';
 import packageJson from '../package.json';
+import type { Logger } from '../src/logger.js';
 
 // Mock @clack/prompts
 const mockIntro = mock();
 const mockOutro = mock();
 const mockSpinner = mock(() => ({ start: mock(), stop: mock() }));
 const mockNote = mock();
-const mockSelect = mock(arg => {
+const mockSelect = mock((arg: { message: string }) => {
   console.log('Unexpected Select:', arg.message);
   return Promise.resolve('cancel');
 });
@@ -15,7 +16,7 @@ const mockText = mock(() => Promise.resolve('edited message'));
 const mockIsCancel = mock(val => val === 'cancel');
 const mockCancel = mock();
 
-mock.module('@clack/prompts', () => ({
+void mock.module('@clack/prompts', () => ({
   intro: mockIntro,
   outro: mockOutro,
   spinner: mockSpinner,
@@ -34,14 +35,14 @@ const mockLoadSession = mock(() =>
   }),
 );
 const mockSaveSession = mock(() => Promise.resolve());
-mock.module('../src/session.js', () => ({
+void mock.module('../src/session.js', () => ({
   loadSession: mockLoadSession,
   saveSession: mockSaveSession,
 }));
 
 // Mock clipboardy
 const mockClipboardyWrite = mock(() => Promise.resolve());
-mock.module('clipboardy', () => ({
+void mock.module('clipboardy', () => ({
   default: {
     write: mockClipboardyWrite,
   },
@@ -112,7 +113,7 @@ describe('Refactored Runner', () => {
     mockSpinner.mockClear();
     mockNote.mockClear();
     mockSelect.mockReset();
-    mockSelect.mockImplementation(arg => {
+    mockSelect.mockImplementation((arg: { message: string }) => {
       console.log('Unexpected Select:', arg.message);
       return Promise.resolve('cancel');
     });
@@ -164,28 +165,24 @@ describe('Refactored Runner', () => {
       expect.objectContaining({ summaryAttempted: true }),
     );
 
-    // Check logging
-    const logs = mockLogger.log.mock.calls.map(c => c[1]).join(' ');
-    // expect(logs).toContain('BRANCH:'); // No longer logged, now shown in note
-
-    expect(mockNote).toHaveBeenCalled();
-    const noteContent = mockNote.mock.calls[0][0];
-    // Default is now Commit Only, so only message is shown
-    expect(noteContent).toContain('test');
-    expect(noteContent).not.toContain('BRANCH:');
+    // Default is now Commit Only, so only message is shown.
+    expect(mockNote).toHaveBeenCalledWith(
+      expect.stringContaining('test'),
+      'Generated Commit Message',
+    );
   });
 
   test('Should print package version and exit on --version', async () => {
     const originalStdoutWrite = process.stdout.write;
     const stdoutChunks: string[] = [];
-    process.stdout.write = mock((chunk: any) => {
+    process.stdout.write = mock((chunk: string | Uint8Array) => {
       stdoutChunks.push(String(chunk));
       return true;
-    }) as any;
+    }) as unknown as typeof process.stdout.write;
 
     try {
       await executeCommitMessageGeneration(['--version'], {
-        logger: mockLogger as any,
+        logger: mockLogger as unknown as Logger,
         gitService: mockGitService,
         contextService: mockContextService,
         geminiService: mockGeminiService,
@@ -208,7 +205,7 @@ describe('Refactored Runner', () => {
     try {
       await expect(
         executeCommitMessageGeneration(['--commmit', 'abc'], {
-          logger: mockLogger as any,
+          logger: mockLogger as unknown as Logger,
           gitService: mockGitService,
           contextService: mockContextService,
           geminiService: mockGeminiService,
@@ -284,7 +281,7 @@ describe('Refactored Runner', () => {
       }),
     ).rejects.toBe(error);
 
-    expect(mockCancel).toHaveBeenCalledWith('API Error (429): 429');
+    expect(mockCancel).toHaveBeenCalledWith('API Error (429): quota exhausted');
   });
 
   test('Should remove terminal controls from Gemini API error messages', async () => {
@@ -325,14 +322,14 @@ describe('Refactored Runner', () => {
   test('Should include version details in --help output', async () => {
     const originalStdoutWrite = process.stdout.write;
     const stdoutChunks: string[] = [];
-    process.stdout.write = mock((chunk: any) => {
+    process.stdout.write = mock((chunk: string | Uint8Array) => {
       stdoutChunks.push(String(chunk));
       return true;
-    }) as any;
+    }) as unknown as typeof process.stdout.write;
 
     try {
       await executeCommitMessageGeneration(['--help'], {
-        logger: mockLogger as any,
+        logger: mockLogger as unknown as Logger,
         gitService: mockGitService,
         contextService: mockContextService,
         geminiService: mockGeminiService,
@@ -374,7 +371,7 @@ describe('Refactored Runner', () => {
     mockText.mockResolvedValue('edited message');
 
     await executeCommitMessageGeneration([], {
-      logger: mockLogger as any,
+      logger: mockLogger as unknown as Logger,
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
@@ -421,7 +418,7 @@ describe('Refactored Runner', () => {
     mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
 
     await executeCommitMessageGeneration([], {
-      logger: mockLogger as any,
+      logger: mockLogger as unknown as Logger,
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
@@ -764,7 +761,7 @@ describe('Refactored Runner', () => {
       .mockResolvedValueOnce('commit'); // Review - commit
 
     await executeCommitMessageGeneration([], {
-      logger: mockLogger as any,
+      logger: mockLogger as unknown as Logger,
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
@@ -810,7 +807,7 @@ describe('Refactored Runner', () => {
       .mockResolvedValueOnce('commit'); // 4
 
     await executeCommitMessageGeneration([], {
-      logger: mockLogger as any,
+      logger: mockLogger as unknown as Logger,
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
@@ -848,7 +845,7 @@ describe('Refactored Runner', () => {
     mockText.mockResolvedValue('make it shorter');
 
     await executeCommitMessageGeneration([], {
-      logger: mockLogger as any,
+      logger: mockLogger as unknown as Logger,
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
@@ -883,7 +880,7 @@ describe('Refactored Runner', () => {
     mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
 
     await executeCommitMessageGeneration(['--model', 'gemini-special'], {
-      logger: mockLogger as any,
+      logger: mockLogger as unknown as Logger,
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
@@ -915,7 +912,7 @@ describe('Refactored Runner', () => {
     mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
 
     await executeCommitMessageGeneration([], {
-      logger: mockLogger as any,
+      logger: mockLogger as unknown as Logger,
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
@@ -924,7 +921,7 @@ describe('Refactored Runner', () => {
 
     expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledWith(
       expect.objectContaining({
-        opts: expect.objectContaining({ modelOverride: 'gemini-3.7-flash' }),
+        opts: expect.objectContaining({ modelOverride: 'gemini-3.7-flash' }) as unknown,
       }),
     );
   });
@@ -951,7 +948,7 @@ describe('Refactored Runner', () => {
     mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
 
     await executeCommitMessageGeneration([], {
-      logger: mockLogger as any,
+      logger: mockLogger as unknown as Logger,
       gitService: mockGitService,
       contextService: mockContextService,
       geminiService: mockGeminiService,
@@ -962,7 +959,7 @@ describe('Refactored Runner', () => {
     expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledTimes(1);
     expect(mockGeminiService.callGeminiAPI).toHaveBeenCalledWith(
       expect.objectContaining({
-        opts: expect.objectContaining({ retryIfTruncated: true }),
+        opts: expect.objectContaining({ retryIfTruncated: true }) as unknown,
       }),
     );
     expect(mockNote).toHaveBeenCalledWith(

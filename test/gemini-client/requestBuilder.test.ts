@@ -2,8 +2,7 @@ import { test, expect } from 'bun:test';
 import { buildRequestBody } from '../../src/gemini-client/requestBuilder';
 import { CONFIG } from '../../gcm.config';
 
-// Create a deep copy of CONFIG to modify for tests
-const testConfig = JSON.parse(JSON.stringify(CONFIG));
+const testConfig = structuredClone(CONFIG);
 
 test('requestBuilder: should build a basic request structure', () => {
   const body = buildRequestBody('test content', testConfig, {});
@@ -24,6 +23,11 @@ test('requestBuilder: omits thinking configuration', () => {
 test('requestBuilder: should allow overriding maxOutputTokens', () => {
   const body = buildRequestBody('test content', testConfig, { maxOutputTokens: 1234 });
   expect(body.generationConfig.maxOutputTokens).toBe(1234);
+});
+
+test('requestBuilder: rejects non-finite maxOutputTokens', () => {
+  const body = buildRequestBody('test content', testConfig, { maxOutputTokens: Number.NaN });
+  expect(body.generationConfig.maxOutputTokens).toBe(testConfig.MAX_OUTPUT_TOKENS);
 });
 
 test('requestBuilder: should include system instructions when provided', () => {

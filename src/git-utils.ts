@@ -48,7 +48,7 @@ async function spawnCore(
   defaultMaxBytes = 1024 * 1024,
 ): Promise<{ truncated: boolean }> {
   const maxBytes = integerInRange(options.maxBytes, 1, MAX_CHILD_OUTPUT_BYTES, defaultMaxBytes);
-  const execName = options.execName || 'git';
+  const execName = options.execName ?? 'git';
   const child = Bun.spawn({ cmd: [execName, ...args], stdout: 'pipe', stderr: 'pipe' });
   let bytes = 0;
   let truncated = false;

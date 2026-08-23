@@ -1,7 +1,7 @@
 import { afterAll, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'fs/promises';
 
-const directory = await mkdtemp(`${Bun.env.TMPDIR || '/tmp'}/gcm-session-`);
+const directory = await mkdtemp(`${Bun.env.TMPDIR ?? '/tmp'}/gcm-session-`);
 
 afterAll(async function (): Promise<void> {
   await rm(directory, { recursive: true, force: true });

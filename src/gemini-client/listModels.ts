@@ -34,6 +34,6 @@ export async function listGeminiModels(apiKey: string): Promise<string[]> {
   return data.models
     .filter(isModelApiItem)
     .filter(m => m.supportedGenerationMethods?.includes('generateContent') ?? false)
-    .map(m => m.name || '')
+    .map(m => m.name ?? '')
     .filter(Boolean);
 }

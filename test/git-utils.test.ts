@@ -1,6 +1,5 @@
 import { test, expect, mock, afterEach, afterAll } from 'bun:test';
 import { spawnGitLines, spawnGitStream } from '../src/git-utils';
-import { SpawnGitLinesResult, SpawnGitStreamResult } from '../src/git-utils'; // Assuming these are exported
 
 const mockSpawn = mock(() => ({
   stdout: new Response('mock stdout').body,
@@ -11,7 +10,7 @@ const mockSpawn = mock(() => ({
 
 const originalSpawn = Bun.spawn;
 
-Bun.spawn = mockSpawn as any; // Cast to any because Bun.spawn's signature is complex
+Bun.spawn = mockSpawn as unknown as typeof Bun.spawn;
 
 afterAll(() => {
   Bun.spawn = originalSpawn;

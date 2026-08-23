@@ -3,7 +3,12 @@ import {
   MAX_CHILD_OUTPUT_BYTES,
   MAX_DEBUG_LOG_BYTES,
 } from './src/constants.js';
-import { integerInRange, normalizeRetryConfig, numberInRange } from './src/config-values.js';
+import {
+  integerInRange,
+  normalizeRetryConfig,
+  numberInRange,
+  stringOrDefault,
+} from './src/config-values.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from './src/model-registry.js';
 
 const retry = normalizeRetryConfig({
@@ -26,7 +31,7 @@ export const CONFIG = {
     MAX_CHILD_OUTPUT_BYTES,
     1024 * 1024,
   ),
-  MODEL: process.env.GCM_MODEL || 'gemini-3.7-flash',
+  MODEL: stringOrDefault(process.env.GCM_MODEL, 'gemini-3.7-flash'),
   TEMP: numberInRange(process.env.GCM_TEMP, 0, 1, 1),
   TOKEN_BYTES_RATIO: numberInRange(process.env.GCM_TOKEN_BYTES_RATIO, 0.1, 100, 3.5),
   MAX_OUTPUT_TOKENS: integerInRange(
@@ -35,10 +40,10 @@ export const CONFIG = {
     Number.MAX_SAFE_INTEGER,
     DEFAULT_MAX_OUTPUT_TOKENS,
   ),
-  ENABLE_HUNK_WEIGHTS: (process.env.GCM_ENABLE_HUNK_WEIGHTS || 'false') === 'true',
-  LOG_LEVEL: process.env.GCM_LOG_LEVEL || 'info',
-  DEBUG_API: (process.env.GCM_DEBUG_API || 'false') === 'true',
-  DEBUG_FILE: process.env.GCM_DEBUG_FILE || '.debug.log',
+  ENABLE_HUNK_WEIGHTS: process.env.GCM_ENABLE_HUNK_WEIGHTS === 'true',
+  LOG_LEVEL: stringOrDefault(process.env.GCM_LOG_LEVEL, 'info'),
+  DEBUG_API: process.env.GCM_DEBUG_API === 'true',
+  DEBUG_FILE: stringOrDefault(process.env.GCM_DEBUG_FILE, '.debug.log'),
   DEBUG_MAX_BODY_LOG_BYTES: integerInRange(
     process.env.GCM_DEBUG_MAX_BODY_LOG_BYTES,
     1,

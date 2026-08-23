@@ -5,7 +5,7 @@ export function tryParseJSON(logger: Logger, text: string): unknown {
   try {
     return JSON.parse(text);
   } catch (err: unknown) {
-    const snippet = (text || '').slice(0, 1024);
+    const snippet = text.slice(0, 1024);
     try {
       logger?.log?.('error', 'Invalid JSON received from Gemini', {
         parseError: String(err),
@@ -83,7 +83,7 @@ export function parseCandidates(
   logger?: Logger,
 ): (GeminiResponse & { truncated?: boolean }) | null {
   const candidates = Array.isArray((json as { candidates?: unknown[] })?.candidates)
-    ? (json as { candidates?: unknown[] }).candidates || []
+    ? ((json as { candidates?: unknown[] }).candidates ?? [])
     : [];
   for (const candidate of candidates) {
     let text = extractText(candidate);
@@ -93,7 +93,7 @@ export function parseCandidates(
       try {
         const extracted = extractBetweenMarkers(text, logger);
         text = extracted.text;
-        truncated = !!extracted.truncated || truncated;
+        if (extracted.truncated) truncated = true;
         text = stripCodeFences(text);
       } catch {
         // be conservative: fall back to original text on any failure
@@ -102,17 +102,18 @@ export function parseCandidates(
 
       const usage =
         (json as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } })
-          .usageMetadata || {};
+          .usageMetadata ?? {};
+      const thinkingMetadata = (
+        candidate as {
+          thinkingMetadata?: { thinkingTokenCount?: number };
+        }
+      ).thinkingMetadata;
       return {
         text,
         usage: {
-          promptTokens: usage.promptTokenCount || 0,
-          outputTokens: usage.candidatesTokenCount || 0,
-          thinkingTokens: (candidate as { thinkingMetadata?: { thinkingTokenCount?: number } })
-            ?.thinkingMetadata
-            ? (candidate as { thinkingMetadata?: { thinkingTokenCount?: number } })
-                .thinkingMetadata!.thinkingTokenCount || 0
-            : 0,
+          promptTokens: usage.promptTokenCount ?? 0,
+          outputTokens: usage.candidatesTokenCount ?? 0,
+          thinkingTokens: thinkingMetadata?.thinkingTokenCount ?? 0,
         },
         truncated,
       };

@@ -1,38 +1,38 @@
 import globals from 'globals';
-import love from 'eslint-config-love';
+import loveInfrastructure from 'eslint-config-love';
 
 export default [
   {
-    ignores: ['node_modules', 'dist', 'test/**', '*.test.ts'],
+    ignores: ['node_modules', 'dist'],
   },
   {
-    ...love,
     files: ['**/*.js', '**/*.ts'],
+    linterOptions: loveInfrastructure.linterOptions,
     languageOptions: {
-      ...love.languageOptions,
+      ...loveInfrastructure.languageOptions,
       globals: {
-        ...love.languageOptions?.globals,
+        ...loveInfrastructure.languageOptions?.globals,
         ...globals.bunBuiltin,
       },
     },
+    plugins: loveInfrastructure.plugins,
     rules: {
-      '@typescript-eslint/no-magic-numbers': 'off',
-      '@typescript-eslint/strict-boolean-expressions': 'off',
-      '@typescript-eslint/prefer-nullish-coalescing': 'off',
-      '@typescript-eslint/switch-exhaustiveness-check': 'error',
       '@typescript-eslint/consistent-type-assertions': [
         'error',
         { objectLiteralTypeAssertions: 'never' },
       ],
       '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'error',
       '@typescript-eslint/no-unsafe-argument': 'error',
       '@typescript-eslint/no-unsafe-assignment': 'error',
+      '@typescript-eslint/no-unsafe-call': 'error',
       '@typescript-eslint/no-unsafe-member-access': 'error',
-      'no-negated-condition': 'error',
+      '@typescript-eslint/no-unsafe-return': 'error',
+      '@typescript-eslint/prefer-nullish-coalescing': 'error',
+      '@typescript-eslint/switch-exhaustiveness-check': 'error',
       'no-warning-comments': ['error', { terms: ['todo', 'fixme', 'xxx'], location: 'start' }],
-      'max-nested-callbacks': ['error', { max: 2 }],
-      'max-params': ['warn', { max: 4 }],
-      'max-statements': ['warn', { max: 18 }],
     },
   },
   {

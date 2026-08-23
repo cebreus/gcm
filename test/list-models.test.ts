@@ -4,7 +4,7 @@ import { test, expect, mock } from 'bun:test';
 const listMock = mock(() =>
   Promise.resolve(['models/gemini-3.7-flash', 'models/gemini-3.1-pro-preview']),
 );
-mock.module('../src/gemini-client/listModels', () => ({ listGeminiModels: listMock }));
+await mock.module('../src/gemini-client/listModels', () => ({ listGeminiModels: listMock }));
 
 test('cli: --list-models prints available models', async () => {
   const { executeCommitMessageGeneration } = await import('../src/runner.js'); // Use named export

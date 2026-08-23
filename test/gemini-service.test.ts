@@ -3,11 +3,17 @@ import { createGeminiService } from '../src/services/gemini-service';
 import type { GeminiClient, GeminiResponse } from '../src/gemini-client';
 import { createContextService } from '../src/services/context-service';
 import type { ContextService, PromptContextParts } from '../src/services/context-service';
+import type { Logger } from '../src/logger';
+
+const silentLogger: Logger = { log: () => undefined };
+const noSleep = async function (): Promise<void> {
+  await Promise.resolve();
+};
 
 async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
   let callCount = 0;
-  const mockClient: Partial<GeminiClient> = {
-    async callGemini(params: any) {
+  const mockClient: GeminiClient = {
+    async callGemini(params: Parameters<GeminiClient['callGemini']>[0]): Promise<GeminiResponse> {
       callCount += 1;
       // Simulate client-side automatic retry when opts.retryIfTruncated is true
       if (callCount === 1) {
@@ -18,25 +24,25 @@ async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
             text: 'prefix <<START>>full result<<END>>',
             usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 },
             truncated: false,
-          } as unknown as GeminiResponse & { truncated?: boolean };
+          };
         }
         return {
           text: 'prefix <<START>>partial result...',
           usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 },
           truncated: true,
-        } as unknown as GeminiResponse & { truncated?: boolean };
+        };
       }
       return {
         text: 'prefix <<START>>full result<<END>>',
         usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 },
         truncated: false,
-      } as unknown as GeminiResponse & { truncated?: boolean };
+      };
     },
   };
 
   const service = createGeminiService({
-    client: mockClient as GeminiClient,
-    logger: { log: () => {} } as any,
+    client: mockClient,
+    logger: silentLogger,
     apiKey: 'fake',
   });
   const res = await service.callGeminiAPI({
@@ -101,7 +107,7 @@ test('gemini-service: retry delegates context reduction to ContextService', asyn
   };
   const service = createGeminiService({
     client,
-    logger: { log: () => {} },
+    logger: silentLogger,
     apiKey: 'fake',
     contextService,
   });
@@ -153,10 +159,10 @@ test('gemini-service: keeps a construction summary and structured context on ove
         return { text: 'result', usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 } };
       },
     },
-    logger: { log: () => {} },
+    logger: silentLogger,
     apiKey: 'fake',
     contextService,
-    sleep: async () => {},
+    sleep: noSleep,
   });
 
   await service.callGeminiAPI({
@@ -195,10 +201,10 @@ test('gemini-service: retries after emptying a diff below an unreachable proport
         return { text: 'result', usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 } };
       },
     },
-    logger: { log: () => {} },
+    logger: silentLogger,
     apiKey: 'fake',
     contextService: createContextService(),
-    sleep: async () => {},
+    sleep: noSleep,
   });
 
   const initialPrompt =

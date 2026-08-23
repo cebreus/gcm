@@ -7,8 +7,8 @@ const stdoutWriteMock = mock((_text: string) => true);
 const stderrWriteMock = mock((_text: string) => true);
 
 beforeAll(() => {
-  process.stdout.write = stdoutWriteMock as any;
-  process.stderr.write = stderrWriteMock as any;
+  process.stdout.write = stdoutWriteMock as unknown as typeof process.stdout.write;
+  process.stderr.write = stderrWriteMock as unknown as typeof process.stderr.write;
 });
 
 afterAll(() => {
@@ -86,4 +86,11 @@ test('logger: log level filtering', () => {
   expect(stdoutOutput).not.toContain('this should also be ignored');
   expect(stdoutOutput).toContain('this is a warning');
   expect(stderrOutput).toContain('this is an error');
+});
+
+test('logger: empty log level uses the default', () => {
+  stdoutWriteMock.mockClear();
+  createLogger({ LOG_LEVEL: '' }).log('info', 'default level');
+  const output = stdoutWriteMock.mock.calls.map(call => String(call[0])).join('');
+  expect(output).toContain('default level');
 });

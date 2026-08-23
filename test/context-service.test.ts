@@ -67,6 +67,7 @@ test('context-service: retry summary replaces only the structured diff and prese
     stagedFiles: ['src/service.ts'],
     summaryAttempted: false,
   });
+  if (result.mode === 'unreducible') throw new Error('Expected summary reduction');
 
   expect(result.mode).toBe('summary');
   expect(result.summaryUsed).toBe(true);
@@ -106,6 +107,7 @@ test('context-service: retries retain at most 70% of the previous prompt per pas
       stagedFiles: attempt === 0 ? ['src/service.ts'] : [],
       summaryAttempted: attempt > 0,
     });
+    if (result.mode === 'unreducible') throw new Error('Expected retry reduction');
 
     expect(result.promptContext.length).toBeLessThan(previousLength);
     expect(result.promptContext.length).toBeLessThanOrEqual(Math.ceil(previousLength * 0.7));
@@ -129,6 +131,7 @@ test('context-service: tiny retry prompts terminate through the strict-decrease 
       stagedFiles: [],
       summaryAttempted: true,
     });
+    if (result.mode === 'unreducible') throw new Error('Expected retry reduction');
     promptParts = result.promptParts;
   }
 
@@ -148,6 +151,7 @@ test('context-service: retries without staged files truncate without invoking th
     stagedFiles: undefined,
     summaryAttempted: false,
   });
+  if (result.mode === 'unreducible') throw new Error('Expected retry reduction');
 
   expect(summarizeCalls).toBe(0);
   expect(result.mode).toBe('truncation');

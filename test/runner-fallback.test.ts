@@ -2,9 +2,10 @@ import { test, expect, mock } from 'bun:test';
 import { createLogger } from '../src/logger.ts';
 import runner from '../src/runner.ts';
 import type { SpawnGitStreamResult } from '../src/git-utils.ts';
-import type { GeminiClient } from '../src/gemini-client.ts';
+import type { GeminiService } from '../src/services/gemini-service.ts';
+import type { GitService } from '../src/services/git-service.ts';
 
-mock.module('@clack/prompts', () => ({
+void mock.module('@clack/prompts', () => ({
   intro: mock(() => {}),
   outro: mock(() => {}),
   spinner: mock(() => ({ start: mock(() => {}), stop: mock(() => {}) })),
@@ -32,11 +33,11 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
   }
 
   // Provide a git service that returns staged changes
-  function createGitServiceFake() {
+  function createGitServiceFake(): GitService {
     return {
       retrieveStagedChanges: async (
         commitHash: string | null,
-        logger: any,
+        _logger: Parameters<GitService['retrieveStagedChanges']>[1],
         excludePatterns: string[] = [],
       ) => {
         return {
@@ -45,15 +46,28 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
           truncated: false,
         };
       },
-      commitChanges: async (message: string, logger: any) => {},
-      amendCommit: async (message: string, logger: any) => {},
-      rewordCommit: async (target: any, message: string, logger: any) => {},
-      inspectCommitTarget: async (hash: string, logger: any) => {
+      commitChanges: async (
+        _message: Parameters<GitService['commitChanges']>[0],
+        _logger: Parameters<GitService['commitChanges']>[1],
+      ) => {},
+      amendCommit: async (
+        _message: Parameters<GitService['amendCommit']>[0],
+        _logger: Parameters<GitService['amendCommit']>[1],
+      ) => {},
+      rewordCommit: async (
+        _target: Parameters<GitService['rewordCommit']>[0],
+        _message: Parameters<GitService['rewordCommit']>[1],
+        _logger: Parameters<GitService['rewordCommit']>[2],
+      ) => {},
+      inspectCommitTarget: async (
+        _hash: Parameters<GitService['inspectCommitTarget']>[0],
+        _logger: Parameters<GitService['inspectCommitTarget']>[1],
+      ) => {
         throw new Error('not used in this test');
       },
-      getIndexTree: async (logger: any) => '',
-      getIndexEntries: async (logger: any) => [],
-      getRepositoryState: async (logger: any) => ({
+      getIndexTree: async (_logger: Parameters<GitService['getIndexTree']>[0]) => '',
+      getIndexEntries: async (_logger: Parameters<GitService['getIndexEntries']>[0]) => [],
+      getRepositoryState: async (_logger: Parameters<GitService['getRepositoryState']>[0]) => ({
         hasStagedChanges: true,
         hasUnstagedChanges: false,
         hasUntrackedFiles: false,
@@ -65,23 +79,23 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
   }
 
   // Provide a service that returns null to trigger fallback
-  function createGeminiServiceFake() {
+  function createGeminiServiceFake(): GeminiService {
     return {
-      callGeminiAPI: async () => null,
+      callGeminiAPI: async (_params: Parameters<GeminiService['callGeminiAPI']>[0]) => null,
     };
   }
 
   const logs: string[] = [];
   const originalStdoutWrite = process.stdout.write;
   const originalStderrWrite = process.stderr.write;
-  process.stdout.write = ((chunk: any) => {
+  process.stdout.write = ((chunk: string | Uint8Array) => {
     logs.push(String(chunk));
     return true;
-  }) as any;
-  process.stderr.write = ((chunk: any) => {
+  }) as unknown as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => {
     logs.push(String(chunk));
     return true;
-  }) as any;
+  }) as unknown as typeof process.stderr.write;
 
   // Ensure API key is present
   const origApiKey = process.env.GOOGLE_GEMINI_API_KEY;

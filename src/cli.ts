@@ -191,10 +191,10 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
   const finalMode = parsed.mode && isOutputMode(parsed.mode) ? parsed.mode : null;
 
   return {
-    commit: parsed.commit || null,
+    commit: parsed.commit ?? null,
     help: Boolean(parsed.help),
     version: Boolean(parsed.version),
-    model: parsed.model || null,
+    model: parsed.model ?? null,
     mode: finalMode,
     verbose: Boolean(parsed.verbose),
     debug: Boolean(parsed.debug),

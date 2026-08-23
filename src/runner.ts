@@ -112,9 +112,9 @@ function showHelp() {
 
 function displayResultStructured(logger: Logger, res: Labels): void {
   const branchText = `\n${C.cyan}${C.bright}BRANCH:${C.reset}\n${res.BRANCH || ''}\n`;
-  const commitText = `\n${C.cyan}${C.bright}COMMIT_MESSAGE:${C.reset}\n${res.COMMIT_MESSAGE || ''}\n`;
-  const titleText = `\n${C.magenta}${C.bright}PR_TITLE:${C.reset}\n${res.PR_TITLE || ''}\n`;
-  const descText = `\n${C.magenta}${C.bright}PR_DESCRIPTION:${C.reset}\n${res.PR_DESCRIPTION || ''}\n`;
+  const commitText = `\n${C.cyan}${C.bright}COMMIT_MESSAGE:${C.reset}\n${res.COMMIT_MESSAGE ?? ''}\n`;
+  const titleText = `\n${C.magenta}${C.bright}PR_TITLE:${C.reset}\n${res.PR_TITLE ?? ''}\n`;
+  const descText = `\n${C.magenta}${C.bright}PR_DESCRIPTION:${C.reset}\n${res.PR_DESCRIPTION ?? ''}\n`;
   logger.log('info', `${branchText}${commitText}${titleText}${descText}`);
 }
 
@@ -128,8 +128,8 @@ function reportStats(
   if (usage.thinkingTokens) thinking = ` | thinking: ${usage.thinkingTokens}`;
   logger.log(
     'info',
-    `${C.dim}${modelName} | actual usage -> input: ${usage.promptTokens || 0} tokens | output: ${
-      usage.outputTokens || 0
+    `${C.dim}${modelName} | actual usage -> input: ${usage.promptTokens ?? 0} tokens | output: ${
+      usage.outputTokens ?? 0
     } tokens (${outputLength.toLocaleString()} chars)${thinking}${C.reset}\n`,
   );
 }
@@ -188,14 +188,14 @@ function buildNoteContent(outputMode: 'full' | 'commit-only', parsedOut: Labels)
   if (outputMode === 'commit-only') return parsedOut.COMMIT_MESSAGE;
 
   return [
-    `${C.cyan}${C.bright}BRANCH:${C.reset} ${parsedOut.BRANCH || 'N/A'}`,
-    `${C.cyan}${C.bright}PR_TITLE:${C.reset} ${parsedOut.PR_TITLE || 'N/A'}`,
+    `${C.cyan}${C.bright}BRANCH:${C.reset} ${parsedOut.BRANCH ?? 'N/A'}`,
+    `${C.cyan}${C.bright}PR_TITLE:${C.reset} ${parsedOut.PR_TITLE ?? 'N/A'}`,
     '',
     `${C.bright}COMMIT MESSAGE:${C.reset}`,
     parsedOut.COMMIT_MESSAGE,
     '',
     `${C.magenta}${C.bright}PR DESCRIPTION:${C.reset}`,
-    parsedOut.PR_DESCRIPTION || 'N/A',
+    parsedOut.PR_DESCRIPTION ?? 'N/A',
   ].join('\n');
 }
 
@@ -249,13 +249,13 @@ function createRunnerDialogue(
 }
 
 function createRunnerServices(opts: RunnerOptions, logger: Logger, apiKey: string): RunnerServices {
-  const gitService = opts.gitService || createGitService();
-  const contextService = opts.contextService || createContextService();
+  const gitService = opts.gitService ?? createGitService();
+  const contextService = opts.contextService ?? createContextService();
   const geminiClient = createGeminiClient({ config: CONFIG, logger });
   const geminiService =
-    opts.geminiService ||
+    opts.geminiService ??
     createGeminiService({ client: geminiClient, logger, apiKey, contextService });
-  const listModelsFn = opts.listModels || listGeminiModels;
+  const listModelsFn = opts.listModels ?? listGeminiModels;
   const dialogue = createRunnerDialogue(logger, listModelsFn);
   return { gitService, contextService, geminiService, dialogue };
 }
@@ -295,25 +295,24 @@ async function buildGenerationState(parsedArgs: ParsedOptions): Promise<{
   targetCommit: string | null;
   state: GenerationState;
 }> {
-  const targetCommit = parsedArgs.commit || null;
+  const targetCommit = parsedArgs.commit ?? null;
   const session = await loadSession();
   const resolvedSessionModel =
     session.modelName === 'gemini-2.5-flash' || session.modelName === 'gemini-2.5-pro'
       ? CONFIG.MODEL
       : session.modelName;
-  const initialModelName = parsedArgs.model || resolvedSessionModel || CONFIG.MODEL;
+  const initialModelName = parsedArgs.model ?? resolvedSessionModel ?? CONFIG.MODEL;
   return {
     targetCommit,
     state: {
       baselineModelName: initialModelName,
       modelName: initialModelName,
-      outputMode: parsedArgs.mode || session.outputMode || 'commit-only',
+      outputMode: parsedArgs.mode ?? session.outputMode ?? 'commit-only',
       userHint: undefined,
     },
   };
 }
 
-// eslint-disable-next-line max-statements -- terminal outcomes must reach the entrypoint intact.
 async function runGenerationSafely(params: {
   opts: RunnerOptions;
   parsedArgs: ParsedOptions;
@@ -325,7 +324,7 @@ async function runGenerationSafely(params: {
 }): Promise<TerminalOutcome> {
   const { opts, parsedArgs, logger, apiKey, targetCommit, state, s } = params;
   try {
-    const services = createRunnerServices(opts, logger, apiKey || '');
+    const services = createRunnerServices(opts, logger, apiKey ?? '');
     return await runGenerationWorkflow({
       services,
       parsedArgs,
@@ -344,16 +343,20 @@ async function runGenerationSafely(params: {
     } else if (/unknown revision/i.test(errStr))
       cancel(`Error: Invalid commit SHA: ${targetCommit}`);
     else if (isGeminiApiError(error)) {
-      const metadata = error.metadata || {};
-      let msg = `API Error (${metadata.status || 'Unknown'})`;
+      const metadata = error.metadata ?? {};
+      let status = 'Unknown';
+      if (typeof metadata.status === 'string' || typeof metadata.status === 'number') {
+        status = String(metadata.status);
+      }
+      let msg = `API Error (${status})`;
       try {
         const parsed: unknown = JSON.parse(
           typeof metadata.snippet === 'string' ? metadata.snippet : '{}',
         );
         const responseError = isRecord(parsed) ? parsed.error : undefined;
         const responseMessage = isRecord(responseError) ? responseError.message : undefined;
-        if (responseMessage) {
-          msg += `: ${stripTerminalControlSequences(String(responseMessage))}`;
+        if (typeof responseMessage === 'string' && responseMessage) {
+          msg += `: ${stripTerminalControlSequences(responseMessage)}`;
         } else {
           msg += `: ${stripTerminalControlSequences(error.message)}`;
         }
@@ -387,7 +390,6 @@ function isGeminiApiError(
   );
 }
 
-// eslint-disable-next-line max-statements -- terminal outcomes must reach the entrypoint intact.
 async function runGenerationWorkflow(params: {
   services: RunnerServices;
   parsedArgs: ParsedOptions;
@@ -585,7 +587,7 @@ function buildLogMetadata(
   targetCommit: string | null,
 ): LogMetadata {
   return {
-    targetCommit: targetCommit || null,
+    targetCommit: targetCommit ?? null,
     numFiles: staged.stagedFiles.length,
     origLen: staged.stagedDiff.length,
     truncated: staged.truncated,
@@ -884,15 +886,15 @@ export async function executeCommitMessageGeneration(
   argv?: string[],
   dependencies?: RunnerOptions,
 ): Promise<void> {
-  const opts = dependencies || {};
-  const parsedArgs = parseArgsOrReport(argv || process.argv.slice(2));
+  const opts = dependencies ?? {};
+  const parsedArgs = parseArgsOrReport(argv ?? process.argv.slice(2));
   const packageInfo = getPackageInfo();
   let exitCode = 0;
   if (parsedArgs) {
     const earlyExitCode = await handleCliEarlyExit(parsedArgs, packageInfo);
     if (earlyExitCode === null) {
       const loggerConfig = buildLoggerConfig(parsedArgs);
-      const logger = opts.logger || createLogger(loggerConfig);
+      const logger = opts.logger ?? createLogger(loggerConfig);
       const s = spinner();
       const { targetCommit, state } = await buildGenerationState(parsedArgs);
       const outcome = await runGenerationSafely({
