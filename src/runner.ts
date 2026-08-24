@@ -15,7 +15,13 @@ import { summarizeRepositoryDiff } from './services/repository-summary.js';
 import { createContextService } from './services/context-service.js';
 import type { ContextService } from './services/context-service.js';
 import { createGeminiService } from './services/gemini-service.js';
-import type { GeminiService } from './services/gemini-service.js';
+import type { LanguageModelProvider, LanguageModelService } from './language-model-service.js';
+import {
+  getLanguageModelProviderValidationError,
+  isLanguageModelProviderId,
+  isLanguageModelName,
+} from './language-model-service.js';
+import { getModelSpec, KNOWN_MODELS } from './model-registry.js';
 import { loadSession, saveSession } from './session.js';
 import {
   intro,
@@ -28,7 +34,7 @@ import {
   isCancel,
   cancel,
 } from '@clack/prompts';
-import { sanitizeForDisplay, stripTerminalControlSequences } from './utils.js';
+import { redactSensitiveText, sanitizeForDisplay, stripTerminalControlSequences } from './utils.js';
 import clipboardy from 'clipboardy';
 import pkg from '../package.json';
 import {
@@ -59,13 +65,13 @@ function getPackageInfo(): PackageInfo {
   return { name: pkg.name, version: pkg.version };
 }
 
-function showHelp() {
+function showHelp(providerLabel: string) {
   const packageInfo = getPackageInfo();
   const helpText = `
-    ${C.bright}Gemini Commit Message Helper${C.reset}
+    ${C.bright}${providerLabel} Commit Message Helper${C.reset}
     Version: ${packageInfo.version}
 
-    Automatically generates professional commit messages, branch names, and PR descriptions using Gemini AI.
+    Automatically generates professional commit messages, branch names, and PR descriptions using ${providerLabel} AI.
 
     ${C.bright}Usage:${C.reset}
       gcm [options]
@@ -79,8 +85,8 @@ function showHelp() {
       ${C.cyan}-e, --exclude <pattern>${C.reset}   Exclude files matching pattern (e.g., *manifest*).
                                 Can be comma-separated or used multiple times.
       ${C.cyan}-m, --mode <mode>${C.reset}         Output mode: 'full' or 'commit-only'.
-      ${C.cyan}--model <name>${C.reset}            Specify an alternative Gemini model to use.
-      ${C.cyan}--list-models${C.reset}             List available Gemini models and exit.
+      ${C.cyan}--model <name>${C.reset}            Specify an alternative ${providerLabel} model to use.
+      ${C.cyan}--list-models${C.reset}             List available ${providerLabel} models and exit.
 
     ${C.bright}Commit Safety:${C.reset}
       - Without ${C.cyan}--commit${C.reset} the action commits the staged changes.
@@ -98,16 +104,24 @@ function showHelp() {
 }
 
 export interface RunnerOptions {
+  isInteractive?: boolean;
   logger?: Logger;
   gitService?: GitService;
   contextService?: ContextService;
-  geminiService?: GeminiService;
-  listModels?: (apiKey: string) => Promise<string[]>;
+  geminiService?: LanguageModelService;
+  languageModelProvider?: LanguageModelProvider;
+  languageModelProviderFactories?: Array<{
+    id: string;
+    label: string;
+    create(): Promise<LanguageModelProvider>;
+  }>;
+  geminiModelLister?: (credential: string) => Promise<string[]>;
 }
 
 function createRunnerDialogue(
   logger: Logger,
-  listModelsFn: (apiKey: string) => Promise<string[]>,
+  provider: LanguageModelProvider,
+  providers: Array<{ id: string; label: string }>,
 ): InteractiveGenerationDialogue {
   return createInteractiveGenerationDialogue({
     prompts: {
@@ -130,7 +144,11 @@ function createRunnerDialogue(
         await clipboardy.write(message);
       },
     },
-    listModels: listModelsFn,
+    listModels: async function () {
+      return provider.listModels();
+    },
+    fallbackModels: provider.fallbackModels,
+    providers,
     logger,
   });
 }
@@ -138,16 +156,13 @@ function createRunnerDialogue(
 function createRunnerServices(
   opts: RunnerOptions,
   logger: Logger,
-  apiKey: string,
+  provider: LanguageModelProvider,
+  providers: Array<{ id: string; label: string }>,
 ): Omit<GenerationServices, 'output'> {
   const gitService = opts.gitService ?? createGitService();
   const contextService =
     opts.contextService ?? createContextService({ summarizeLargeDiff: summarizeRepositoryDiff });
-  const geminiClient = createGeminiClient({ config: CONFIG, logger });
-  const geminiService =
-    opts.geminiService ?? createGeminiService({ client: geminiClient, logger, apiKey });
-  const listModelsFn = opts.listModels ?? listGeminiModels;
-  const dialogue = createRunnerDialogue(logger, listModelsFn);
+  const dialogue = createRunnerDialogue(logger, provider, providers);
   const commitActions = createCommitActionService({ gitService, logger });
   async function resolveCommitContextHints(files: string[]) {
     return getCommitContextHints(files, await readCommitContextFacts(files));
@@ -155,7 +170,10 @@ function createRunnerServices(
   return {
     gitService,
     contextService,
-    geminiService,
+    languageModelService: provider.service,
+    providerId: provider.id,
+    providerLabel: provider.label,
+    getModelSpec: provider.getModelSpec,
     dialogue,
     commitActions,
     getCommitContextHints: resolveCommitContextHints,
@@ -163,9 +181,77 @@ function createRunnerServices(
   };
 }
 
-function createRunnerOutput(s: ReturnType<typeof spinner>): GenerationServices['output'] {
+function createGeminiProvider(opts: RunnerOptions, logger: Logger): LanguageModelProvider {
+  const apiKey = process.env.GOOGLE_GEMINI_API_KEY ?? '';
+  const service: LanguageModelService =
+    opts.geminiService ??
+    createGeminiService({
+      client: createGeminiClient({ config: CONFIG, logger }),
+      logger,
+      apiKey,
+    });
+  const listModels = opts.geminiModelLister ?? listGeminiModels;
   return {
-    isInteractive: Boolean(process.stdin.isTTY),
+    id: 'gemini',
+    label: 'Gemini',
+    readinessError: apiKey ? undefined : 'Environment variable GOOGLE_GEMINI_API_KEY not set.',
+    defaultModel: CONFIG.MODEL,
+    fallbackModels: KNOWN_MODELS,
+    service,
+    listModels: function () {
+      if (!apiKey) throw new Error('GOOGLE_GEMINI_API_KEY is not set.');
+      return listModels(apiKey).then(function (models) {
+        return models
+          .map(model => model.replace(/^models\//, ''))
+          .filter(model => model.startsWith('gemini-'))
+          .filter(
+            model =>
+              !/(embedding|image|tts|audio|live|robotics|computer-use|veo|imagen)/i.test(model),
+          );
+      });
+    },
+    getModelSpec,
+  };
+}
+
+function getProviderFactories(opts: RunnerOptions, logger: Logger) {
+  if (opts.languageModelProvider) {
+    const provider = opts.languageModelProvider;
+    return [{ id: provider.id, label: provider.label, create: async function () { return provider; } }];
+  }
+  return opts.languageModelProviderFactories ?? [
+    {
+      id: 'gemini',
+      label: 'Gemini',
+      create: async function () {
+        return createGeminiProvider(opts, logger);
+      },
+    },
+  ];
+}
+
+function getProviderFactoriesValidationError(
+  factories: ReturnType<typeof getProviderFactories>,
+): string | null {
+  if (factories.length === 0) return 'No language model provider available';
+  const ids = new Set<string>();
+  for (const factory of factories) {
+    if (!isLanguageModelProviderId(factory.id)) return 'Invalid language model provider id';
+    if (!/^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$/u.test(factory.label)) {
+      return 'Invalid language model provider label';
+    }
+    if (ids.has(factory.id)) return 'Duplicate language model provider id';
+    ids.add(factory.id);
+  }
+  return null;
+}
+
+function createRunnerOutput(
+  s: ReturnType<typeof spinner>,
+  isInteractive = Boolean(process.stdin.isTTY),
+): GenerationServices['output'] {
+  return {
+    isInteractive,
     startProgress: function (message) {
       s.start(message);
     },
@@ -176,7 +262,9 @@ function createRunnerOutput(s: ReturnType<typeof spinner>): GenerationServices['
     note,
     outro,
     sanitizeGeneratedText: sanitizeForDisplay,
-    sanitizeTerminalText: stripTerminalControlSequences,
+    sanitizeTerminalText: function (message) {
+      return redactSensitiveText(stripTerminalControlSequences(message));
+    },
     style: {
       bright: function (message) {
         return `${C.bright}${message}${C.reset}`;
@@ -202,12 +290,15 @@ function createRunnerOutput(s: ReturnType<typeof spinner>): GenerationServices['
 
 async function maybeHandleListModels(
   parsedArgs: ParsedOptions,
-  listModels: (apiKey: string) => Promise<string[]>,
+  provider: LanguageModelProvider,
 ): Promise<number | null> {
   if (!parsedArgs.listModels) return null;
   return runListModelsCommand({
-    apiKey: process.env.GOOGLE_GEMINI_API_KEY,
-    listModels,
+    providerLabel: provider.label,
+    readinessError: provider.readinessError,
+    listModels: function () {
+      return provider.listModels();
+    },
     output: { cancel, note, outro },
   });
 }
@@ -219,23 +310,6 @@ function buildLoggerConfig(parsedArgs: ParsedOptions): LoggerConfig {
   if (parsedArgs.verbose) loggerConfig.LOG_LEVEL = 'debug';
   if (parsedArgs.debug) CONFIG.DEBUG_API = true;
   return loggerConfig;
-}
-
-async function handleCliEarlyExit(
-  parsedArgs: ParsedOptions,
-  packageInfo: PackageInfo,
-  listModels: (apiKey: string) => Promise<string[]>,
-): Promise<number | null> {
-  if (parsedArgs.version) {
-    process.stdout.write(`${packageInfo.name} ${packageInfo.version}\n`);
-    return 0;
-  }
-  intro(`${C.bright}Gemini Commit Message Helper v${packageInfo.version}${C.reset}`);
-  if (parsedArgs.help) {
-    showHelp();
-    return 0;
-  }
-  return maybeHandleListModels(parsedArgs, listModels);
 }
 
 function parseArgsOrReport(argv: string[]): ParsedOptions | null {
@@ -257,33 +331,126 @@ export async function executeCommitMessageGeneration(
   const packageInfo = getPackageInfo();
   let exitCode = 0;
   if (parsedArgs) {
-    const earlyExitCode = await handleCliEarlyExit(
-      parsedArgs,
-      packageInfo,
-      opts.listModels ?? listGeminiModels,
-    );
-    if (earlyExitCode === null) {
-      const loggerConfig = buildLoggerConfig(parsedArgs);
-      const logger = opts.logger ?? createLogger(loggerConfig);
+    const loggerConfig = buildLoggerConfig(parsedArgs);
+    const logger = opts.logger ?? createLogger(loggerConfig);
+    const isInteractive = opts.isInteractive ?? Boolean(process.stdin.isTTY);
+    if (parsedArgs.version) {
+      process.stdout.write(`${packageInfo.name} ${packageInfo.version}\n`);
+      process.exitCode = 0;
+      return;
+    }
+    const factories = getProviderFactories(opts, logger);
+    const factoriesError = getProviderFactoriesValidationError(factories);
+    if (factoriesError) {
+      cancel(`Error: ${factoriesError}.`);
+      process.exitCode = 1;
+      return;
+    }
+    const session = await loadSession();
+    const environmentProviderId = process.env.GCM_PROVIDER;
+    let providerId = opts.languageModelProvider
+      ? opts.languageModelProvider.id
+      : environmentProviderId ??
+        (factories.some(factory => factory.id === session.providerId)
+          ? session.providerId
+          : factories[0]?.id);
+    if (!providerId || (parsedArgs.model && !isLanguageModelName(parsedArgs.model))) {
+      cancel(`Error: ${providerId ? 'Invalid model name' : 'No language model provider available'}.`);
+      process.exitCode = 1;
+      return;
+    }
+    if (parsedArgs.help) {
+      const helpFactory = factories.find(factory => factory.id === providerId) ?? factories[0];
+      if (!helpFactory) throw new Error('No language model provider available.');
+      intro(`${C.bright}${helpFactory.label} Commit Message Helper v${packageInfo.version}${C.reset}`);
+      showHelp(helpFactory.label);
+      process.exitCode = 0;
+      return;
+    }
+    let providerSwitched = false;
+    let previousProviderId: string | null = null;
+    for (;;) {
+      const factory = factories.find(candidate => candidate.id === providerId);
+      if (!factory) {
+        cancel('Error: Unknown language model provider.');
+        exitCode = 1;
+        break;
+      }
+      let provider: LanguageModelProvider;
+      try {
+        provider = await factory.create();
+      } catch (error) {
+        const message = redactSensitiveText(stripTerminalControlSequences(String(error)));
+        if (previousProviderId) {
+          note(message, `${factory.label} unavailable`);
+          providerId = previousProviderId;
+          previousProviderId = null;
+          providerSwitched = false;
+          continue;
+        }
+        if (isInteractive && factories.length > 1) {
+          note(message, `${factory.label} unavailable`);
+          const selectedProvider = await select({
+            message: 'Select AI Provider',
+            options: factories.map(candidate => ({ value: candidate.id, label: candidate.label })),
+          });
+          if (!isCancel(selectedProvider)) {
+            providerId = String(selectedProvider);
+            providerSwitched = true;
+            continue;
+          }
+        }
+        cancel(`Error: ${message}.`);
+        exitCode = 1;
+        break;
+      }
+      if (provider.id !== factory.id || provider.label !== factory.label) {
+        cancel('Error: Invalid provider factory identity.');
+        exitCode = 1;
+        break;
+      }
+      const providerError = getLanguageModelProviderValidationError(provider);
+      if (providerError) {
+        cancel(`Error: ${providerError}.`);
+        exitCode = 1;
+        break;
+      }
+      intro(`${C.bright}${provider.label} Commit Message Helper v${packageInfo.version}${C.reset}`);
+      const earlyExitCode = await maybeHandleListModels(parsedArgs, provider);
+      if (earlyExitCode !== null) {
+        exitCode = earlyExitCode;
+        break;
+      }
       const s = spinner();
-      const output = createRunnerOutput(s);
-      const session = await loadSession();
-      const { targetCommit, state } = createGenerationState(parsedArgs, session, CONFIG.MODEL);
-      const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
+      const output = createRunnerOutput(s, isInteractive);
+      const activeParsedArgs = providerSwitched ? { ...parsedArgs, model: null } : parsedArgs;
+      const { targetCommit, state } = createGenerationState(
+        activeParsedArgs,
+        session,
+        provider.defaultModel,
+        provider.id,
+      );
       const outcome = await runGenerationCommand({
         createServices: function () {
-          return createRunnerServices(opts, logger, apiKey ?? '');
+          return createRunnerServices(opts, logger, provider, factories);
         },
-        parsedArgs,
+        parsedArgs: activeParsedArgs,
         logger,
-        apiKey,
+        providerReadinessError: provider.readinessError,
+        canSwitchProvider: factories.length > 1 && output.isInteractive,
         targetCommit,
         state,
         output,
       });
+      if (typeof outcome === 'object') {
+        previousProviderId = providerId;
+        providerId = outcome.providerId;
+        providerSwitched = true;
+        session.outputMode = state.outputMode;
+        continue;
+      }
       exitCode = outcome === 'failure' ? 1 : 0;
-    } else {
-      exitCode = earlyExitCode;
+      break;
     }
   } else {
     exitCode = 1;

@@ -57,8 +57,13 @@ function sanitizeBranchName(branch: string): string {
   return branch.replace(/[^a-zA-Z0-9/_-]/g, '-').toLowerCase();
 }
 
-export function parseGeminiOutput(text: string, mode: 'full' | 'commit-only' = 'full'): Labels {
-  if (!text || typeof text !== 'string') throw new Error('parseGeminiOutput expects a string');
+export function parseLanguageModelOutput(
+  text: string,
+  mode: 'full' | 'commit-only' = 'full',
+): Labels {
+  if (!text || typeof text !== 'string') {
+    throw new Error('parseLanguageModelOutput expects a string');
+  }
 
   // Add a sanity limit to prevent parsing excessively large responses
   const MAX_RESPONSE_SIZE = 16 * 1024 * 1024; // 16MB

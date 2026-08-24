@@ -10,13 +10,16 @@ export function estimateTokenCount(text: string, tokenBytesRatio: number): numbe
   return Math.ceil(encoder.encode(text).length / tokenBytesRatio);
 }
 
-export function generateFallbackCommitDetails(stagedFiles: string[]): Labels {
+export function generateFallbackCommitDetails(
+  stagedFiles: string[],
+  providerLabel: string,
+): Labels {
   const files = stagedFiles || [];
   const n = files.length;
   const branch = `chore/update-${n}-files`;
   const commitTitle = `chore: update ${n} file${n === 1 ? '' : 's'}`;
   const bullets = files.slice(0, 12).map(fileBullet).join('\n');
-  const prDesc = `Automatic fallback commit produced after Gemini failed to respond.\n\nFiles changed:\n${bullets}\n\n(Truncated list if more files)`;
+  const prDesc = `Automatic fallback commit produced after ${providerLabel} failed to respond.\n\nFiles changed:\n${bullets}\n\n(Truncated list if more files)`;
   return {
     BRANCH: branch,
     COMMIT_MESSAGE: commitTitle + '\n\n' + bullets,

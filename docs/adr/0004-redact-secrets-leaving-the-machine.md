@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 
-The staged diff is the payload of every request to Gemini. A developer who
+The staged diff is the payload of every request to the active language model provider. A developer who
 stages a secret by accident transmits it to a third party, and the same text
 also reaches the local debug log. The logger already redacted a set of key
 shapes for its own output; the outbound request did not.

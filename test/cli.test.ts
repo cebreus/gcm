@@ -101,6 +101,7 @@ test('cli: gives precedence to flags over string arguments', () => {
 
 test('cli: rejects unknown flags', () => {
   expect(() => parseArgs(['--commmit', 'abc123'])).toThrow('Unknown flag: --commmit');
+  expect(() => parseArgs(['--listModels'])).toThrow('Unknown flag: --listModels');
 });
 
 test('cli: rejects unknown clustered flags', () => {

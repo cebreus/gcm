@@ -626,7 +626,9 @@ async function getRepositoryStateWithDeps(params: {
   const { deps, logger } = params;
   const status = await deps.gitCommandRunner(['status', '--porcelain']);
   if (status.truncated) {
-    throw new Error('Repository status output was truncated. Reduce the worktree size, then try again.');
+    throw new Error(
+      'Repository status output was truncated. Reduce the worktree size, then try again.',
+    );
   }
   const parsed = parsePorcelainStatus(status.text);
   const inProgressOperation = await detectInProgressOperation(deps);

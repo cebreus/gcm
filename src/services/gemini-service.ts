@@ -3,10 +3,12 @@ import type { Logger, LogMetadata } from '../logger.js';
 import { renderPromptContext } from './context-service.js';
 import type { PromptContextParts, RetryReductionResult } from './context-service.js';
 import { CONFIG } from '../../gcm.config.js';
-
-export interface GeminiService {
-  callGeminiAPI(params: CallGeminiApiParams): Promise<GeminiResponse | null>;
-}
+import type {
+  LanguageModelGenerateParams,
+  LanguageModelService,
+} from '../language-model-service.js';
+import { createLanguageModelApiError } from '../language-model-service.js';
+import { isGeminiApiError } from '../gemini-client/errors.js';
 
 export interface GeminiServiceDeps {
   client: GeminiClient;
@@ -15,26 +17,8 @@ export interface GeminiServiceDeps {
   sleep?: (milliseconds: number) => Promise<unknown>;
 }
 
-type CallGeminiOptions = {
-  retryIfTruncated?: boolean;
-  retryIfTruncatedMaxRetries?: number;
-  retryIfTruncatedIncreaseTokens?: number;
-  timeoutMs?: number;
-  modelOverride?: string;
-};
-
-interface CallGeminiApiParams {
-  promptContext: string;
-  promptParts?: PromptContextParts;
-  summaryAttempted?: boolean;
-  systemPrompt: string;
-  reduceForRetry(params: {
-    promptParts: PromptContextParts;
-    summaryAttempted: boolean;
-  }): Promise<RetryReductionResult>;
-  meta: LogMetadata;
-  opts?: CallGeminiOptions;
-}
+type CallGeminiOptions = NonNullable<LanguageModelGenerateParams['opts']>;
+type CallGeminiApiParams = LanguageModelGenerateParams;
 
 interface CallLoopState {
   input: string;
@@ -142,7 +126,7 @@ async function maybeHandleOverflow(params: {
   return true;
 }
 
-async function callGeminiAPIWithDeps(params: {
+async function generateWithDeps(params: {
   deps: GeminiServiceRuntimeDeps;
   promptContext: string;
   promptParts?: PromptContextParts;
@@ -207,7 +191,7 @@ export function createGeminiService({
   logger,
   apiKey,
   sleep = Bun.sleep,
-}: GeminiServiceDeps): GeminiService {
+}: GeminiServiceDeps): LanguageModelService {
   const deps: GeminiServiceRuntimeDeps = {
     client,
     logger,
@@ -215,8 +199,15 @@ export function createGeminiService({
     sleep,
   };
   return {
-    callGeminiAPI: function (params: CallGeminiApiParams): Promise<GeminiResponse | null> {
-      return callGeminiAPIWithDeps({ deps, ...params });
+    generate: async function (params: CallGeminiApiParams): Promise<GeminiResponse | null> {
+      try {
+        return await generateWithDeps({ deps, ...params });
+      } catch (error) {
+        if (isGeminiApiError(error)) {
+          throw createLanguageModelApiError(error.message, error.metadata);
+        }
+        throw error;
+      }
     },
   };
 }
