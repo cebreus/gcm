@@ -10,7 +10,12 @@ void mock.module('@clack/prompts', () => ({
   outro: mock(() => {}),
   spinner: mock(() => ({ start: mock(() => {}), stop: mock(() => {}) })),
   note: mock(() => {}),
-  select: mock(() => Promise.resolve('continue')),
+  select: mock(function (prompt: { options: Array<{ value: string }> }) {
+    const values = prompt.options.map(function (option) {
+      return option.value;
+    });
+    return Promise.resolve(values.includes('generate') ? 'generate' : 'continue');
+  }),
   text: mock(() => Promise.resolve('')),
   isCancel: mock((value: unknown) => value === 'cancel'),
   cancel: mock(() => {}),

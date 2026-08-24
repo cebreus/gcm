@@ -20,12 +20,12 @@ async function selectIntegrationPrompt(options: {
   const values = options.options.map(function (option) {
     return option.value;
   });
-  if (options.message.startsWith('Settings:') && values.join(',') === 'generate,configure,exit') {
+  if (options.message.startsWith('Settings:') && values.join(',') === 'generate,model,mode,exit') {
     return 'generate';
   }
   if (
     options.message.startsWith('Staged files suggest multiple possible scopes:') &&
-    values.join(',') === 'split,continue,cancel'
+    values.join(',') === 'continue,split,cancel'
   ) {
     return 'continue';
   }
