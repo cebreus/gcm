@@ -73,7 +73,11 @@ test('parser: rejects language-model control tags and fenced output in every mod
 });
 
 test('parser: requires a Conventional Commit subject without restricting type or length', () => {
-  for (const output of ['Gen', 'feat(scope) missing colon', 'Here is your commit: feat: add thing']) {
+  for (const output of [
+    'Gen',
+    'feat(scope) missing colon',
+    'Here is your commit: feat: add thing',
+  ]) {
     expect(() => parseLanguageModelOutput(output, 'commit-only')).toThrow(
       'LLM output has invalid Conventional Commit subject',
     );
@@ -87,7 +91,9 @@ test('parser: requires a Conventional Commit subject without restricting type or
   ).toThrow('LLM output has invalid Conventional Commit subject');
 
   const valid = parseLanguageModelOutput(
-    'custom-type(long scope)!: ' + 'word '.repeat(100) + '\n\nThinking and channel are ordinary words.',
+    'custom-type(long scope)!: ' +
+      'word '.repeat(100) +
+      '\n\nThinking and channel are ordinary words.',
     'commit-only',
   );
   expect(valid.COMMIT_MESSAGE).toContain('Thinking and channel are ordinary words.');

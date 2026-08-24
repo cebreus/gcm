@@ -182,12 +182,19 @@ function createRunnerServices(
   };
 }
 
-function createGeminiProvider(opts: RunnerOptions, logger: Logger): LanguageModelProvider {
+function createGeminiProvider(
+  opts: RunnerOptions,
+  logger: Logger,
+  debugApi = false,
+): LanguageModelProvider {
   const apiKey = process.env.GOOGLE_GEMINI_API_KEY ?? '';
   const service: LanguageModelService =
     opts.geminiService ??
     createGeminiService({
-      client: createGeminiClient({ config: CONFIG, logger }),
+      client: createGeminiClient({
+        config: { ...CONFIG, DEBUG_API: debugApi || CONFIG.DEBUG_API },
+        logger,
+      }),
       logger,
       apiKey,
     });
@@ -215,7 +222,7 @@ function createGeminiProvider(opts: RunnerOptions, logger: Logger): LanguageMode
   };
 }
 
-function getProviderFactories(opts: RunnerOptions, logger: Logger) {
+function getProviderFactories(opts: RunnerOptions, logger: Logger, debugApi = false) {
   if (opts.languageModelProvider) {
     const provider = opts.languageModelProvider;
     return [
@@ -234,7 +241,7 @@ function getProviderFactories(opts: RunnerOptions, logger: Logger) {
         id: 'gemini',
         label: 'Gemini',
         create: async function () {
-          return createGeminiProvider(opts, logger);
+          return createGeminiProvider(opts, logger, debugApi);
         },
       },
       {
@@ -332,7 +339,6 @@ function buildLoggerConfig(parsedArgs: ParsedOptions): LoggerConfig {
     LOG_LEVEL: CONFIG.LOG_LEVEL,
   };
   if (parsedArgs.verbose) loggerConfig.LOG_LEVEL = 'debug';
-  if (parsedArgs.debug) CONFIG.DEBUG_API = true;
   return loggerConfig;
 }
 
@@ -363,7 +369,7 @@ export async function executeCommitMessageGeneration(
       process.exitCode = 0;
       return;
     }
-    const factories = getProviderFactories(opts, logger);
+    const factories = getProviderFactories(opts, logger, parsedArgs.debug);
     const factoriesError = getProviderFactoriesValidationError(factories);
     if (factoriesError) {
       cancel(`Error: ${factoriesError}.`);

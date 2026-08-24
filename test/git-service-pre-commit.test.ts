@@ -124,3 +124,46 @@ test('git service: treats a commit as unpublished when the repository has no rem
     await runCommand(['rm', '-rf', repository]);
   }
 });
+
+test('git service: inspects independent commit facts concurrently', async function () {
+  let active = 0;
+  let peak = 0;
+  const service = createGitService({
+    gitCommandRunner: async function (args) {
+      active += 1;
+      peak = Math.max(peak, active);
+      await Bun.sleep(1);
+      active -= 1;
+      const command = args.join(' ');
+      if (command === 'rev-parse --verify target^{commit}')
+        return { text: 'target\n', truncated: false };
+      if (command === 'rev-parse --verify HEAD^{commit}')
+        return { text: 'head\n', truncated: false };
+      if (command === 'log -1 --format=%s target')
+        return { text: 'feat: target\n', truncated: false };
+      if (command === 'log --format=%s target^')
+        return { text: 'chore: parent\n', truncated: false };
+      if (command === 'branch --remotes --contains target') return { text: '', truncated: false };
+      if (command === 'remote') return { text: '', truncated: false };
+      if (command === 'merge-base HEAD target') return { text: 'target\n', truncated: false };
+      if (command === 'symbolic-ref --quiet HEAD')
+        return { text: 'refs/heads/main\n', truncated: false };
+      throw new Error(`Unexpected command: ${command}`);
+    },
+  });
+
+  const target = await service.inspectCommitTarget('target', null);
+
+  expect(peak).toBeGreaterThan(1);
+  expect(target).toMatchObject({
+    hash: 'target',
+    headHash: 'head',
+    subject: 'feat: target',
+    isHead: false,
+    isPublished: false,
+    isAncestorOfHead: true,
+    isHeadDetached: false,
+    hasParent: true,
+    hasAmbiguousSubject: false,
+  });
+});

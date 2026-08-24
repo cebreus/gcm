@@ -21,19 +21,9 @@ const noSleep = async function (): Promise<void> {
 async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
   let callCount = 0;
   const mockClient: GeminiClient = {
-    async callGemini(params: Parameters<GeminiClient['callGemini']>[0]): Promise<GeminiResponse> {
+    async callGemini(): Promise<GeminiResponse> {
       callCount += 1;
-      // Simulate client-side automatic retry when opts.retryIfTruncated is true
       if (callCount === 1) {
-        if (params?.callOptions?.retryIfTruncated) {
-          // pretend the client retried internally and returned a full result
-          callCount += 1;
-          return {
-            text: 'prefix <<START>>full result<<END>>',
-            usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 },
-            truncated: false,
-          };
-        }
         return {
           text: 'prefix <<START>>partial result...',
           usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 },
@@ -64,13 +54,103 @@ async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
       retryIfTruncated: true,
       retryIfTruncatedMaxRetries: 2,
       retryIfTruncatedIncreaseTokens: 100,
+      modelOverride: 'gemini-3.1-pro-preview',
     },
   });
-  expect(callCount).toBeGreaterThanOrEqual(2);
+  expect(callCount).toBe(2);
   expect(res?.truncated).toBeFalsy();
 }
 
-test('gemini-service: retry passthrough on truncated responses', geminiServiceRetryOnTruncatedTest);
+test('gemini-service: owns truncated response retries', geminiServiceRetryOnTruncatedTest);
+
+test('gemini-service: bounds invalid truncation retry options', async () => {
+  const outputLimits: number[] = [];
+  const service = createGeminiService({
+    client: {
+      callGemini: async function (params) {
+        outputLimits.push(params.callOptions.maxOutputTokens ?? 0);
+        return {
+          text: outputLimits.length === 1 ? 'partial' : 'complete',
+          usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 },
+          truncated: outputLimits.length === 1,
+        };
+      },
+    },
+    logger: silentLogger,
+    apiKey: 'fake',
+    sleep: noSleep,
+  });
+
+  await service.generate({
+    promptContext: 'ctx',
+    systemPrompt: 'sys',
+    reduceForRetry: async function () {
+      return { mode: 'unreducible' };
+    },
+    meta: {},
+    opts: {
+      retryIfTruncated: true,
+      retryIfTruncatedMaxRetries: -1,
+      retryIfTruncatedIncreaseTokens: -1,
+      modelOverride: 'gemini-3.1-pro-preview',
+    },
+  });
+
+  expect(outputLimits).toEqual([8192, 16_384]);
+});
+
+test('gemini-service: truncation retries do not consume context overflow retries', async () => {
+  let calls = 0;
+  let reductions = 0;
+  const service = createGeminiService({
+    client: {
+      callGemini: async function () {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            text: 'partial',
+            usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 },
+            truncated: true,
+          };
+        }
+        if (calls < 4) throw new Error('MAX_TOKENS');
+        return {
+          text: 'complete',
+          usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 },
+          truncated: false,
+        };
+      },
+    },
+    logger: silentLogger,
+    apiKey: 'fake',
+    sleep: noSleep,
+  });
+
+  const result = await service.generate({
+    promptContext: 'ctx',
+    systemPrompt: 'sys',
+    reduceForRetry: async function () {
+      reductions += 1;
+      return {
+        promptContext: `reduced ${reductions}`,
+        promptParts: { prefix: '', diffHeading: '', diffBody: `reduced ${reductions}`, suffix: '' },
+        mode: 'truncation',
+        summaryAttempted: true,
+        summaryUsed: false,
+      };
+    },
+    meta: {},
+    opts: {
+      retryIfTruncated: true,
+      retryIfTruncatedMaxRetries: 1,
+      retryIfTruncatedIncreaseTokens: 100,
+      modelOverride: 'gemini-3.1-pro-preview',
+    },
+  });
+
+  expect(result?.text).toBe('complete');
+  expect(reductions).toBe(2);
+});
 
 test('gemini-service: retry delegates context reduction to the call boundary', async () => {
   const promptParts: PromptContextParts = {

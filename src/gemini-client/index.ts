@@ -1,7 +1,7 @@
 import { dlopen, read, type Pointer } from 'bun:ffi';
 import { CONFIG } from '../../gcm.config.js';
 import { createLogger } from '../logger.js';
-import type { Logger, LoggerConfig, LogMetadata } from '../logger.js';
+import type { Logger, LogMetadata } from '../logger.js';
 import { tryParseJSON, parseCandidates } from './parsers.js';
 import { addJitterWithinCap, getRetryMsFromResponse } from './backoff.js';
 import { buildRequestBody } from './requestBuilder.js';
@@ -32,11 +32,11 @@ export interface GeminiCallOpts {
   timeoutMs?: number;
   systemInstructions?: string;
   maxOutputTokens?: number;
-  // If true, the client will automatically retry when a truncated response is detected.
+  /** @deprecated Semantic retries should normally be owned by GeminiService. */
   retryIfTruncated?: boolean;
-  // How many times to retry after a truncated response. Default: 1
+  /** @deprecated Semantic retries should normally be owned by GeminiService. */
   retryIfTruncatedMaxRetries?: number;
-  // How many extra maxOutputTokens to add on each retry. Default: add CONFIG.MAX_OUTPUT_TOKENS
+  /** @deprecated Semantic retries should normally be owned by GeminiService. */
   retryIfTruncatedIncreaseTokens?: number;
 }
 
@@ -166,10 +166,6 @@ function shouldRetryClientError(error: unknown): boolean {
   const errStr = String(error);
   if (/invalid json|returned no text/i.test(errStr)) return false;
   return /aborted|network|fetch|timed?\s*out|econnreset|enotfound|eai_again/i.test(errStr);
-}
-
-function createDefaultLogger(): Logger {
-  return createLogger(CONFIG as LoggerConfig);
 }
 
 function reportDebugFlushError(error: unknown): void {
@@ -438,11 +434,7 @@ async function handleSuccessfulResponse(
   const nextTruncRetries = truncRetries + 1;
   deps.logger.log(
     'warn',
-    'Gemini response appeared truncated; retrying with higher maxOutputTokens (attempt ' +
-      String(nextTruncRetries) +
-      '/' +
-      String(truncMaxRetries) +
-      ')',
+    `Gemini response appeared truncated; retrying with higher maxOutputTokens (attempt ${nextTruncRetries}/${truncMaxRetries})`,
     { previousTextSnippet: parsed.text.slice(0, 256) },
   );
   await Bun.sleep(50);

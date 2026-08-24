@@ -9,12 +9,14 @@ function gitResult(text: string): SpawnGitStreamResult {
 
 test('reads exact scope and recent history commands for changed paths', async () => {
   const commands: string[][] = [];
-  const responses = ['feat(core): first\nfix(api): second', 'fix(api): second\nchore: third'];
+  const history = Array.from({ length: 25 }, function (_, index) {
+    return `feat(core): change ${index + 1}`;
+  });
 
   const result = await readCommitContextFacts(['src/a.ts', 'src/b.ts'], {
     runGit: async function (args) {
       commands.push(args);
-      return gitResult(responses[commands.length - 1] ?? '');
+      return gitResult(history.join('\n'));
     },
     fileExists: async function () {
       return false;
@@ -23,40 +25,51 @@ test('reads exact scope and recent history commands for changed paths', async ()
 
   expect(commands).toEqual([
     ['log', '-n', '50', '--pretty=format:%s', '--', 'src/a.ts', 'src/b.ts'],
-    ['log', '-n', '20', '--pretty=format:%s', '--', 'src/a.ts', 'src/b.ts'],
   ]);
   expect(result).toEqual({
-    scopeHistorySubjects: ['feat(core): first', 'fix(api): second'],
-    recentSubjects: ['fix(api): second', 'chore: third'],
+    scopeHistorySubjects: history,
+    recentSubjects: history.slice(0, 20),
     repoType: 'single',
   });
 });
 
-test.each([
-  [1, [], ['recent subject']],
-  [2, ['scope subject'], []],
-])(
-  'keeps successful history and repository facts when Git query %d fails',
-  async (failedCall, expectedScopeHistory, expectedRecentHistory) => {
-    let call = 0;
-    const result = await readCommitContextFacts(['src/a.ts'], {
-      runGit: async function () {
-        call += 1;
-        if (call === failedCall) throw new Error('git log failed');
-        return gitResult(call === 1 ? 'scope subject' : 'recent subject');
-      },
-      fileExists: async function (path) {
-        return path === 'pnpm-workspace.yaml';
-      },
-    });
+test('keeps repository facts when Git history fails', async () => {
+  const result = await readCommitContextFacts(['src/a.ts'], {
+    runGit: async function () {
+      throw new Error('git log failed');
+    },
+    fileExists: async function (path) {
+      return path === 'pnpm-workspace.yaml';
+    },
+  });
 
-    expect(result).toEqual({
-      scopeHistorySubjects: expectedScopeHistory,
-      recentSubjects: expectedRecentHistory,
-      repoType: 'monorepo',
-    });
-  },
-);
+  expect(result).toEqual({
+    scopeHistorySubjects: [],
+    recentSubjects: [],
+    repoType: 'monorepo',
+  });
+});
+
+test('recovers recent history when the longer history read fails', async () => {
+  const commands: string[][] = [];
+  const result = await readCommitContextFacts(['src/a.ts'], {
+    runGit: async function (args) {
+      commands.push(args);
+      if (commands.length === 1) throw new Error('transient git log failure');
+      return gitResult('feat: recovered');
+    },
+    fileExists: async function () {
+      return false;
+    },
+  });
+
+  expect(commands).toEqual([
+    ['log', '-n', '50', '--pretty=format:%s', '--', 'src/a.ts'],
+    ['log', '-n', '20', '--pretty=format:%s', '--', 'src/a.ts'],
+  ]);
+  expect(result.scopeHistorySubjects).toEqual([]);
+  expect(result.recentSubjects).toEqual(['feat: recovered']);
+});
 
 test.each([
   ['lerna', ['lerna.json']],

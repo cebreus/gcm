@@ -4,12 +4,13 @@ import { buildAtomicSplitProposal, detectAtomicGroup } from './atomic-commit-pla
 import { describeExcludedPaths } from './commit-action-service.js';
 import { stripTerminalControlSequences } from './utils.js';
 import { isLanguageModelName } from './language-model-service.js';
+import type { OutputMode } from './output-mode.js';
 
 export interface GenerationState {
   providerId: string;
   baselineModelName: string;
   modelName: string;
-  outputMode: 'full' | 'commit-only';
+  outputMode: OutputMode;
   userHint?: string;
 }
 
@@ -354,10 +355,7 @@ export function createInteractiveGenerationDialogue(
               return { value: provider.id, label: provider.label };
             }),
           });
-          if (
-            !prompts.isCancel(selectedProvider) &&
-            selectedProvider !== state.providerId
-          ) {
+          if (!prompts.isCancel(selectedProvider) && selectedProvider !== state.providerId) {
             return { type: 'switch-provider', providerId: String(selectedProvider) };
           }
         } else if (action === 'model') {

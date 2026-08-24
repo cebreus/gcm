@@ -76,3 +76,66 @@ test('repository summary owns config context and binary skip Git reads', async (
     ['diff', '--staged', '-w', '-U0', '--', 'gcm.config.ts'],
   ]);
 });
+
+test('repository summary bounds concurrent per-file Git reads', async () => {
+  let active = 0;
+  let peak = 0;
+  const files = Array.from({ length: 12 }, function (_, index) {
+    return `src/file-${index}.ts`;
+  });
+
+  await summarizeLargeDiff(files, {
+    spawnStreamImpl: async function () {
+      return { text: '', truncated: false };
+    },
+    spawnLinesImpl: async function () {
+      active += 1;
+      peak = Math.max(peak, active);
+      await Bun.sleep(1);
+      active -= 1;
+      return { lines: [], truncated: false };
+    },
+  });
+
+  expect(peak).toBeGreaterThan(1);
+  expect(peak).toBeLessThanOrEqual(8);
+});
+
+test('repository summary stops scheduling file reads after the first failure', async () => {
+  let calls = 0;
+  const files = Array.from({ length: 20 }, function (_, index) {
+    return `src/file-${index}.ts`;
+  });
+
+  await expect(
+    summarizeLargeDiff(files, {
+      spawnStreamImpl: async function () {
+        return { text: '', truncated: false };
+      },
+      spawnLinesImpl: async function (args) {
+        calls += 1;
+        if (args.at(-1) === files[0]) throw new Error('read failed');
+        await Bun.sleep(1);
+        return { lines: [], truncated: false };
+      },
+    }),
+  ).rejects.toThrow('read failed');
+  await Bun.sleep(20);
+
+  expect(calls).toBeLessThanOrEqual(8);
+});
+
+test('repository summary preserves staged-file error order', async () => {
+  await expect(
+    summarizeLargeDiff(['a.ts', 'b.ts'], {
+      spawnStreamImpl: async function () {
+        return { text: '', truncated: false };
+      },
+      spawnLinesImpl: async function (args) {
+        const file = args.at(-1);
+        await Bun.sleep(file === 'a.ts' ? 20 : 1);
+        throw new Error(String(file));
+      },
+    }),
+  ).rejects.toThrow('a.ts');
+});

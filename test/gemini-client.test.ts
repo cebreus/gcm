@@ -559,15 +559,17 @@ async function geminiClientRetryOnTruncatedTest(): Promise<void> {
         retryIfTruncatedIncreaseTokens: 100,
       },
     });
-    expect(callCount).toBeGreaterThanOrEqual(2);
-    expect(res?.truncated).toBeFalsy();
-    expect(seenMaxOutput.length).toBeGreaterThanOrEqual(2);
-    expect(seenMaxOutput[1]).toBeGreaterThan(seenMaxOutput[0]);
+    expect(callCount).toBe(2);
+    expect(res?.truncated).toBe(false);
+    expect(seenMaxOutput).toEqual([256, 356]);
   } finally {
     globalThis.fetch = origFetch;
   }
 }
-test('gemini-client: retry on truncated response when enabled', geminiClientRetryOnTruncatedTest);
+test(
+  'gemini-client: preserves direct truncated response retries',
+  geminiClientRetryOnTruncatedTest,
+);
 
 async function geminiClientTruncationRetryRespectsModelOutputLimitTest(): Promise<void> {
   let callCount = 0;
@@ -623,7 +625,7 @@ async function geminiClientTruncationRetryRespectsModelOutputLimitTest(): Promis
   );
 }
 test(
-  'gemini-client: stops truncation retries at the selected model output limit',
+  'gemini-client: stops direct truncation retries at the selected model output limit',
   geminiClientTruncationRetryRespectsModelOutputLimitTest,
 );
 
@@ -910,7 +912,7 @@ async function geminiClientRetriesMaxTokensWithoutMarkersTest(): Promise<void> {
   expect(result?.truncated).toBe(false);
 }
 test(
-  'gemini-client: retries MAX_TOKENS responses without response markers',
+  'gemini-client: preserves direct MAX_TOKENS retries without response markers',
   geminiClientRetriesMaxTokensWithoutMarkersTest,
 );
 

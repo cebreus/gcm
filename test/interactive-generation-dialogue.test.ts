@@ -93,15 +93,12 @@ function createScriptedDialogue(
 describe('interactive generation dialogue', () => {
   test('returns a provider switch request from the main menu', async function () {
     const state = createState();
-    const { dialogue, selectOptions } = createScriptedDialogue(
-      ['provider', 'lm-studio'],
-      {
-        providers: [
-          { id: 'gemini', label: 'Gemini' },
-          { id: 'lm-studio', label: 'LM Studio' },
-        ],
-      },
-    );
+    const { dialogue, selectOptions } = createScriptedDialogue(['provider', 'lm-studio'], {
+      providers: [
+        { id: 'gemini', label: 'Gemini' },
+        { id: 'lm-studio', label: 'LM Studio' },
+      ],
+    });
 
     await expect(dialogue.configure(state)).resolves.toEqual({
       type: 'switch-provider',
@@ -641,9 +638,11 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], null),
     ).resolves.toBe(true);
-    expect(selectOptions[0]?.map(function (option) {
-      return option.label;
-    })).toEqual(['Continue anyway', 'Show split proposal', 'Cancel']);
+    expect(
+      selectOptions[0]?.map(function (option) {
+        return option.label;
+      }),
+    ).toEqual(['Continue anyway', 'Show split proposal', 'Cancel']);
   });
 
   test('shows the split proposal then prompts again', async () => {

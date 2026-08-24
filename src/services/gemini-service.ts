@@ -6,9 +6,14 @@ import { CONFIG } from '../../gcm.config.js';
 import type {
   LanguageModelGenerateParams,
   LanguageModelService,
+  SemanticRetryState,
 } from '../language-model-service.js';
-import { createLanguageModelApiError } from '../language-model-service.js';
+import {
+  createLanguageModelApiError,
+  generateWithSemanticRetries,
+} from '../language-model-service.js';
 import { isGeminiApiError } from '../gemini-client/errors.js';
+import { getEffectiveMaxOutputTokens, getModelSpec } from '../model-registry.js';
 
 export interface GeminiServiceDeps {
   client: GeminiClient;
@@ -19,13 +24,6 @@ export interface GeminiServiceDeps {
 
 type CallGeminiOptions = NonNullable<LanguageModelGenerateParams['opts']>;
 type CallGeminiApiParams = LanguageModelGenerateParams;
-
-interface CallLoopState {
-  input: string;
-  promptParts: PromptContextParts;
-  maxOutputOverride: number;
-  summaryAttempted: boolean;
-}
 
 interface GeminiServiceRuntimeDeps extends GeminiServiceDeps {
   sleep: (milliseconds: number) => Promise<unknown>;
@@ -90,9 +88,6 @@ async function callOnce(params: {
       maxOutputTokens: maxOutputOverride,
       systemInstructions: systemPrompt,
       timeoutMs: typeof opts?.timeoutMs === 'number' ? opts.timeoutMs : 60000,
-      retryIfTruncated: opts?.retryIfTruncated,
-      retryIfTruncatedMaxRetries: opts?.retryIfTruncatedMaxRetries,
-      retryIfTruncatedIncreaseTokens: opts?.retryIfTruncatedIncreaseTokens,
     },
     modelOverride: opts?.modelOverride,
   });
@@ -101,29 +96,30 @@ async function callOnce(params: {
 async function maybeHandleOverflow(params: {
   deps: GeminiServiceRuntimeDeps;
   err: unknown;
+  state: SemanticRetryState;
   attempt: number;
   maxAttempts: number;
   reduceForRetry: CallGeminiApiParams['reduceForRetry'];
-  loopState: CallLoopState;
-}): Promise<boolean> {
-  const { deps, err, attempt, maxAttempts, reduceForRetry, loopState } = params;
+}): Promise<SemanticRetryState | null> {
+  const { deps, err, state, attempt, maxAttempts, reduceForRetry } = params;
   const errStr = String(err);
   const isMaxTokens = /MAX_TOKENS/i.test(errStr) || /returned no text/i.test(errStr);
-  if (!(isMaxTokens && attempt < maxAttempts)) return false;
+  if (!(isMaxTokens && attempt < maxAttempts)) return null;
   const result = await handleContextOverflow({
     deps,
     reduceForRetry,
-    promptParts: loopState.promptParts,
-    maxOutputTokens: loopState.maxOutputOverride,
+    promptParts: state.promptParts,
+    maxOutputTokens: state.maxOutputTokens,
     attempt,
-    summaryAttempted: loopState.summaryAttempted,
+    summaryAttempted: state.summaryAttempted,
   });
-  if (!result) return false;
-  loopState.input = result.input;
-  loopState.promptParts = result.promptParts;
-  loopState.maxOutputOverride = result.maxOutputTokens;
-  loopState.summaryAttempted = result.summaryAttempted;
-  return true;
+  if (!result) return null;
+  return {
+    promptContext: result.input,
+    promptParts: result.promptParts,
+    maxOutputTokens: result.maxOutputTokens,
+    summaryAttempted: result.summaryAttempted,
+  };
 }
 
 async function generateWithDeps(params: {
@@ -146,44 +142,69 @@ async function generateWithDeps(params: {
     meta,
     opts,
   } = params;
+  const modelName = opts?.modelOverride ?? CONFIG.MODEL;
+  const initialMaxOutputTokens = getEffectiveMaxOutputTokens(modelName, CONFIG.MAX_OUTPUT_TOKENS);
   const maxAttempts = CONFIG.GEMINI_MAX_RETRIES;
-  let attempt = 0;
-  const loopState: CallLoopState = {
-    promptParts: promptParts ?? {
-      prefix: '',
-      diffHeading: '',
-      diffBody: promptContext,
-      suffix: '',
-    },
-    input: promptContext,
-    maxOutputOverride: CONFIG.MAX_OUTPUT_TOKENS,
-    summaryAttempted: summaryAttempted ?? false,
+  let overflowRetries = 0;
+  const initialPromptParts = promptParts ?? {
+    prefix: '',
+    diffHeading: '',
+    diffBody: promptContext,
+    suffix: '',
   };
-  loopState.input = renderPromptContext(loopState.promptParts);
-  for (;;) {
-    attempt += 1;
-    try {
-      return await callOnce({
+  return generateWithSemanticRetries({
+    params: {
+      promptContext: renderPromptContext(initialPromptParts),
+      promptParts: initialPromptParts,
+      summaryAttempted,
+      systemPrompt,
+      reduceForRetry,
+      meta,
+      opts,
+    },
+    initialMaxOutputTokens,
+    maxOutputTokensLimit: getModelSpec(modelName).maxOutputTokens,
+    defaultRetryLimit: 1,
+    maximumRetryLimit: 10,
+    defaultTokenIncrease: initialMaxOutputTokens,
+    reduceInputOnTruncation: false,
+    generateOnce: function (state) {
+      return callOnce({
         deps,
-        input: loopState.input,
+        input: state.promptContext,
         meta,
         systemPrompt,
-        maxOutputOverride: loopState.maxOutputOverride,
+        maxOutputOverride: state.maxOutputTokens,
         opts,
       });
-    } catch (err: unknown) {
-      const handled = await maybeHandleOverflow({
+    },
+    recoverError: async function (error, state) {
+      const recovered = await maybeHandleOverflow({
         deps,
-        err,
-        attempt,
+        err: error,
+        state,
+        attempt: overflowRetries + 1,
         maxAttempts,
         reduceForRetry,
-        loopState,
       });
-      if (handled) continue;
-      throw err;
-    }
-  }
+      if (recovered) overflowRetries += 1;
+      return recovered;
+    },
+    onTruncationRetry: async function (retry, limit, response) {
+      deps.logger.log(
+        'warn',
+        `Gemini response appeared truncated; retrying with higher maxOutputTokens (attempt ${retry}/${limit})`,
+        { previousTextSnippet: response.text.slice(0, 256) },
+      );
+      await deps.sleep(50);
+    },
+    onOutputLimit: function () {
+      deps.logger.log(
+        'warn',
+        "Gemini response was truncated because the model's output limit was reached.",
+      );
+    },
+  });
 }
 
 export function createGeminiService({

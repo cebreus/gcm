@@ -503,20 +503,27 @@ async function inspectCommitTargetWithDeps(params: {
   const resolved = (
     await deps.gitCommandRunner(['rev-parse', '--verify', `${hash}^{commit}`])
   ).text.trim();
-  const head = (
-    await deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^{commit}'])
-  ).text.trim();
-  const subject = (await deps.gitCommandRunner(['log', '-1', '--format=%s', resolved])).text.trim();
-  const ambiguity = await readSubjectAmbiguity(deps, resolved, subject);
+  const [headResult, subjectResult] = await Promise.all([
+    deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^{commit}']),
+    deps.gitCommandRunner(['log', '-1', '--format=%s', resolved]),
+  ]);
+  const head = headResult.text.trim();
+  const subject = subjectResult.text.trim();
   const isHead = resolved === head;
+  const [ambiguity, isPublished, isAncestor, headDetached] = await Promise.all([
+    readSubjectAmbiguity(deps, resolved, subject),
+    isPublishedCommit(deps, resolved),
+    isHead ? Promise.resolve(true) : isAncestorOfHead(deps, resolved),
+    isHeadDetached(deps),
+  ]);
   const target: CommitTarget = {
     hash: resolved,
     headHash: head,
     subject,
     isHead,
-    isPublished: await isPublishedCommit(deps, resolved),
-    isAncestorOfHead: isHead || (await isAncestorOfHead(deps, resolved)),
-    isHeadDetached: await isHeadDetached(deps),
+    isPublished,
+    isAncestorOfHead: isAncestor,
+    isHeadDetached: headDetached,
     ...ambiguity,
   };
   logger?.log('debug', 'Commit target', { ...target });

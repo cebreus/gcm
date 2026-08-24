@@ -1,4 +1,5 @@
 import { formatCommitMessage } from './utils.js';
+import type { OutputMode } from './output-mode.js';
 
 export interface Labels {
   BRANCH: string;
@@ -36,7 +37,7 @@ function trimLabels(labels: Labels): Labels {
   };
 }
 
-function ensureRequiredFields(labels: Labels, mode: 'full' | 'commit-only', text: string): Labels {
+function ensureRequiredFields(labels: Labels, mode: OutputMode, text: string): Labels {
   if (mode === 'full') {
     if (!labels.BRANCH || !labels.COMMIT_MESSAGE) {
       throw new Error('LLM output missing required BRANCH or COMMIT_MESSAGE fields');
@@ -57,10 +58,7 @@ function sanitizeBranchName(branch: string): string {
   return branch.replace(/[^a-zA-Z0-9/_-]/g, '-').toLowerCase();
 }
 
-export function parseLanguageModelOutput(
-  text: string,
-  mode: 'full' | 'commit-only' = 'full',
-): Labels {
+export function parseLanguageModelOutput(text: string, mode: OutputMode = 'full'): Labels {
   if (!text || typeof text !== 'string') {
     throw new Error('parseLanguageModelOutput expects a string');
   }
