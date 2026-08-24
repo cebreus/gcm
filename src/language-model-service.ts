@@ -5,8 +5,6 @@ import { stripTerminalControlSequences } from './utils.js';
 
 export type { ModelSpec } from './model-registry.js';
 
-export const DEFAULT_LANGUAGE_MODEL_MAX_OUTPUT_TOKENS = 8_192;
-
 export interface LanguageModelResponse {
   text: string;
   usage: {
@@ -132,4 +130,91 @@ export interface LanguageModelGenerateParams {
     timeoutMs?: number;
     modelOverride?: string;
   };
+}
+
+export interface SemanticRetryState {
+  promptContext: string;
+  promptParts: PromptContextParts;
+  summaryAttempted: boolean;
+  maxOutputTokens: number;
+}
+
+export async function generateWithSemanticRetries<T extends LanguageModelResponse>(options: {
+  params: LanguageModelGenerateParams;
+  initialMaxOutputTokens: number;
+  maxOutputTokensLimit: number;
+  defaultRetryLimit: number;
+  maximumRetryLimit: number;
+  defaultTokenIncrease: number;
+  reduceInputOnTruncation: boolean;
+  retryWhenOutputLimitUnchanged?: boolean;
+  generateOnce(state: SemanticRetryState): Promise<T | null>;
+  recoverError?(error: unknown, state: SemanticRetryState): Promise<SemanticRetryState | null>;
+  onTruncationRetry?(retry: number, limit: number, response: T): Promise<void>;
+  onOutputLimit?(): void;
+}): Promise<T | null> {
+  const { params } = options;
+  const configuredRetryLimit = params.opts?.retryIfTruncatedMaxRetries;
+  const retryLimit =
+    Number.isSafeInteger(configuredRetryLimit) &&
+    Number(configuredRetryLimit) >= 0 &&
+    Number(configuredRetryLimit) <= options.maximumRetryLimit
+      ? Number(configuredRetryLimit)
+      : options.defaultRetryLimit;
+  const configuredIncrease = params.opts?.retryIfTruncatedIncreaseTokens;
+  const tokenIncrease =
+    Number.isSafeInteger(configuredIncrease) && Number(configuredIncrease) > 0
+      ? Number(configuredIncrease)
+      : options.defaultTokenIncrease;
+  let retries = 0;
+  let state: SemanticRetryState = {
+    promptContext: params.promptContext,
+    promptParts: params.promptParts ?? {
+      prefix: '',
+      diffHeading: '',
+      diffBody: params.promptContext,
+      suffix: '',
+    },
+    summaryAttempted: params.summaryAttempted ?? false,
+    maxOutputTokens: options.initialMaxOutputTokens,
+  };
+
+  for (;;) {
+    let response: T | null;
+    try {
+      response = await options.generateOnce(state);
+    } catch (error) {
+      const recovered = await options.recoverError?.(error, state);
+      if (!recovered) throw error;
+      state = recovered;
+      continue;
+    }
+    if (!(response?.truncated && params.opts?.retryIfTruncated && retries < retryLimit)) {
+      return response;
+    }
+    const nextMaxOutputTokens = Math.min(
+      state.maxOutputTokens + tokenIncrease,
+      options.maxOutputTokensLimit,
+    );
+    if (nextMaxOutputTokens <= state.maxOutputTokens && !options.retryWhenOutputLimitUnchanged) {
+      options.onOutputLimit?.();
+      return response;
+    }
+    if (options.reduceInputOnTruncation) {
+      const reduction = await params.reduceForRetry({
+        promptParts: state.promptParts,
+        summaryAttempted: state.summaryAttempted,
+      });
+      if (reduction.mode === 'unreducible') return response;
+      state = {
+        ...state,
+        promptContext: reduction.promptContext,
+        promptParts: reduction.promptParts,
+        summaryAttempted: reduction.summaryAttempted,
+      };
+    }
+    retries += 1;
+    state.maxOutputTokens = nextMaxOutputTokens;
+    await options.onTruncationRetry?.(retries, retryLimit, response);
+  }
 }

@@ -1,8 +1,7 @@
 import minimist, { type ParsedArgs } from 'minimist';
+import { OUTPUT_MODES, isOutputMode, type OutputMode } from './output-mode.js';
 
-const outputModes = ['full', 'commit-only'] as const;
-
-type OutputMode = (typeof outputModes)[number];
+export type { OutputMode } from './output-mode.js';
 
 interface Args extends ParsedArgs {
   commit?: string | null;
@@ -38,14 +37,10 @@ export function isArgumentValidationError(error: unknown): error is Error {
   return error instanceof Error && error.name === 'ArgumentValidationError';
 }
 
-function isOutputMode(value: string): value is OutputMode {
-  return (outputModes as readonly string[]).includes(value);
-}
-
 function validateOutputMode(value: string): void {
   if (!isOutputMode(value)) {
     throw createArgumentValidationError(
-      `Invalid value for --mode: ${value}. Expected one of: ${outputModes.join(', ')}`,
+      `Invalid value for --mode: ${value}. Expected one of: ${OUTPUT_MODES.join(', ')}`,
     );
   }
 }

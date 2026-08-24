@@ -4,6 +4,7 @@ import { createGenerationState } from '../src/generation.js';
 import { parseArgs } from '../src/cli.js';
 import packageJson from '../package.json';
 import type { Logger } from '../src/logger.js';
+import { CONFIG } from '../gcm.config.js';
 
 // Mock @clack/prompts
 const mockIntro = mock();
@@ -94,6 +95,14 @@ const mockListModels = mock(() =>
 );
 
 describe('Refactored Runner', () => {
+  test('--debug does not mutate shared configuration', async () => {
+    const originalDebugApi = CONFIG.DEBUG_API;
+
+    await executeCommitMessageGeneration(['--debug', '--version'], { logger: mockLogger });
+
+    expect(CONFIG.DEBUG_API).toBe(originalDebugApi);
+  });
+
   test('Should scope restored models to their provider', () => {
     const session = { providerId: 'gemini', modelName: 'gemini-model', outputMode: null } as const;
     expect(

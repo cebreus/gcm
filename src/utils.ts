@@ -16,10 +16,7 @@ export interface Hunk {
 }
 
 function redactAuthorizationCredentials(text: string): string {
-  return text.replace(
-    /(\bAuthorization\s*:\s*(?:Bearer|Basic)\s+)[^\s,;]+/gi,
-    '$1[REDACTED]',
-  );
+  return text.replace(/(\bAuthorization\s*:\s*(?:Bearer|Basic)\s+)[^\s,;]+/gi, '$1[REDACTED]');
 }
 
 export function redactSensitiveText(text: string): string {
@@ -94,7 +91,8 @@ export function filterExcludedFiles(files: string[], excludePatterns: string[]):
     return files;
   }
 
-  return files.filter(file => !shouldExcludeFile(file, excludePatterns));
+  const excluded = excludePatterns.map(globToRegex);
+  return files.filter(file => !excluded.some(pattern => pattern.test(file)));
 }
 
 /**
@@ -113,7 +111,7 @@ export function fileImportanceWeight(file: string): number {
   if (STYLE_EXTENSIONS.some(ext => lower.endsWith(`.${ext}`))) {
     return FILE_IMPORTANCE_WEIGHTS.STYLE;
   }
-  if (BINARY_EXTENSIONS.some(ext => new RegExp(`\\.(${ext})$`).test(lower))) {
+  if (BINARY_EXTENSIONS.some(ext => lower.endsWith(`.${ext}`))) {
     return FILE_IMPORTANCE_WEIGHTS.BINARY;
   }
   return FILE_IMPORTANCE_WEIGHTS.DEFAULT;
@@ -129,10 +127,6 @@ export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void 
   for (let i = 1; i < array.length; i += 1) if (array[i].score < array[minIdx].score) minIdx = i;
   if (hunk.score > array[minIdx].score) array[minIdx] = hunk;
 }
-
-// Minimal p-limit implementation (small, dependency-free)
-// Usage: const limit = pLimit(concurrency); await Promise.all(items.map(item => limit(() => doWork(item)));
-// (No concurrency helper; simplified, serial processing is used in summarizer)
 
 export function unescapeNewlinesInText(obj: unknown, maxDepth = 20): unknown {
   return recurseUnescapeNewlines(obj, 0, maxDepth);

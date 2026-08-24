@@ -1,12 +1,12 @@
 import {
-  DEFAULT_LANGUAGE_MODEL_MAX_OUTPUT_TOKENS,
   createLanguageModelApiError,
+  generateWithSemanticRetries,
   isLanguageModelName,
   type LanguageModelGenerateParams,
   type LanguageModelResponse,
   type LanguageModelProvider,
 } from './language-model-service.js';
-import type { ModelSpec } from './model-registry.js';
+import { DEFAULT_MAX_OUTPUT_TOKENS, type ModelSpec } from './model-registry.js';
 import {
   redactSensitiveText,
   redactSensitiveTextForPrompt,
@@ -58,10 +58,7 @@ function parseModel(value: unknown): ModelSpec | null {
     maxInputTokens,
     maxOutputTokens: Math.min(
       loadedContexts.length > 0
-        ? Math.min(
-            DEFAULT_LANGUAGE_MODEL_MAX_OUTPUT_TOKENS,
-            maxInputTokens - 1_000 - reservedInputTokens,
-          )
+        ? Math.min(DEFAULT_MAX_OUTPUT_TOKENS, maxInputTokens - 1_000 - reservedInputTokens)
         : UNLOADED_MODEL_MAX_OUTPUT_TOKENS,
       maxInputTokens - 1_001,
     ),
@@ -306,7 +303,9 @@ export async function createLmStudioProvider(options: {
   }
   if (!byName.has(defaultModel)) throw new Error('Configured LM Studio model is not available');
 
-  async function generate(params: LanguageModelGenerateParams): Promise<LanguageModelResponse> {
+  async function generate(
+    params: LanguageModelGenerateParams,
+  ): Promise<LanguageModelResponse | null> {
     const modelName = params.opts?.modelOverride ?? defaultModel;
     const model = byName.get(modelName);
     if (!model) throw new Error('Unknown LM Studio model');
@@ -321,83 +320,64 @@ export async function createLmStudioProvider(options: {
     }
     const headers = new Headers({ 'content-type': 'application/json' });
     if (options.token) headers.set('authorization', `Bearer ${options.token}`);
-    const maxRetries =
-      Number.isSafeInteger(params.opts?.retryIfTruncatedMaxRetries) &&
-      Number(params.opts?.retryIfTruncatedMaxRetries) >= 0
-        ? Number(params.opts?.retryIfTruncatedMaxRetries)
-        : 0;
-    const increase =
-      Number.isSafeInteger(params.opts?.retryIfTruncatedIncreaseTokens) &&
-      Number(params.opts?.retryIfTruncatedIncreaseTokens) > 0
-        ? Number(params.opts?.retryIfTruncatedIncreaseTokens)
-        : 0;
-    let retries = 0;
-    let promptContext = params.promptContext;
-    let promptParts = params.promptParts ?? {
-      prefix: '',
-      diffHeading: '',
-      diffBody: params.promptContext,
-      suffix: '',
-    };
-    let summaryAttempted = params.summaryAttempted ?? false;
-    let maxOutputTokens = Math.min(
+    const initialMaxOutputTokens = Math.min(
       Number.isSafeInteger(options.maxOutputTokens) && Number(options.maxOutputTokens) > 0
         ? Number(options.maxOutputTokens)
-        : DEFAULT_LANGUAGE_MODEL_MAX_OUTPUT_TOKENS,
+        : DEFAULT_MAX_OUTPUT_TOKENS,
       model.maxOutputTokens,
     );
-    for (;;) {
-      const payload = await requestJson({
-        url: new URL('/v1/chat/completions', url),
-        timeoutMs: requestedTimeout ?? 60_000,
-        token: options.token,
-        init: {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            model: modelName,
-            messages: [
-              { role: 'system', content: sanitizePromptText(params.systemPrompt, options.token) },
-              { role: 'user', content: sanitizePromptText(promptContext, options.token) },
-            ],
-            temperature: options.temperature ?? 1,
-            max_tokens: maxOutputTokens,
-            stream: false,
-          }),
-        },
-      });
-      if (!isRecord(payload) || !Array.isArray(payload.choices)) {
-        throw createLanguageModelApiError('Invalid LM Studio response');
-      }
-      const choices: unknown[] = payload.choices;
-      const choice = choices[0];
-      if (
-        !isRecord(choice) ||
-        !isRecord(choice.message) ||
-        typeof choice.message.content !== 'string'
-      ) {
-        throw createLanguageModelApiError('Invalid LM Studio response');
-      }
-      const usage = isRecord(payload.usage) ? payload.usage : {};
-      const result = {
-        text: sanitizeErrorText(choice.message.content, options.token),
-        usage: {
-          promptTokens: readNonNegativeInteger(usage.prompt_tokens) ?? undefined,
-          outputTokens: readNonNegativeInteger(usage.completion_tokens) ?? undefined,
-        },
-        truncated: choice.finish_reason === 'length',
-      };
-      if (!(result.truncated && params.opts?.retryIfTruncated && retries < maxRetries)) {
-        return result;
-      }
-      const reduction = await params.reduceForRetry({ promptParts, summaryAttempted });
-      if (reduction.mode === 'unreducible') return result;
-      retries += 1;
-      promptContext = reduction.promptContext;
-      promptParts = reduction.promptParts;
-      summaryAttempted = reduction.summaryAttempted;
-      maxOutputTokens = Math.min(model.maxOutputTokens, maxOutputTokens + increase);
-    }
+    return generateWithSemanticRetries({
+      params,
+      initialMaxOutputTokens,
+      maxOutputTokensLimit: model.maxOutputTokens,
+      defaultRetryLimit: 0,
+      maximumRetryLimit: Number.MAX_SAFE_INTEGER,
+      defaultTokenIncrease: 0,
+      reduceInputOnTruncation: true,
+      retryWhenOutputLimitUnchanged: true,
+      generateOnce: async function (state) {
+        const payload = await requestJson({
+          url: new URL('/v1/chat/completions', url),
+          timeoutMs: requestedTimeout ?? 60_000,
+          token: options.token,
+          init: {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              model: modelName,
+              messages: [
+                { role: 'system', content: sanitizePromptText(params.systemPrompt, options.token) },
+                { role: 'user', content: sanitizePromptText(state.promptContext, options.token) },
+              ],
+              temperature: options.temperature ?? 1,
+              max_tokens: state.maxOutputTokens,
+              stream: false,
+            }),
+          },
+        });
+        if (!isRecord(payload) || !Array.isArray(payload.choices)) {
+          throw createLanguageModelApiError('Invalid LM Studio response');
+        }
+        const choices: unknown[] = payload.choices;
+        const choice = choices[0];
+        if (
+          !isRecord(choice) ||
+          !isRecord(choice.message) ||
+          typeof choice.message.content !== 'string'
+        ) {
+          throw createLanguageModelApiError('Invalid LM Studio response');
+        }
+        const usage = isRecord(payload.usage) ? payload.usage : {};
+        return {
+          text: sanitizeErrorText(choice.message.content, options.token),
+          usage: {
+            promptTokens: readNonNegativeInteger(usage.prompt_tokens) ?? undefined,
+            outputTokens: readNonNegativeInteger(usage.completion_tokens) ?? undefined,
+          },
+          truncated: choice.finish_reason === 'length',
+        };
+      },
+    });
   }
 
   return {

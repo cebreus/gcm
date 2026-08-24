@@ -1,5 +1,6 @@
 import { CONFIG } from '../gcm.config.js';
 import type { ParsedOptions } from './cli.js';
+import type { OutputMode } from './output-mode.js';
 import {
   isCommitActionRefusal,
   type CommitActionService,
@@ -7,11 +8,11 @@ import {
 } from './commit-action-service.js';
 import type { Logger, LogMetadata } from './logger.js';
 import {
-  DEFAULT_LANGUAGE_MODEL_MAX_OUTPUT_TOKENS,
   getModelSpecValidationError,
   isLanguageModelApiError,
   type ModelSpec,
 } from './language-model-service.js';
+import { DEFAULT_MAX_OUTPUT_TOKENS } from './model-registry.js';
 import { parseLanguageModelOutput, type Labels } from './parser.js';
 import { generateFallbackCommitDetails } from './runner-utils.js';
 import type { CommitContextHints } from './scope-detector.js';
@@ -238,7 +239,7 @@ function logTokenInfo(params: {
 
 function buildNoteContent(
   output: GenerationServices['output'],
-  outputMode: 'full' | 'commit-only',
+  outputMode: OutputMode,
   parsedOut: Labels,
 ): string {
   if (outputMode === 'commit-only') return parsedOut.COMMIT_MESSAGE;
@@ -258,7 +259,7 @@ function buildNoteContent(
 function parseAndSanitizeResponse(
   output: GenerationServices['output'],
   responseText: string,
-  outputMode: 'full' | 'commit-only',
+  outputMode: OutputMode,
   logger: Logger,
 ): Labels | null {
   try {
@@ -341,9 +342,10 @@ async function runGenerationWorkflow(params: {
     inspection.capability,
     services.output,
   );
-  const preflight = canSwitchProvider || (parsedArgs.model && parsedArgs.mode)
-    ? 'continue'
-    : await services.dialogue.configure(state);
+  const preflight =
+    canSwitchProvider || (parsedArgs.model && parsedArgs.mode)
+      ? 'continue'
+      : await services.dialogue.configure(state);
   if (preflight === 'exit') return 'success';
   if (typeof preflight === 'object') return preflight;
   const commitCapability = {
@@ -589,7 +591,7 @@ async function runSingleGenerationAttempt(params: {
   const configuredMaxOutputTokens =
     Number.isSafeInteger(CONFIG.MAX_OUTPUT_TOKENS) && CONFIG.MAX_OUTPUT_TOKENS > 0
       ? CONFIG.MAX_OUTPUT_TOKENS
-      : DEFAULT_LANGUAGE_MODEL_MAX_OUTPUT_TOKENS;
+      : DEFAULT_MAX_OUTPUT_TOKENS;
   const maxOutputTokens = Math.min(configuredMaxOutputTokens, modelSpec.maxOutputTokens);
   const safeMaxTokens = modelSpec.maxInputTokens - maxOutputTokens - 1000;
   const customHeader =
