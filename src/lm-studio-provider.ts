@@ -1,35 +1,25 @@
 import {
   createLanguageModelApiError,
-  generateWithSemanticRetries,
   isLanguageModelName,
   type LanguageModelGenerateParams,
-  type LanguageModelResponse,
   type LanguageModelProvider,
 } from './language-model-service.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS, type ModelSpec } from './model-registry.js';
 import {
-  redactSensitiveText,
-  redactSensitiveTextForPrompt,
-  stripTerminalControlSequences,
-} from './utils.js';
+  generateOpenAiCompatibleChat,
+  isRecord,
+  requestLanguageModelJson,
+  sanitizeLanguageModelErrorText,
+} from './openai-compatible-client.js';
 
 const PREFERRED_LM_STUDIO_MODEL = 'gemma-4-e4b-it-mlx';
 
-const MAX_ERROR_SNIPPET_BYTES = 4_096;
-const MAX_RESPONSE_BODY_BYTES = 1024 * 1024;
 const UNLOADED_MODEL_MAX_OUTPUT_TOKENS = 1_024;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function readPositiveInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
 }
 
-function readNonNegativeInteger(value: unknown): number | null {
-  return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null;
-}
 
 function parseModel(value: unknown): ModelSpec | null {
   if (!isRecord(value) || value.type !== 'llm' || !isLanguageModelName(value.key)) return null;
@@ -96,84 +86,12 @@ function parseBaseUrl(baseUrl: string): URL {
   return url;
 }
 
-function sanitizeErrorText(text: string, token?: string): string {
-  const withoutToken = token ? text.split(token).join('[REDACTED-TOKEN]') : text;
-  return redactSensitiveText(stripTerminalControlSequences(withoutToken))
-    .replace(/(["'](?:password|token|api[_-]?key)["']\s*:\s*)["'][^"']*["']/gi, '$1"[REDACTED]"')
-    .replace(/\b(password|token|api[_-]?key)\s*[:=]\s*[^\s,}&]+/gi, '$1=[REDACTED]');
-}
-
-function sanitizePromptText(text: string, token?: string): string {
-  const withoutToken = token ? text.split(token).join('[REDACTED-TOKEN]') : text;
-  return redactSensitiveTextForPrompt(withoutToken);
-}
-
-async function requestJson(params: {
-  url: URL;
-  init?: RequestInit;
-  timeoutMs: number;
-  token?: string;
-}): Promise<unknown> {
-  const { url, init, timeoutMs, token } = params;
-  const signal = AbortSignal.timeout(timeoutMs);
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      ...init,
-      redirect: 'error',
-      signal,
-    });
-  } catch (error) {
-    const isTimeout =
-      error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
-    throw createLanguageModelApiError(
-      isTimeout ? 'LM Studio request timed out' : 'LM Studio request failed',
-    );
-  }
-  let bytesRead = 0;
-  let text: string;
-  try {
-    const body = response.body?.pipeThrough(
-      new TransformStream<Uint8Array, Uint8Array>({
-        transform: function (chunk, controller) {
-          bytesRead += chunk.byteLength;
-          if (bytesRead > MAX_RESPONSE_BODY_BYTES) throw new Error('response body too large');
-          controller.enqueue(chunk);
-        },
-      }),
-    );
-    text = await new Response(body).text();
-  } catch (error) {
-    if (signal.aborted) {
-      throw createLanguageModelApiError('LM Studio request timed out');
-    }
-    const oversized = error instanceof Error && error.message === 'response body too large';
-    throw createLanguageModelApiError(
-      oversized ? 'LM Studio response body is too large' : 'LM Studio response body failed',
-    );
-  }
-  const redacted = sanitizeErrorText(text, token);
-  const snippet = new TextDecoder().decode(
-    new TextEncoder().encode(redacted).slice(0, MAX_ERROR_SNIPPET_BYTES),
-  );
-  if (!response.ok) {
-    throw createLanguageModelApiError(`LM Studio request failed (${response.status})`, {
-      status: response.status,
-      snippet,
-    });
-  }
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw createLanguageModelApiError('LM Studio returned malformed JSON', { snippet });
-  }
-}
-
 async function discoverModels(
   url: URL,
   token?: string,
 ): Promise<{ models: ModelSpec[]; loadedModelIds: Set<string> }> {
-  const payload = await requestJson({
+  const payload = await requestLanguageModelJson({
+    providerLabel: 'LM Studio',
     url: new URL('/api/v1/models', url),
     timeoutMs: 5_000,
     token,
@@ -185,7 +103,10 @@ async function discoverModels(
   for (const entry of payload.models) {
     if (!isRecord(entry) || entry.type !== 'llm') continue;
     for (const metadata of [entry.key, entry.display_name]) {
-      if (typeof metadata === 'string' && sanitizeErrorText(metadata, token) !== metadata) {
+      if (
+        typeof metadata === 'string' &&
+        sanitizeLanguageModelErrorText(metadata, token) !== metadata
+      ) {
         throw createLanguageModelApiError('Invalid LM Studio model metadata');
       }
     }
@@ -251,7 +172,8 @@ export async function createLmStudioProvider(options: {
     if (loadedModelIds.has(modelName)) return;
     const headers = new Headers({ 'content-type': 'application/json' });
     if (options.token) headers.set('authorization', `Bearer ${options.token}`);
-    const loadResult = await requestJson({
+    const loadResult = await requestLanguageModelJson({
+      providerLabel: 'LM Studio',
       url: new URL('/api/v1/models/load', url),
       timeoutMs: 300_000,
       token: options.token,
@@ -303,80 +225,19 @@ export async function createLmStudioProvider(options: {
   }
   if (!byName.has(defaultModel)) throw new Error('Configured LM Studio model is not available');
 
-  async function generate(
-    params: LanguageModelGenerateParams,
-  ): Promise<LanguageModelResponse | null> {
+  async function generate(params: LanguageModelGenerateParams) {
     const modelName = params.opts?.modelOverride ?? defaultModel;
     const model = byName.get(modelName);
     if (!model) throw new Error('Unknown LM Studio model');
-    const requestedTimeout = params.opts?.timeoutMs;
-    if (
-      requestedTimeout !== undefined &&
-      (!Number.isSafeInteger(requestedTimeout) ||
-        requestedTimeout <= 0 ||
-        requestedTimeout > 2_147_483_647)
-    ) {
-      throw createLanguageModelApiError('Invalid LM Studio timeout');
-    }
-    const headers = new Headers({ 'content-type': 'application/json' });
-    if (options.token) headers.set('authorization', `Bearer ${options.token}`);
-    const initialMaxOutputTokens = Math.min(
-      Number.isSafeInteger(options.maxOutputTokens) && Number(options.maxOutputTokens) > 0
-        ? Number(options.maxOutputTokens)
-        : DEFAULT_MAX_OUTPUT_TOKENS,
-      model.maxOutputTokens,
-    );
-    return generateWithSemanticRetries({
+    return generateOpenAiCompatibleChat({
+      providerLabel: 'LM Studio',
+      url: new URL('/v1/chat/completions', url),
+      token: options.token,
+      temperature: options.temperature,
+      maxOutputTokens: options.maxOutputTokens,
+      modelName,
+      model,
       params,
-      initialMaxOutputTokens,
-      maxOutputTokensLimit: model.maxOutputTokens,
-      defaultRetryLimit: 0,
-      maximumRetryLimit: Number.MAX_SAFE_INTEGER,
-      defaultTokenIncrease: 0,
-      reduceInputOnTruncation: true,
-      retryWhenOutputLimitUnchanged: true,
-      generateOnce: async function (state) {
-        const payload = await requestJson({
-          url: new URL('/v1/chat/completions', url),
-          timeoutMs: requestedTimeout ?? 60_000,
-          token: options.token,
-          init: {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              model: modelName,
-              messages: [
-                { role: 'system', content: sanitizePromptText(params.systemPrompt, options.token) },
-                { role: 'user', content: sanitizePromptText(state.promptContext, options.token) },
-              ],
-              temperature: options.temperature ?? 1,
-              max_tokens: state.maxOutputTokens,
-              stream: false,
-            }),
-          },
-        });
-        if (!isRecord(payload) || !Array.isArray(payload.choices)) {
-          throw createLanguageModelApiError('Invalid LM Studio response');
-        }
-        const choices: unknown[] = payload.choices;
-        const choice = choices[0];
-        if (
-          !isRecord(choice) ||
-          !isRecord(choice.message) ||
-          typeof choice.message.content !== 'string'
-        ) {
-          throw createLanguageModelApiError('Invalid LM Studio response');
-        }
-        const usage = isRecord(payload.usage) ? payload.usage : {};
-        return {
-          text: sanitizeErrorText(choice.message.content, options.token),
-          usage: {
-            promptTokens: readNonNegativeInteger(usage.prompt_tokens) ?? undefined,
-            outputTokens: readNonNegativeInteger(usage.completion_tokens) ?? undefined,
-          },
-          truncated: choice.finish_reason === 'length',
-        };
-      },
     });
   }
 

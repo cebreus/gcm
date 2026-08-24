@@ -53,4 +53,10 @@ export const CONFIG = {
   GEMINI_MAX_RETRIES: retry.maxRetries,
   GEMINI_RETRY_BASE_MS: retry.retryBaseMs,
   GEMINI_RETRY_MAX_MS: retry.retryMaxMs,
+  OPENAI_URL: stringOrDefault(
+    process.env.GCM_OPENAI_URL ?? process.env.OPENAI_BASE_URL,
+    'http://127.0.0.1:3001',
+  ),
+  OPENAI_MODEL: process.env.GCM_OPENAI_MODEL ?? process.env.OPENAI_MODEL,
+  OPENAI_TOKEN: process.env.GCM_OPENAI_TOKEN ?? process.env.OPENAI_API_KEY,
 };
