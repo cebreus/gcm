@@ -1,6 +1,6 @@
 # GCM
 
-Generate Conventional Commit messages from staged changes or existing commit with Google Gemini.
+Generate Conventional Commit messages from staged changes or an existing commit with Google Gemini or LM Studio.
 
 Default: GCM generate commit message. `full` mode also generate branch name, PR title, PR description. Review every result before any Git write.
 
@@ -8,7 +8,7 @@ Default: GCM generate commit message. `full` mode also generate branch name, PR 
 
 - [Bun](https://bun.sh/) 1.4+
 - Git
-- [Google Gemini API key](https://aistudio.google.com/app/apikey)
+- [Google Gemini API key](https://aistudio.google.com/app/apikey), or LM Studio running locally
 
 ## Install
 
@@ -39,6 +39,9 @@ gcm --exclude 'dist/*'
 
 # List models available to your API key
 gcm --list-models
+
+# Use local LM Studio
+GCM_PROVIDER=lm-studio gcm
 ```
 
 From source checkout, replace `gcm` with `bun run ./gcm.ts`.
@@ -49,21 +52,23 @@ See [user-flow diagrams](docs/user-flow.md) for complete staged and existing-com
 
 ## Options
 
-| Option                    | Description                                                                                               |
-| ------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `-c, --commit <hash>`     | Analyse a commit. Default: staged changes.                                                                |
-| `-e, --exclude <pattern>` | Exclude matching paths; repeat or comma-separate patterns. Default: none.                                 |
-| `-m, --mode <mode>`       | Use `commit-only` or `full`. Default: last successfully used mode, initially `commit-only`.               |
-| `--model <name>`          | Select a Gemini model. Default: last successfully used model, initially `GCM_MODEL` (`gemini-3.7-flash`). |
-| `--list-models`           | List available text-generation models and exit.                                                           |
-| `-v, --verbose`           | Show debug-level console logs. Default: off.                                                              |
-| `-d, --debug`             | Write bounded API traces to `.debug.log`. Default: off.                                                   |
-| `-h, --help`              | Show built-in help.                                                                                       |
-| `--version`               | Show the version.                                                                                         |
+| Option                    | Description                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------- |
+| `-c, --commit <hash>`     | Analyse a commit. Default: staged changes.                                                  |
+| `-e, --exclude <pattern>` | Exclude matching paths; repeat or comma-separate patterns. Default: none.                   |
+| `-m, --mode <mode>`       | Use `commit-only` or `full`. Default: last successfully used mode, initially `commit-only`. |
+| `--model <name>`          | Select a model from the active provider.                                                    |
+| `--list-models`           | List available text-generation models and exit.                                             |
+| `-v, --verbose`           | Show debug-level console logs. Default: off.                                                |
+| `-d, --debug`             | Write bounded API traces to `.debug.log`. Default: off.                                     |
+| `-h, --help`              | Show built-in help.                                                                         |
+| `--version`               | Show the version.                                                                           |
 
 `--exclude` patterns case-sensitive, match whole path, support `*` and `?`. Excluded files stay staged, will commit; GCM asks confirmation before writing. Merge commit analysed against first parent.
 
 If Gemini returns no text after retries, GCM shows deterministic four-artifact diagnostic fallback, offers no write action.
+
+LM Studio uses `gemma-4-e4b-it-mlx` by default and waits for LM Studio to load it. If Gemma is unavailable or cannot load, GCM visibly reports the fallback and selects an already loaded model, then the first compatible model. An explicit `GCM_LM_STUDIO_MODEL` is strict: if it is missing or cannot load, GCM stops instead of silently changing models. In the interactive flow you can then select another provider; non-interactive use exits with an error.
 
 ## Git safety
 
@@ -79,7 +84,7 @@ Rationale detail: [commit consistency](docs/adr/0002-commit-action-consistency.m
 
 ## Security
 
-Analysed diff sent to Gemini. Known Google, AWS, GitHub, Slack, OpenAI-style keys, JWTs, PEM blocks redacted, but pattern-based redaction can't recognise every secret.
+Analysed diff is sent to the selected provider. LM Studio stays on the configured loopback URL. Known Google, AWS, GitHub, Slack, OpenAI-style keys, JWTs, PEM blocks redacted, but pattern-based redaction can't recognise every secret.
 
 `--debug` writes capped request/response traces to `.debug.log`. Treat file sensitive, delete after use. See [secret redaction](docs/adr/0004-redact-secrets-leaving-the-machine.md).
 
@@ -87,23 +92,27 @@ Analysed diff sent to Gemini. Known Google, AWS, GitHub, Slack, OpenAI-style key
 
 `GCM_MODEL`, `GCM_TEMP` only model/temperature names; legacy Gemini aliases not read. Invalid numeric values fall back safely.
 
-| Variable                       | Default            | Purpose                                      |
-| ------------------------------ | ------------------ | -------------------------------------------- |
-| `GCM_MODEL`                    | `gemini-3.7-flash` | Gemini model.                                |
-| `GCM_TEMP`                     | `1`                | Temperature from 0 to 1.                     |
-| `GCM_MAX_BUFFER`               | `50 MiB`           | Maximum Git output.                          |
-| `GCM_PER_FILE_BUFFER`          | `1 MiB`            | Maximum per-file diff.                       |
-| `GCM_MAX_HUNKS`                | `40`               | Maximum analysed hunks.                      |
-| `GCM_TOKEN_BYTES_RATIO`        | `3.5`              | Estimated bytes per input token.             |
-| `GCM_MAX_OUTPUT_TOKENS`        | `8192`             | Response-token limit, capped by model.       |
-| `GCM_ENABLE_HUNK_WEIGHTS`      | `false`            | Prefer important files when selecting hunks. |
-| `GCM_LOG_LEVEL`                | `info`             | Console log level.                           |
-| `GCM_DEBUG_API`                | `false`            | Enable API trace logging.                    |
-| `GCM_DEBUG_FILE`               | `.debug.log`       | Trace file path.                             |
-| `GCM_DEBUG_MAX_BODY_LOG_BYTES` | `32768`            | Maximum logged body size.                    |
-| `GCM_GEMINI_MAX_RETRIES`       | `3`                | Gemini request attempts.                     |
-| `GCM_GEMINI_RETRY_BASE_MS`     | `1000`             | Initial retry delay.                         |
-| `GCM_GEMINI_RETRY_MAX_MS`      | `60000`            | Maximum retry delay.                         |
+| Variable                       | Default                 | Purpose                                      |
+| ------------------------------ | ----------------------- | -------------------------------------------- |
+| `GCM_MODEL`                    | `gemini-3.7-flash`      | Gemini model.                                |
+| `GCM_PROVIDER`                 | `gemini`                | Provider: `gemini` or `lm-studio`.           |
+| `GCM_LM_STUDIO_URL`            | `http://127.0.0.1:1234` | LM Studio loopback URL.                      |
+| `GCM_LM_STUDIO_MODEL`          | Gemma, then fallback    | Strict LM Studio model override.             |
+| `LM_API_TOKEN`                 | none                    | Optional LM Studio API token.                |
+| `GCM_TEMP`                     | `1`                     | Temperature from 0 to 1.                     |
+| `GCM_MAX_BUFFER`               | `50 MiB`                | Maximum Git output.                          |
+| `GCM_PER_FILE_BUFFER`          | `1 MiB`                 | Maximum per-file diff.                       |
+| `GCM_MAX_HUNKS`                | `40`                    | Maximum analysed hunks.                      |
+| `GCM_TOKEN_BYTES_RATIO`        | `3.5`                   | Estimated bytes per input token.             |
+| `GCM_MAX_OUTPUT_TOKENS`        | `8192`                  | Response-token limit, capped by model.       |
+| `GCM_ENABLE_HUNK_WEIGHTS`      | `false`                 | Prefer important files when selecting hunks. |
+| `GCM_LOG_LEVEL`                | `info`                  | Console log level.                           |
+| `GCM_DEBUG_API`                | `false`                 | Enable API trace logging.                    |
+| `GCM_DEBUG_FILE`               | `.debug.log`            | Trace file path.                             |
+| `GCM_DEBUG_MAX_BODY_LOG_BYTES` | `32768`                 | Maximum logged body size.                    |
+| `GCM_GEMINI_MAX_RETRIES`       | `3`                     | Gemini request attempts.                     |
+| `GCM_GEMINI_RETRY_BASE_MS`     | `1000`                  | Initial retry delay.                         |
+| `GCM_GEMINI_RETRY_MAX_MS`      | `60000`                 | Maximum retry delay.                         |
 
 ## Development
 

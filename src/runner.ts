@@ -15,6 +15,7 @@ import { summarizeRepositoryDiff } from './services/repository-summary.js';
 import { createContextService } from './services/context-service.js';
 import type { ContextService } from './services/context-service.js';
 import { createGeminiService } from './services/gemini-service.js';
+import { createLmStudioProvider } from './lm-studio-provider.js';
 import type { LanguageModelProvider, LanguageModelService } from './language-model-service.js';
 import {
   getLanguageModelProviderValidationError,
@@ -217,17 +218,40 @@ function createGeminiProvider(opts: RunnerOptions, logger: Logger): LanguageMode
 function getProviderFactories(opts: RunnerOptions, logger: Logger) {
   if (opts.languageModelProvider) {
     const provider = opts.languageModelProvider;
-    return [{ id: provider.id, label: provider.label, create: async function () { return provider; } }];
-  }
-  return opts.languageModelProviderFactories ?? [
-    {
-      id: 'gemini',
-      label: 'Gemini',
-      create: async function () {
-        return createGeminiProvider(opts, logger);
+    return [
+      {
+        id: provider.id,
+        label: provider.label,
+        create: async function () {
+          return provider;
+        },
       },
-    },
-  ];
+    ];
+  }
+  return (
+    opts.languageModelProviderFactories ?? [
+      {
+        id: 'gemini',
+        label: 'Gemini',
+        create: async function () {
+          return createGeminiProvider(opts, logger);
+        },
+      },
+      {
+        id: 'lm-studio',
+        label: 'LM Studio',
+        create: async function () {
+          return createLmStudioProvider({
+            baseUrl: process.env.GCM_LM_STUDIO_URL ?? 'http://127.0.0.1:1234',
+            model: process.env.GCM_LM_STUDIO_MODEL,
+            token: process.env.LM_API_TOKEN,
+            temperature: CONFIG.TEMP,
+            maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS,
+          });
+        },
+      },
+    ]
+  );
 }
 
 function getProviderFactoriesValidationError(
@@ -350,19 +374,25 @@ export async function executeCommitMessageGeneration(
     const environmentProviderId = process.env.GCM_PROVIDER;
     let providerId = opts.languageModelProvider
       ? opts.languageModelProvider.id
-      : environmentProviderId ??
-        (factories.some(factory => factory.id === session.providerId)
-          ? session.providerId
-          : factories[0]?.id);
+      : (environmentProviderId ?? factories[0]?.id);
     if (!providerId || (parsedArgs.model && !isLanguageModelName(parsedArgs.model))) {
-      cancel(`Error: ${providerId ? 'Invalid model name' : 'No language model provider available'}.`);
+      cancel(
+        `Error: ${providerId ? 'Invalid model name' : 'No language model provider available'}.`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (!factories.some(factory => factory.id === providerId)) {
+      cancel('Error: Unknown language model provider.');
       process.exitCode = 1;
       return;
     }
     if (parsedArgs.help) {
       const helpFactory = factories.find(factory => factory.id === providerId) ?? factories[0];
       if (!helpFactory) throw new Error('No language model provider available.');
-      intro(`${C.bright}${helpFactory.label} Commit Message Helper v${packageInfo.version}${C.reset}`);
+      intro(
+        `${C.bright}${helpFactory.label} Commit Message Helper v${packageInfo.version}${C.reset}`,
+      );
       showHelp(helpFactory.label);
       process.exitCode = 0;
       return;
@@ -416,6 +446,7 @@ export async function executeCommitMessageGeneration(
         break;
       }
       intro(`${C.bright}${provider.label} Commit Message Helper v${packageInfo.version}${C.reset}`);
+      if (provider.selectionNotice) note(provider.selectionNotice, 'Model fallback');
       const earlyExitCode = await maybeHandleListModels(parsedArgs, provider);
       if (earlyExitCode !== null) {
         exitCode = earlyExitCode;

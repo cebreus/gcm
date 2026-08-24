@@ -65,6 +65,17 @@ export function parseLanguageModelOutput(
     throw new Error('parseLanguageModelOutput expects a string');
   }
 
+  if (
+    /<\|[^>\r\n]+\|?>/i.test(text) ||
+    /<\/?(?:think|analysis|reasoning)(?:\s[^>]*)?\/?>/i.test(text) ||
+    /^\s*(?:```|~~~)/.test(text)
+  ) {
+    throw new Error('LLM output contains unsupported control markup');
+  }
+  if (/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u.test(text)) {
+    throw new Error('LLM output contains unsupported control characters');
+  }
+
   // Add a sanity limit to prevent parsing excessively large responses
   const MAX_RESPONSE_SIZE = 16 * 1024 * 1024; // 16MB
   if (text.length > MAX_RESPONSE_SIZE) {
@@ -76,6 +87,13 @@ export function parseLanguageModelOutput(
   const labels = trimLabels(parsedLabels);
   labels.COMMIT_MESSAGE = formatCommitMessage(labels.COMMIT_MESSAGE);
   const labelsWithRequiredFields = ensureRequiredFields(labels, mode, text);
+  if (/```|~~~/.test(labelsWithRequiredFields.COMMIT_MESSAGE)) {
+    throw new Error('LLM output contains unsupported control markup');
+  }
+  const subject = labelsWithRequiredFields.COMMIT_MESSAGE.split(/\r?\n/, 1)[0];
+  if (!/^[a-z][a-z0-9-]*(?:\([^()\r\n]+\))?!?: \S.*$/i.test(subject)) {
+    throw new Error('LLM output has invalid Conventional Commit subject');
+  }
   if (labelsWithRequiredFields.BRANCH) {
     labelsWithRequiredFields.BRANCH = sanitizeBranchName(labelsWithRequiredFields.BRANCH);
   }

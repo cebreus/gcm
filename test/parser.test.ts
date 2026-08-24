@@ -36,6 +36,69 @@ test('parser: parseLanguageModelOutput - should handle very long commit messages
   expect(parsed.COMMIT_MESSAGE).toBe(longMessage);
 });
 
+test('parser: rejects language-model control tags and fenced output in every mode', () => {
+  const invalidOutputs = [
+    '<|channel>thought\nI cannot proceed',
+    '<think>reasoning</think>\nfeat: add thing',
+    'feat: add thing\n\n<think reasoning>secret</think reasoning>',
+    'feat: add thing\n\n<analysis>secret</analysis>',
+    'feat: add thing\n\n<reasoning>secret</reasoning>',
+    'feat: add thing\n\n<think/>secret',
+    'feat: add thing\n\n<|assistant|><|analysis|>secret',
+    'feat: add thing\n\n```text\nhidden reasoning\n```',
+    '```text\nfeat: add thing\n```',
+    '```text\nfeat: add thing\n```\nGenerated as requested.',
+    'BRANCH: feat/add-thing\nCOMMIT_MESSAGE: feat: add thing\n<|channel>thought',
+  ];
+
+  for (const output of invalidOutputs) {
+    expect(() => parseLanguageModelOutput(output, 'commit-only')).toThrow(
+      'LLM output contains unsupported control markup',
+    );
+  }
+
+  expect(() =>
+    parseLanguageModelOutput(
+      '<|channel>thought\nBRANCH: feat/add-thing\nCOMMIT_MESSAGE: feat: add thing',
+      'full',
+    ),
+  ).toThrow('LLM output contains unsupported control markup');
+
+  expect(
+    parseLanguageModelOutput(
+      'BRANCH: docs/example\nCOMMIT_MESSAGE: docs: add example\nPR_TITLE: Add example\nPR_DESCRIPTION: Example:\n```ts\nconst value = 1;\n```',
+      'full',
+    ).PR_DESCRIPTION,
+  ).toContain('```ts');
+});
+
+test('parser: requires a Conventional Commit subject without restricting type or length', () => {
+  for (const output of ['Gen', 'feat(scope) missing colon', 'Here is your commit: feat: add thing']) {
+    expect(() => parseLanguageModelOutput(output, 'commit-only')).toThrow(
+      'LLM output has invalid Conventional Commit subject',
+    );
+  }
+
+  expect(() =>
+    parseLanguageModelOutput(
+      'BRANCH: feat/add-thing\nCOMMIT_MESSAGE: not a commit\nPR_TITLE: Add thing',
+      'full',
+    ),
+  ).toThrow('LLM output has invalid Conventional Commit subject');
+
+  const valid = parseLanguageModelOutput(
+    'custom-type(long scope)!: ' + 'word '.repeat(100) + '\n\nThinking and channel are ordinary words.',
+    'commit-only',
+  );
+  expect(valid.COMMIT_MESSAGE).toContain('Thinking and channel are ordinary words.');
+});
+
+test('parser: rejects bidirectional controls that can spoof reviewed commit text', () => {
+  expect(() => parseLanguageModelOutput('feat: safe\u202Etxt', 'commit-only')).toThrow(
+    'LLM output contains unsupported control characters',
+  );
+});
+
 test('parser: parseLanguageModelOutput - should format commit message with body text', () => {
   const longBody = `feat: add very long feature description that exceeds the sixty character limit for the first line of a commit message\n\nThis is the body of the commit message that contains a very long line that definitely exceeds the eighty character limit`;
   const sample = `BRANCH: feat/long-body\nCOMMIT_MESSAGE: ${longBody}\nPR_TITLE: Long body\nPR_DESCRIPTION: test`;
