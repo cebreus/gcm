@@ -1,5 +1,24 @@
 # gcm
 
+## 0.9.0
+
+> GCM can now use models from LM Studio on the user's computer. Gemini still works as before. A simpler settings menu makes it easier to choose the AI service, model, and output type.
+
+### Minor Changes
+
+- **LM Studio support:** GCM can find models from LM Studio and use them to create commit messages. LM Studio must run on the same computer. The default address is `http://127.0.0.1:1234`, and other network addresses are rejected. Choose LM Studio in Settings or set `GCM_PROVIDER=lm-studio`. An optional login token can be set with `LM_API_TOKEN`. Analysed text stays on the same computer when LM Studio is used.
+- **LM Studio limits:** For a loaded model, GCM uses its active context size. For an unloaded model, it uses at most 8,192 input tokens until the model is loaded.
+- **LM Studio model choice:** The preferred model is `gemma-4-e4b-it-mlx`. If that model is missing or cannot load, and no strict model was set, GCM reports the fallback and chooses an already loaded model, then the first compatible model.
+- **Saved AI service:** After a successful Git action, GCM saves the selected AI service with its matching model. Old session data has no service name, so this release ignores it. The user may need to choose the model and output settings again once.
+- **Service failure:** If the selected AI service cannot start in an interactive terminal, GCM offers the other service. Without an interactive terminal, it exits with an error.
+- **Simpler settings:** The AI service, model, and output type can now be changed directly from the main settings menu. The user no longer needs to open a second menu.
+
+### Patch Changes
+
+- **Safer generated text:** GCM rejects control or reasoning tags, fenced code, bidirectional control characters, and a commit subject that is not a valid Conventional Commit. It hides the secret value in `Authorization: Bearer` and `Authorization: Basic` text before that text is sent to an AI service or written to a log.
+- **Better commit bodies:** A commit body is still optional. When it is needed, GCM asks for at least two short bullet points. Each point must add a different detail and must not repeat the subject.
+- **Development checks:** TypeScript-aware lint checks now cover all production code. This does not change normal GCM output.
+
 ## 0.8.1
 
 > GCM now checks the Git state and its settings before it asks an AI service for text. It stops early when files have merge conflicts or when it cannot read a full and stable Git result.
