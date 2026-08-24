@@ -190,9 +190,17 @@ const COMMIT_MESSAGE_RULES = `Commit message rules:
 - Subject format: type(scope): summary
 - Allowed types: feat, fix, refactor, perf, style, docs, test, build, ci, chore
 - Subject must start lowercase after the colon, use imperative mood, have no trailing period, and be extremely concise (max 60 characters).
-- Body is optional. Use it only for non-trivial changes.
-- Body bullets must start with "- " and each bullet must be extremely concise (max 80 characters total per bullet point).
+- Body is optional. Use it only when the change cannot be described faithfully in the subject alone.
+- When a body is needed, use at least two concise "- " bullets.
+- Each bullet must add a distinct detail not already stated in the subject or another bullet.
+- Do not repeat or paraphrase the subject in the body.
 - CRITICAL: Never add manual line breaks (\\n) inside the subject or inside a single bullet point. Keep each bullet as a single continuous line.
+
+Body shape when needed:
+type(scope): summary
+
+- specific outcome or invariant not stated in the subject
+- another distinct outcome or invariant
 
 Body semantics:
 - Describe observable behaviour, business rules, or technical invariants changed by the diff.
