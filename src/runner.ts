@@ -16,6 +16,7 @@ import { createContextService } from './services/context-service.js';
 import type { ContextService } from './services/context-service.js';
 import { createGeminiService } from './services/gemini-service.js';
 import { createLmStudioProvider } from './lm-studio-provider.js';
+import { createOpenAiProvider } from './openai-provider.js';
 import type { LanguageModelProvider, LanguageModelService } from './language-model-service.js';
 import {
   getLanguageModelProviderValidationError,
@@ -245,6 +246,20 @@ function getProviderFactories(opts: RunnerOptions, logger: Logger, debugApi = fa
         },
       },
       {
+        id: 'openai',
+        label: 'OpenAI-FreeLLMAPI',
+        create: async function () {
+          return createOpenAiProvider({
+            baseUrl: process.env.GCM_OPENAI_URL ?? process.env.OPENAI_BASE_URL ?? CONFIG.OPENAI_URL,
+            model: process.env.GCM_OPENAI_MODEL ?? process.env.OPENAI_MODEL ?? CONFIG.OPENAI_MODEL,
+            token:
+              process.env.GCM_OPENAI_TOKEN ?? process.env.OPENAI_API_KEY ?? CONFIG.OPENAI_TOKEN,
+            temperature: CONFIG.TEMP,
+            maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS,
+          });
+        },
+      },
+      {
         id: 'lm-studio',
         label: 'LM Studio',
         create: async function () {
@@ -377,7 +392,8 @@ export async function executeCommitMessageGeneration(
       return;
     }
     const session = await loadSession();
-    const environmentProviderId = process.env.GCM_PROVIDER;
+    const environmentProviderId =
+      process.env.GCM_PROVIDER === 'freellmapi' ? 'openai' : process.env.GCM_PROVIDER;
     let providerId = opts.languageModelProvider
       ? opts.languageModelProvider.id
       : (environmentProviderId ?? factories[0]?.id);
