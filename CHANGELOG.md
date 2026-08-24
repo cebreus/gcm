@@ -1,5 +1,26 @@
 # gcm
 
+## 0.9.0
+
+> Local LLMs are now first-class: GCM connects directly to LM Studio for offline model
+> discovery and commit generation. The core architecture introduces a provider boundary,
+> flattens configuration dialogues, redacts Authorization headers, and rejects malformed
+> control tokens or invalid subjects.
+
+### Minor Changes
+
+- feat(core): Added LM Studio provider support with local model discovery, Gemma fallback, and chat completions.
+- feat(core): Rejected control markup, bidirectional control characters, and invalid subjects in commit parser.
+- feat(core): Redacted Authorization header credentials in text and prompt redaction utilities.
+
+### Patch Changes
+
+- refactor(core): Introduced language model provider boundary to abstract models, token limits, and error handling.
+- refactor(core): Modularized generation workflow and decoupled generation from provider-specific adapters.
+- refactor(dialogue): Flattened settings menu options to configure model, mode, and provider directly.
+- refactor(core): Updated commit body prompt rules.
+- fix(tooling): Enforced typed lint boundaries across source files and tests.
+
 ## 0.8.1
 
 > Generation now stops when the staged snapshot can no longer be verified, while unfinished
