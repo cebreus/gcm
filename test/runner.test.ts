@@ -158,7 +158,7 @@ describe('Refactored Runner', () => {
       summaryAttempted: true,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'BRANCH: feat/test\nCOMMIT_MESSAGE: test',
+      text: 'BRANCH: feat/test\nCOMMIT_MESSAGE: test: message',
       usage: {},
     });
 
@@ -180,7 +180,19 @@ describe('Refactored Runner', () => {
     expect(mockContextService.constructLLMPromptContext).toHaveBeenCalled();
     expect(mockGeminiService.generate).toHaveBeenCalled();
     expect(mockGeminiService.generate).toHaveBeenCalledWith(
-      expect.objectContaining({ summaryAttempted: true }),
+      expect.objectContaining({
+        summaryAttempted: true,
+        systemPrompt: expect.stringContaining(
+          'Body is optional. Use it only when the change cannot be described faithfully in the subject alone.',
+        ) as unknown,
+      }),
+    );
+    expect(mockGeminiService.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemPrompt: expect.stringContaining(
+          'When a body is needed, use at least two concise "- " bullets.',
+        ) as unknown,
+      }),
     );
 
     // Default is now Commit Only, so only message is shown.
@@ -192,7 +204,7 @@ describe('Refactored Runner', () => {
 
   test('Should run a keyless provider through the complete generation seam', async () => {
     const generate = mock(async () => ({
-      text: 'COMMIT_MESSAGE: local result',
+      text: 'COMMIT_MESSAGE: test: local result',
       usage: {},
     }));
     mockGitService.retrieveStagedChanges.mockResolvedValue({
@@ -217,6 +229,7 @@ describe('Refactored Runner', () => {
     const provider = {
       id: 'local',
       label: 'Local',
+      selectionNotice: 'Preferred model is unavailable; using local-model',
       defaultModel: 'local-model',
       fallbackModels: [
         {
@@ -256,6 +269,10 @@ describe('Refactored Runner', () => {
       expect.objectContaining({ providerId: 'local', modelName: 'local-alt' }),
     );
     expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('Local Commit Message Helper'));
+    expect(mockNote).toHaveBeenCalledWith(
+      'Preferred model is unavailable; using local-model',
+      'Model fallback',
+    );
 
     const originalStdoutWrite = process.stdout.write;
     const helpOutput: string[] = [];
@@ -273,8 +290,11 @@ describe('Refactored Runner', () => {
   });
 
   test('Should recompose services after selecting another provider', async () => {
-    const geminiGenerate = mock(async () => ({ text: 'COMMIT_MESSAGE: wrong', usage: {} }));
-    const localGenerate = mock(async () => ({ text: 'COMMIT_MESSAGE: local result', usage: {} }));
+    const geminiGenerate = mock(async () => ({ text: 'COMMIT_MESSAGE: test: wrong', usage: {} }));
+    const localGenerate = mock(async () => ({
+      text: 'COMMIT_MESSAGE: test: local result',
+      usage: {},
+    }));
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['a.ts'],
@@ -298,9 +318,13 @@ describe('Refactored Runner', () => {
         id,
         label,
         defaultModel: `${id}-model`,
-        fallbackModels: [{ name: `${id}-model`, label, maxInputTokens: 8_192, maxOutputTokens: 1_024 }],
+        fallbackModels: [
+          { name: `${id}-model`, label, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+        ],
         service: { generate },
-        listModels: async function () { return [`${id}-model`]; },
+        listModels: async function () {
+          return [`${id}-model`];
+        },
         getModelSpec: function (name: string) {
           return { name, label, maxInputTokens: 8_192, maxOutputTokens: 1_024 };
         },
@@ -313,8 +337,20 @@ describe('Refactored Runner', () => {
       gitService: mockGitService,
       contextService: mockContextService,
       languageModelProviderFactories: [
-        { id: 'gemini', label: 'Gemini', create: async function () { return provider('gemini', 'Gemini', geminiGenerate); } },
-        { id: 'local', label: 'Local', create: async function () { return provider('local', 'Local', localGenerate); } },
+        {
+          id: 'gemini',
+          label: 'Gemini',
+          create: async function () {
+            return provider('gemini', 'Gemini', geminiGenerate);
+          },
+        },
+        {
+          id: 'local',
+          label: 'Local',
+          create: async function () {
+            return provider('local', 'Local', localGenerate);
+          },
+        },
       ],
     });
 
@@ -326,20 +362,74 @@ describe('Refactored Runner', () => {
   });
 
   test('Should allow switching away from a provider that is not ready', async () => {
-    const localGenerate = mock(async () => ({ text: 'COMMIT_MESSAGE: local result', usage: {} }));
-    mockGitService.retrieveStagedChanges.mockResolvedValue({ stagedDiff: 'diff', stagedFiles: ['a.ts'], truncated: false });
-    mockContextService.constructLLMPromptContext.mockResolvedValue({
-      promptContext: 'ctx', promptParts: { prefix: '', diffHeading: '', diffBody: 'diff', suffix: '' },
-      processedDiffContent: 'diff', tokens: 10, summaryAttempted: false,
+    const localGenerate = mock(async () => ({
+      text: 'COMMIT_MESSAGE: test: local result',
+      usage: {},
+    }));
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
     });
-    mockSelect.mockResolvedValueOnce('configure').mockResolvedValueOnce('provider').mockResolvedValueOnce('local').mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      promptParts: { prefix: '', diffHeading: '', diffBody: 'diff', suffix: '' },
+      processedDiffContent: 'diff',
+      tokens: 10,
+      summaryAttempted: false,
+    });
+    mockSelect
+      .mockResolvedValueOnce('configure')
+      .mockResolvedValueOnce('provider')
+      .mockResolvedValueOnce('local')
+      .mockResolvedValueOnce('generate')
+      .mockResolvedValueOnce('commit');
     const spec = { name: 'model', label: 'Model', maxInputTokens: 8_192, maxOutputTokens: 1_024 };
     await executeCommitMessageGeneration(['--mode', 'commit-only'], {
       isInteractive: true,
-      logger: mockLogger, gitService: mockGitService, contextService: mockContextService,
+      logger: mockLogger,
+      gitService: mockGitService,
+      contextService: mockContextService,
       languageModelProviderFactories: [
-        { id: 'broken', label: 'Broken', create: async function () { return { id: 'broken', label: 'Broken', readinessError: 'Unavailable', defaultModel: 'model', fallbackModels: [spec], service: { generate: mock() }, listModels: async function () { return ['model']; }, getModelSpec: function () { return spec; } }; } },
-        { id: 'local', label: 'Local', create: async function () { return { id: 'local', label: 'Local', defaultModel: 'model', fallbackModels: [spec], service: { generate: localGenerate }, listModels: async function () { return ['model']; }, getModelSpec: function () { return spec; } }; } },
+        {
+          id: 'broken',
+          label: 'Broken',
+          create: async function () {
+            return {
+              id: 'broken',
+              label: 'Broken',
+              readinessError: 'Unavailable',
+              defaultModel: 'model',
+              fallbackModels: [spec],
+              service: { generate: mock() },
+              listModels: async function () {
+                return ['model'];
+              },
+              getModelSpec: function () {
+                return spec;
+              },
+            };
+          },
+        },
+        {
+          id: 'local',
+          label: 'Local',
+          create: async function () {
+            return {
+              id: 'local',
+              label: 'Local',
+              defaultModel: 'model',
+              fallbackModels: [spec],
+              service: { generate: localGenerate },
+              listModels: async function () {
+                return ['model'];
+              },
+              getModelSpec: function () {
+                return spec;
+              },
+            };
+          },
+        },
       ],
     });
     expect(localGenerate).toHaveBeenCalledTimes(1);
@@ -357,32 +447,139 @@ describe('Refactored Runner', () => {
     }
   });
 
+  test('Should reject an unknown provider before showing help', async () => {
+    const originalProvider = process.env.GCM_PROVIDER;
+    process.env.GCM_PROVIDER = 'missing';
+    try {
+      await executeCommitMessageGeneration(['--help'], { logger: mockLogger });
+      expect(process.exitCode).toBe(1);
+      expect(mockCancel).toHaveBeenCalledWith('Error: Unknown language model provider.');
+      expect(mockIntro).not.toHaveBeenCalled();
+    } finally {
+      if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
+      else process.env.GCM_PROVIDER = originalProvider;
+    }
+  });
+
+  test('Should show LM Studio help without contacting the server', async () => {
+    const originalProvider = process.env.GCM_PROVIDER;
+    const originalUrl = process.env.GCM_LM_STUDIO_URL;
+    process.env.GCM_PROVIDER = 'lm-studio';
+    process.env.GCM_LM_STUDIO_URL = 'http://127.0.0.1:1';
+    try {
+      await executeCommitMessageGeneration(['--help'], { logger: mockLogger });
+      expect(process.exitCode).toBe(0);
+      expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('LM Studio'));
+      expect(mockCancel).not.toHaveBeenCalled();
+    } finally {
+      if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
+      else process.env.GCM_PROVIDER = originalProvider;
+      if (originalUrl === undefined) delete process.env.GCM_LM_STUDIO_URL;
+      else process.env.GCM_LM_STUDIO_URL = originalUrl;
+    }
+  });
+
+  test('Should keep Gemini as default when a prior session used LM Studio', async () => {
+    const originalProvider = process.env.GCM_PROVIDER;
+    delete process.env.GCM_PROVIDER;
+    mockLoadSession.mockResolvedValueOnce({
+      providerId: 'lm-studio',
+      modelName: 'local-model',
+      outputMode: null,
+    });
+    try {
+      await executeCommitMessageGeneration(['--help'], { logger: mockLogger });
+      expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('Gemini'));
+    } finally {
+      if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
+      else process.env.GCM_PROVIDER = originalProvider;
+    }
+  });
+
   test('Should keep explicit model and mode prompt-free with multiple providers', async () => {
     mockGitService.retrieveStagedChanges.mockResolvedValue(null);
     const provider = {
-      id: 'gemini', label: 'Gemini', defaultModel: 'gemini-3.7-flash', fallbackModels: [{ name: 'gemini-3.7-flash', label: 'Gemini', maxInputTokens: 8_192, maxOutputTokens: 1_024 }],
-      service: { generate: mock() }, listModels: async function () { return ['gemini-3.7-flash']; },
-      getModelSpec: function () { return { name: 'gemini-3.7-flash', label: 'Gemini', maxInputTokens: 8_192, maxOutputTokens: 1_024 }; },
+      id: 'gemini',
+      label: 'Gemini',
+      defaultModel: 'gemini-3.7-flash',
+      fallbackModels: [
+        {
+          name: 'gemini-3.7-flash',
+          label: 'Gemini',
+          maxInputTokens: 8_192,
+          maxOutputTokens: 1_024,
+        },
+      ],
+      service: { generate: mock() },
+      listModels: async function () {
+        return ['gemini-3.7-flash'];
+      },
+      getModelSpec: function () {
+        return {
+          name: 'gemini-3.7-flash',
+          label: 'Gemini',
+          maxInputTokens: 8_192,
+          maxOutputTokens: 1_024,
+        };
+      },
     };
     await executeCommitMessageGeneration(['--model', 'gemini-3.7-flash', '--mode', 'commit-only'], {
-      isInteractive: true, logger: mockLogger, gitService: mockGitService,
+      isInteractive: true,
+      logger: mockLogger,
+      gitService: mockGitService,
       languageModelProviderFactories: [
-        { id: 'gemini', label: 'Gemini', create: async function () { return provider; } },
-        { id: 'local', label: 'Local', create: async function () { return { ...provider, id: 'local', label: 'Local' }; } },
+        {
+          id: 'gemini',
+          label: 'Gemini',
+          create: async function () {
+            return provider;
+          },
+        },
+        {
+          id: 'local',
+          label: 'Local',
+          create: async function () {
+            return { ...provider, id: 'local', label: 'Local' };
+          },
+        },
       ],
     });
-    expect(mockSelect.mock.calls.some(call => String(call[0]?.message).startsWith('Settings:'))).toBe(false);
+    expect(
+      mockSelect.mock.calls.some(call => String(call[0]?.message).startsWith('Settings:')),
+    ).toBe(false);
   });
 
   test('Should reject a provider factory identity mismatch', async () => {
     await executeCommitMessageGeneration([], {
       logger: mockLogger,
-      languageModelProviderFactories: [{
-        id: 'advertised', label: 'Advertised',
-        create: async function () {
-          return { id: 'different', label: 'Different', defaultModel: 'model', fallbackModels: [{ name: 'model', label: 'Model', maxInputTokens: 8_192, maxOutputTokens: 1_024 }], service: { generate: mock() }, listModels: async function () { return ['model']; }, getModelSpec: function () { return { name: 'model', label: 'Model', maxInputTokens: 8_192, maxOutputTokens: 1_024 }; } };
+      languageModelProviderFactories: [
+        {
+          id: 'advertised',
+          label: 'Advertised',
+          create: async function () {
+            return {
+              id: 'different',
+              label: 'Different',
+              defaultModel: 'model',
+              fallbackModels: [
+                { name: 'model', label: 'Model', maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+              ],
+              service: { generate: mock() },
+              listModels: async function () {
+                return ['model'];
+              },
+              getModelSpec: function () {
+                return {
+                  name: 'model',
+                  label: 'Model',
+                  maxInputTokens: 8_192,
+                  maxOutputTokens: 1_024,
+                };
+              },
+            };
+          },
         },
-      }],
+      ],
     });
     expect(mockCancel).toHaveBeenCalledWith(expect.stringContaining('provider factory identity'));
   });
@@ -673,7 +870,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'BRANCH: branch\nCOMMIT_MESSAGE: initial message',
+      text: 'BRANCH: branch\nCOMMIT_MESSAGE: test: initial message',
       usage: {},
     });
 
@@ -728,7 +925,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: initial message',
+      text: 'COMMIT_MESSAGE: test: initial message',
       usage: {},
     });
     mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
@@ -812,7 +1009,8 @@ describe('Refactored Runner', () => {
   for (const inputCase of [
     {
       args: ['--model', 'gemini-3.1-pro-preview'],
-      message: 'Settings: [Provider: Gemini] [Model: gemini-3.1-pro-preview] [Mode: Commit Msg Only]',
+      message:
+        'Settings: [Provider: Gemini] [Model: gemini-3.1-pro-preview] [Mode: Commit Msg Only]',
     },
     {
       args: ['--mode', 'full'],
@@ -932,7 +1130,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: test message',
+      text: 'COMMIT_MESSAGE: test: message',
       usage: {},
     });
     mockSelect.mockResolvedValueOnce('cancel');
@@ -1094,7 +1292,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: test message',
+      text: 'COMMIT_MESSAGE: test: message',
       usage: {},
     });
     mockGitService.commitChanges.mockRejectedValueOnce(new Error('git commit failed'));
@@ -1133,7 +1331,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: test message',
+      text: 'COMMIT_MESSAGE: test: message',
       usage: {},
     });
 
@@ -1152,7 +1350,7 @@ describe('Refactored Runner', () => {
     });
 
     // Verify clipboardy.write was called with correct message (extracted)
-    expect(mockClipboardyWrite).toHaveBeenCalledWith('test message');
+    expect(mockClipboardyWrite).toHaveBeenCalledWith('test: message');
     // Verify note was shown about successful copy
     expect(mockNote).toHaveBeenCalledWith('Commit message copied to clipboard!', 'Success');
     // Verify commit was eventually called
@@ -1172,7 +1370,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: msg',
+      text: 'COMMIT_MESSAGE: test: msg',
       usage: {},
     });
 
@@ -1216,7 +1414,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: msg',
+      text: 'COMMIT_MESSAGE: test: msg',
       usage: {},
     });
 
@@ -1256,7 +1454,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: msg',
+      text: 'COMMIT_MESSAGE: test: msg',
       usage: {},
     });
 
@@ -1293,7 +1491,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: msg',
+      text: 'COMMIT_MESSAGE: test: msg',
       usage: {},
     });
     mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
@@ -1327,7 +1525,7 @@ describe('Refactored Runner', () => {
 
     // First call returns full (internal retry logic is handled by the client/service)
     mockGeminiService.generate.mockResolvedValueOnce({
-      text: 'COMMIT_MESSAGE: full message',
+      text: 'COMMIT_MESSAGE: test: full message',
       truncated: false,
       usage: { outputTokens: 20, promptTokens: 10 },
     });

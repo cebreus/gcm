@@ -9,6 +9,7 @@ import {
   sanitizeForDisplay,
   stripTerminalControlSequences,
   redactSensitiveText,
+  redactSensitiveTextForPrompt,
 } from '../src/utils';
 import type { Hunk } from '../src/utils';
 
@@ -352,4 +353,12 @@ test('utils: redactSensitiveText keeps broad log redaction', () => {
   expect(
     redactSensitiveText('const opt = "sk-optional-flag"; docs mention AIzaSyExample1234'),
   ).toBe('const opt = "[REDACTED-KEY]"; docs mention [REDACTED-KEY]');
+});
+
+test('utils: secret redaction removes Authorization credentials', () => {
+  const input = 'Authorization: Bearer arbitrary-secret\nAuthorization: Basic dXNlcjpwYXNz';
+  const expected = 'Authorization: Bearer [REDACTED]\nAuthorization: Basic [REDACTED]';
+
+  expect(redactSensitiveText(input)).toBe(expected);
+  expect(redactSensitiveTextForPrompt(input)).toBe(expected);
 });

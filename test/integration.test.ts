@@ -20,7 +20,10 @@ async function selectIntegrationPrompt(options: {
   const values = options.options.map(function (option) {
     return option.value;
   });
-  if (options.message.startsWith('Settings:') && values.join(',') === 'generate,model,mode,exit') {
+  if (
+    options.message.startsWith('Settings:') &&
+    values.join(',') === 'generate,provider,model,mode,exit'
+  ) {
     return 'generate';
   }
   if (

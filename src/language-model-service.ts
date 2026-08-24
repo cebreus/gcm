@@ -106,6 +106,7 @@ export interface LanguageModelProvider {
   id: string;
   label: string;
   readinessError?: string;
+  selectionNotice?: string;
   defaultModel: string;
   fallbackModels: ModelSpec[];
   service: LanguageModelService;
