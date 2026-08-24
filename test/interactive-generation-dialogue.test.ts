@@ -91,10 +91,10 @@ function createScriptedDialogue(
 }
 
 describe('interactive generation dialogue', () => {
-  test('returns a provider switch request from Configure', async function () {
+  test('returns a provider switch request from the main menu', async function () {
     const state = createState();
     const { dialogue, selectOptions } = createScriptedDialogue(
-      ['configure', 'provider', 'lm-studio'],
+      ['provider', 'lm-studio'],
       {
         providers: [
           { id: 'gemini', label: 'Gemini' },
@@ -107,8 +107,8 @@ describe('interactive generation dialogue', () => {
       type: 'switch-provider',
       providerId: 'lm-studio',
     });
-    expect(selectOptions[1]?.[0]?.label).toBe('Change Provider (Current: Gemini)');
-    expect(selectOptions[2]).toEqual([
+    expect(selectOptions[0]?.[1]?.label).toBe('Change Provider (Current: Gemini)');
+    expect(selectOptions[1]).toEqual([
       { value: 'gemini', label: 'Gemini' },
       { value: 'lm-studio', label: 'LM Studio' },
     ]);
@@ -533,7 +533,6 @@ describe('interactive generation dialogue', () => {
   test('changes the configured model before returning to the main menu', async () => {
     const state = createState();
     const { dialogue, selectOptions } = createScriptedDialogue([
-      'configure',
       'model',
       'gemini-3.1-pro-preview',
       'generate',
@@ -546,29 +545,15 @@ describe('interactive generation dialogue', () => {
       modelName: 'gemini-3.1-pro-preview',
       outputMode: 'commit-only',
     });
-    expect(selectOptions).toHaveLength(4);
+    expect(selectOptions).toHaveLength(3);
   });
 
   test('changes the configured output mode before returning to the main menu', async () => {
     const state = createState();
-    const { dialogue, selectOptions } = createScriptedDialogue([
-      'configure',
-      'mode',
-      'full',
-      'generate',
-    ]);
+    const { dialogue, selectOptions } = createScriptedDialogue(['mode', 'full', 'generate']);
 
     await expect(dialogue.configure(state)).resolves.toBe('continue');
     expect(state).toEqual({ ...createState(), outputMode: 'full' });
-    expect(selectOptions).toHaveLength(4);
-  });
-
-  test('returns from configuration Back to the main menu', async () => {
-    const state = createState();
-    const { dialogue, selectOptions } = createScriptedDialogue(['configure', 'back', 'generate']);
-
-    await expect(dialogue.configure(state)).resolves.toBe('continue');
-    expect(state).toEqual(createState());
     expect(selectOptions).toHaveLength(3);
   });
 
@@ -651,11 +636,14 @@ describe('interactive generation dialogue', () => {
   });
 
   test('continuing a multi-group atomic split returns true', async () => {
-    const { dialogue } = createScriptedDialogue(['continue']);
+    const { dialogue, selectOptions } = createScriptedDialogue(['continue']);
 
     await expect(
       dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], null),
     ).resolves.toBe(true);
+    expect(selectOptions[0]?.map(function (option) {
+      return option.label;
+    })).toEqual(['Continue anyway', 'Show split proposal', 'Cancel']);
   });
 
   test('shows the split proposal then prompts again', async () => {

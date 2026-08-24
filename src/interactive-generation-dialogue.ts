@@ -327,20 +327,6 @@ export function createInteractiveGenerationDialogue(
           message: `Settings: [Provider: ${providerLabel}] [Model: ${state.modelName}] [Mode: ${modeLabel}]`,
           options: [
             { value: 'generate', label: 'Generate' },
-            { value: 'configure', label: 'Configure...' },
-            { value: 'exit', label: 'Exit' },
-          ],
-        });
-
-        if (prompts.isCancel(action) || action === 'exit') {
-          prompts.outro('Bye!');
-          return 'exit';
-        }
-        if (action !== 'configure') return 'continue';
-
-        const configAction = await prompts.select({
-          message: 'Configure Settings',
-          options: [
             ...(dependencies.providers.length > 1
               ? [
                   {
@@ -351,11 +337,17 @@ export function createInteractiveGenerationDialogue(
               : []),
             { value: 'model', label: `Change Model (Current: ${state.modelName})` },
             { value: 'mode', label: `Change Mode (Current: ${state.outputMode})` },
-            { value: 'back', label: 'Back' },
+            { value: 'exit', label: 'Exit' },
           ],
         });
 
-        if (configAction === 'provider') {
+        if (prompts.isCancel(action) || action === 'exit') {
+          prompts.outro('Bye!');
+          return 'exit';
+        }
+        if (action === 'generate') return 'continue';
+
+        if (action === 'provider') {
           const selectedProvider = await prompts.select({
             message: 'Select AI Provider',
             options: dependencies.providers.map(function (provider) {
@@ -368,7 +360,7 @@ export function createInteractiveGenerationDialogue(
           ) {
             return { type: 'switch-provider', providerId: String(selectedProvider) };
           }
-        } else if (configAction === 'model') {
+        } else if (action === 'model') {
           const modelOptions = await getModelSelectionOptions(dependencies);
           const selectedModel = await prompts.select({
             message: 'Select AI Model',
@@ -378,7 +370,7 @@ export function createInteractiveGenerationDialogue(
             state.baselineModelName = String(selectedModel);
             state.modelName = state.baselineModelName;
           }
-        } else if (configAction === 'mode') {
+        } else if (action === 'mode') {
           const selectedMode = await prompts.select({
             message: 'Select Output Mode',
             options: [
@@ -437,8 +429,8 @@ export function createInteractiveGenerationDialogue(
             'Atomic commits are preferred; split unrelated changes unless this is one functional unit.',
           ].join('\n'),
           options: [
-            { value: 'split', label: 'Show split proposal' },
             { value: 'continue', label: 'Continue anyway' },
+            { value: 'split', label: 'Show split proposal' },
             { value: 'cancel', label: 'Cancel' },
           ],
         });
