@@ -334,7 +334,9 @@ test('binary contract: one generation setting still shows configuration', async 
   const result = await runBinary(['--mode', 'full'], excludeRepository, 'not-a-real-key');
 
   expect(result.exitCode).toBe(0);
-  expect(result.stdout).toContain('Settings: [Model: gemini-3.7-flash] [Mode: Full Report]');
+  expect(result.stdout).toContain(
+    'Settings: [Provider: Gemini] [Model: gemini-3.7-flash] [Mode: Full Report]',
+  );
   expect(result.stderr).toBe('');
 });
 

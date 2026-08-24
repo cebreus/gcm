@@ -2,7 +2,7 @@ import { test, expect, mock } from 'bun:test';
 import { createLogger } from '../src/logger.ts';
 import runner from '../src/runner.ts';
 import type { SpawnGitStreamResult } from '../src/git-utils.ts';
-import type { GeminiService } from '../src/services/gemini-service.ts';
+import type { LanguageModelService } from '../src/language-model-service.ts';
 import type { GitService } from '../src/services/git-service.ts';
 
 void mock.module('@clack/prompts', () => ({
@@ -79,9 +79,9 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
   }
 
   // Provide a service that returns null to trigger fallback
-  function createGeminiServiceFake(): GeminiService {
+  function createGeminiServiceFake(): LanguageModelService {
     return {
-      callGeminiAPI: async (_params: Parameters<GeminiService['callGeminiAPI']>[0]) => null,
+      generate: async (_params: Parameters<LanguageModelService['generate']>[0]) => null,
     };
   }
 

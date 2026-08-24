@@ -1,5 +1,6 @@
 import { test, expect } from 'bun:test';
 import { createGeminiService } from '../src/services/gemini-service';
+import { createGeminiApiError } from '../src/gemini-client/errors';
 import type { GeminiClient, GeminiResponse } from '../src/gemini-client';
 import { createContextService } from '../src/services/context-service';
 import type { PromptContextParts, RetryReductionResult } from '../src/services/context-service';
@@ -52,7 +53,7 @@ async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
     logger: silentLogger,
     apiKey: 'fake',
   });
-  const res = await service.callGeminiAPI({
+  const res = await service.generate({
     promptContext: 'ctx',
     systemPrompt: 'sys',
     reduceForRetry: async function () {
@@ -101,7 +102,7 @@ test('gemini-service: retry delegates context reduction to the call boundary', a
     apiKey: 'fake',
   });
 
-  await service.callGeminiAPI({
+  await service.generate({
     promptContext: 'full context',
     promptParts,
     systemPrompt: 'system',
@@ -160,7 +161,7 @@ test('gemini-service: keeps a construction summary and structured context on ove
     sleep: noSleep,
   });
 
-  await service.callGeminiAPI({
+  await service.generate({
     promptContext: contextResult.promptContext,
     promptParts: contextResult.promptParts,
     summaryAttempted: contextResult.summaryAttempted,
@@ -204,7 +205,7 @@ test('gemini-service: retries after emptying a diff below an unreachable proport
 
   const initialPrompt =
     promptParts.prefix + promptParts.diffHeading + promptParts.diffBody + promptParts.suffix;
-  await service.callGeminiAPI({
+  await service.generate({
     promptContext: initialPrompt,
     promptParts,
     summaryAttempted: true,
@@ -263,7 +264,7 @@ test('gemini-service: retry mode selects its original delay and log message', as
       },
     });
 
-    await service.callGeminiAPI({
+    await service.generate({
       promptContext: 'context',
       systemPrompt: 'system',
       meta: {},
@@ -273,4 +274,26 @@ test('gemini-service: retry mode selects its original delay and log message', as
     expect(delays).toEqual([delay]);
     expect(messages).toContain(`Gemini returned MAX_TOKENS or no text; ${message}`);
   }
+});
+test('gemini-service: normalizes provider errors', async () => {
+  const service = createGeminiService({
+    client: {
+      callGemini: async function () {
+        throw createGeminiApiError('quota', { status: 429 });
+      },
+    },
+    logger: silentLogger,
+    apiKey: 'fake',
+  });
+
+  await expect(
+    service.generate({
+      promptContext: 'prompt',
+      systemPrompt: 'system',
+      meta: {},
+      reduceForRetry: async function () {
+        throw new Error('not used');
+      },
+    }),
+  ).rejects.toMatchObject({ name: 'LanguageModelApiError', metadata: { status: 429 } });
 });

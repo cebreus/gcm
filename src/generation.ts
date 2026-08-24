@@ -6,12 +6,17 @@ import {
   type CommitCapability,
 } from './commit-action-service.js';
 import type { Logger, LogMetadata } from './logger.js';
-import { isGeminiApiError } from './gemini-client/errors.js';
-import { parseGeminiOutput, type Labels } from './parser.js';
+import {
+  DEFAULT_LANGUAGE_MODEL_MAX_OUTPUT_TOKENS,
+  getModelSpecValidationError,
+  isLanguageModelApiError,
+  type ModelSpec,
+} from './language-model-service.js';
+import { parseLanguageModelOutput, type Labels } from './parser.js';
 import { generateFallbackCommitDetails } from './runner-utils.js';
 import type { CommitContextHints } from './scope-detector.js';
 import type { ContextService } from './services/context-service.js';
-import type { GeminiService } from './services/gemini-service.js';
+import type { LanguageModelService } from './language-model-service.js';
 import type { GitService, RepositoryState } from './services/git-service.js';
 import type { GCMSession } from './session.js';
 import {
@@ -19,12 +24,14 @@ import {
   type GenerationState,
   type InteractiveGenerationDialogue,
 } from './interactive-generation-dialogue.js';
-import { getEffectiveMaxOutputTokens, getModelSpec } from './model-registry.js';
 
 export type GenerationServices = {
   gitService: GitService;
   contextService: ContextService;
-  geminiService: GeminiService;
+  languageModelService: LanguageModelService;
+  providerId: string;
+  providerLabel: string;
+  getModelSpec(modelName: string): ModelSpec;
   dialogue: InteractiveGenerationDialogue;
   commitActions: CommitActionService;
   getCommitContextHints(files: string[]): Promise<CommitContextHints>;
@@ -49,17 +56,21 @@ export type GenerationServices = {
   };
 };
 
-export type TerminalOutcome = 'success' | 'failure';
+export type ProviderSwitchOutcome = { type: 'switch-provider'; providerId: string };
+export type TerminalOutcome = 'success' | 'failure' | ProviderSwitchOutcome;
 
 export function createGenerationState(
   parsedArgs: ParsedOptions,
   session: GCMSession,
   defaultModel: string,
+  providerId: string,
 ): { targetCommit: string | null; state: GenerationState } {
-  const initialModelName = parsedArgs.model ?? session.modelName ?? defaultModel;
+  const sessionModel = session.providerId === providerId ? session.modelName : null;
+  const initialModelName = parsedArgs.model ?? sessionModel ?? defaultModel;
   return {
     targetCommit: parsedArgs.commit ?? null,
     state: {
+      providerId,
       baselineModelName: initialModelName,
       modelName: initialModelName,
       outputMode: parsedArgs.mode ?? session.outputMode ?? 'commit-only',
@@ -76,18 +87,29 @@ export async function runGenerationCommand(params: {
   createServices(): Omit<GenerationServices, 'output'>;
   parsedArgs: ParsedOptions;
   logger: Logger;
-  apiKey: string | undefined;
+  providerReadinessError?: string;
+  canSwitchProvider?: boolean;
   targetCommit: string | null;
   state: GenerationState;
   output: GenerationServices['output'];
 }): Promise<TerminalOutcome> {
-  const { createServices, parsedArgs, logger, apiKey, targetCommit, state, output } = params;
+  const {
+    createServices,
+    parsedArgs,
+    logger,
+    providerReadinessError,
+    canSwitchProvider,
+    targetCommit,
+    state,
+    output,
+  } = params;
   try {
     return await runGenerationWorkflow({
       services: { ...createServices(), output },
       parsedArgs,
       logger,
-      apiKey,
+      providerReadinessError,
+      canSwitchProvider,
       targetCommit,
       state,
     });
@@ -99,7 +121,7 @@ export async function runGenerationCommand(params: {
       return 'failure';
     } else if (/unknown revision/i.test(errStr))
       output.cancel(`Error: Invalid commit SHA: ${targetCommit}`);
-    else if (isGeminiApiError(error)) {
+    else if (isLanguageModelApiError(error)) {
       const metadata = error.metadata ?? {};
       let status = 'Unknown';
       if (typeof metadata.status === 'string' || typeof metadata.status === 'number') {
@@ -120,14 +142,14 @@ export async function runGenerationCommand(params: {
       } catch {
         msg += `: ${output.sanitizeTerminalText(error.message)}`;
       }
-      logger.log('error', `Gemini commit helper failed: ${error}`, {
+      logger.log('error', `Commit helper failed: ${error}`, {
         error: errStr,
         snippet: metadata.snippet,
       });
       output.cancel(output.sanitizeTerminalText(msg));
     } else {
-      logger.log('error', `Gemini commit helper failed: ${error}`, { error: errStr });
-      output.cancel(`An unexpected error occurred: ${errStr}`);
+      logger.log('error', `Commit helper failed: ${error}`, { error: errStr });
+      output.cancel(`An unexpected error occurred: ${output.sanitizeTerminalText(errStr)}`);
     }
     throw error;
   }
@@ -232,7 +254,7 @@ function parseAndSanitizeResponse(
   logger: Logger,
 ): Labels | null {
   try {
-    const rawParsed = parseGeminiOutput(responseText, outputMode);
+    const rawParsed = parseLanguageModelOutput(responseText, outputMode);
     return {
       BRANCH: output.sanitizeGeneratedText(rawParsed.BRANCH),
       COMMIT_MESSAGE: output.sanitizeGeneratedText(rawParsed.COMMIT_MESSAGE),
@@ -249,12 +271,32 @@ async function runGenerationWorkflow(params: {
   services: GenerationServices;
   parsedArgs: ParsedOptions;
   logger: Logger;
-  apiKey: string | undefined;
+  providerReadinessError?: string;
+  canSwitchProvider?: boolean;
   targetCommit: string | null;
   state: GenerationState;
 }): Promise<TerminalOutcome> {
-  const { services, parsedArgs, logger, apiKey, targetCommit, state } = params;
+  const {
+    services,
+    parsedArgs,
+    logger,
+    providerReadinessError,
+    canSwitchProvider,
+    targetCommit,
+    state,
+  } = params;
   logTargetCommitInfo(services.output, logger, targetCommit);
+  if (canSwitchProvider && (!(parsedArgs.model && parsedArgs.mode) || providerReadinessError)) {
+    const providerConfiguration = await services.dialogue.configure(state);
+    if (providerConfiguration === 'exit') return 'success';
+    if (typeof providerConfiguration === 'object') return providerConfiguration;
+    if (providerReadinessError) {
+      services.output.cancel(
+        `Error: ${services.output.sanitizeTerminalText(providerReadinessError)}`,
+      );
+      return 'failure';
+    }
+  }
   const readyState = await resolveReadyRepositoryState({
     services,
     parsedArgs,
@@ -269,8 +311,10 @@ async function runGenerationWorkflow(params: {
     );
     return 'failure';
   }
-  if (!apiKey) {
-    services.output.cancel('Error: Environment variable GOOGLE_GEMINI_API_KEY not set.');
+  if (providerReadinessError && !canSwitchProvider) {
+    services.output.cancel(
+      `Error: ${services.output.sanitizeTerminalText(providerReadinessError)}`,
+    );
     return 'failure';
   }
   const inspection = await services.commitActions.inspect(targetCommit, staged.snapshot);
@@ -289,11 +333,11 @@ async function runGenerationWorkflow(params: {
     inspection.capability,
     services.output,
   );
-  const preflight =
-    parsedArgs.model && parsedArgs.mode
-      ? 'continue'
-      : await services.dialogue.configure(state, apiKey);
+  const preflight = canSwitchProvider || (parsedArgs.model && parsedArgs.mode)
+    ? 'continue'
+    : await services.dialogue.configure(state);
   if (preflight === 'exit') return 'success';
+  if (typeof preflight === 'object') return preflight;
   const commitCapability = {
     ...inspection.capability,
     excludedPaths: targetCommit ? [] : (staged.excludedPaths ?? []),
@@ -305,7 +349,6 @@ async function runGenerationWorkflow(params: {
   return runGenerationCycle({
     services,
     logger,
-    apiKey,
     state,
     staged,
     meta,
@@ -476,7 +519,6 @@ async function resolveCommitContextHints(
 async function runGenerationCycle(params: {
   services: GenerationServices;
   logger: Logger;
-  apiKey: string;
   state: GenerationState;
   staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>;
   meta: LogMetadata;
@@ -487,7 +529,6 @@ async function runGenerationCycle(params: {
   const {
     services,
     logger,
-    apiKey,
     state,
     staged,
     meta,
@@ -499,7 +540,6 @@ async function runGenerationCycle(params: {
     const outcome = await runSingleGenerationAttempt({
       services,
       logger,
-      apiKey,
       state,
       staged,
       meta,
@@ -515,7 +555,6 @@ async function runGenerationCycle(params: {
 async function runSingleGenerationAttempt(params: {
   services: GenerationServices;
   logger: Logger;
-  apiKey: string;
   state: GenerationState;
   staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>;
   meta: LogMetadata;
@@ -526,7 +565,6 @@ async function runSingleGenerationAttempt(params: {
   const {
     services,
     logger,
-    apiKey,
     state,
     staged,
     meta,
@@ -534,8 +572,17 @@ async function runSingleGenerationAttempt(params: {
     targetCommit,
     commitCapability,
   } = params;
-  const modelSpec = getModelSpec(state.modelName);
-  const maxOutputTokens = getEffectiveMaxOutputTokens(state.modelName, CONFIG.MAX_OUTPUT_TOKENS);
+  const modelSpec = services.getModelSpec(state.modelName);
+  const modelSpecError = getModelSpecValidationError(modelSpec, state.modelName);
+  if (modelSpecError) {
+    services.output.cancel(`Error: ${modelSpecError}.`);
+    return 'failure';
+  }
+  const configuredMaxOutputTokens =
+    Number.isSafeInteger(CONFIG.MAX_OUTPUT_TOKENS) && CONFIG.MAX_OUTPUT_TOKENS > 0
+      ? CONFIG.MAX_OUTPUT_TOKENS
+      : DEFAULT_LANGUAGE_MODEL_MAX_OUTPUT_TOKENS;
+  const maxOutputTokens = Math.min(configuredMaxOutputTokens, modelSpec.maxOutputTokens);
   const safeMaxTokens = modelSpec.maxInputTokens - maxOutputTokens - 1000;
   const customHeader =
     state.outputMode === 'full'
@@ -565,7 +612,7 @@ async function runSingleGenerationAttempt(params: {
   services.output.startProgress(`Generating commit message with ${state.modelName}...`);
   const systemPrompt =
     state.outputMode === 'full' ? SYSTEM_INSTRUCTIONS_FULL : SYSTEM_INSTRUCTIONS_COMMIT_ONLY;
-  const response = await services.geminiService.callGeminiAPI({
+  const response = await services.languageModelService.generate({
     promptContext: contextResult.promptContext,
     promptParts: contextResult.promptParts,
     summaryAttempted: contextResult.summaryAttempted,
@@ -584,13 +631,16 @@ async function runSingleGenerationAttempt(params: {
       retryIfTruncatedIncreaseTokens: maxOutputTokens,
     },
   });
-  services.output.stopProgress('Gemini response received');
+  services.output.stopProgress(`${services.providerLabel} response received`);
   if (!response) {
-    logger.log('warn', 'Gemini did not return text after retries; using deterministic fallback');
+    logger.log(
+      'warn',
+      `${services.providerLabel} did not return text after retries; using deterministic fallback`,
+    );
     displayResultStructured(
       services.output,
       logger,
-      generateFallbackCommitDetails(staged.stagedFiles),
+      generateFallbackCommitDetails(staged.stagedFiles, services.providerLabel),
     );
     return 'success';
   }
@@ -598,7 +648,6 @@ async function runSingleGenerationAttempt(params: {
     response,
     state,
     logger,
-    apiKey,
     services,
     meta,
     commitCapability,
@@ -607,15 +656,14 @@ async function runSingleGenerationAttempt(params: {
 }
 
 async function handleSuccessfulGeneration(params: {
-  response: NonNullable<Awaited<ReturnType<GeminiService['callGeminiAPI']>>>;
+  response: NonNullable<Awaited<ReturnType<LanguageModelService['generate']>>>;
   state: GenerationState;
   logger: Logger;
-  apiKey: string;
   services: GenerationServices;
   meta: LogMetadata;
   commitCapability: CommitCapability;
 }): Promise<TerminalOutcome | 'regenerate'> {
-  const { response, state, logger, apiKey, services, meta, commitCapability } = params;
+  const { response, state, logger, services, meta, commitCapability } = params;
   logger.log('debug', 'LLM response received', {
     promptTokens: response.usage.promptTokens,
     outputTokens: response.usage.outputTokens,
@@ -641,7 +689,6 @@ async function handleSuccessfulGeneration(params: {
   const actionResult: ActionMenuResult = await services.dialogue.review({
     state,
     result: parsedOut,
-    apiKey,
     commitCapability,
   });
   if (actionResult.type === 'cancel') return 'success';
@@ -674,6 +721,7 @@ async function commitGeneratedMessage(params: {
   try {
     const { summary } = await services.commitActions.apply(commitCapability, commitMessage);
     await services.saveSession({
+      providerId: services.providerId,
       modelName: state.baselineModelName,
       outputMode: state.outputMode,
     });

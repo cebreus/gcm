@@ -2,7 +2,13 @@ import { test, expect, mock } from 'bun:test';
 
 // Mock the listGeminiModels module before importing the runner
 const listMock = mock(() =>
-  Promise.resolve(['models/gemini-3.7-flash', 'models/gemini-3.1-pro-preview']),
+  Promise.resolve([
+    'models/gemini-3.7-flash',
+    'models/gemini-3.1-pro-preview',
+    'models/gemini-3-pro-image',
+    'models/gemini-3.1-flash-tts-preview',
+    'models/gemini-robotics-er-2-preview',
+  ]),
 );
 await mock.module('../src/gemini-client/listModels', () => ({ listGeminiModels: listMock }));
 
@@ -10,12 +16,26 @@ test('cli: --list-models prints available models', async () => {
   const { executeCommitMessageGeneration } = await import('../src/runner.js'); // Use named export
   const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
   const originalExitCode = process.exitCode;
+  const originalStdoutWrite = process.stdout.write;
+  const stdoutChunks: string[] = [];
   process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
   process.exitCode = 0;
+  process.stdout.write = mock((chunk: string | Uint8Array) => {
+    stdoutChunks.push(String(chunk));
+    return true;
+  }) as unknown as typeof process.stdout.write;
 
-  await executeCommitMessageGeneration(['--list-models']);
+  try {
+    await executeCommitMessageGeneration(['--list-models']);
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+  }
 
   expect(listMock).toHaveBeenCalledWith('test-key');
+  expect(stdoutChunks.join('')).toContain('gemini-3.7-flash');
+  expect(stdoutChunks.join('')).not.toContain('image');
+  expect(stdoutChunks.join('')).not.toContain('tts');
+  expect(stdoutChunks.join('')).not.toContain('robotics');
 
   // restore
   process.exitCode = originalExitCode ?? 0;
@@ -60,7 +80,7 @@ test('cli: --list-models uses the injected model list failure contract', async (
   }) as unknown as typeof process.stdout.write;
   try {
     await expect(
-      executeCommitMessageGeneration(['--list-models'], { listModels: injectedListModels }),
+      executeCommitMessageGeneration(['--list-models'], { geminiModelLister: injectedListModels }),
     ).resolves.toBeUndefined();
     exitCode = Number(process.exitCode);
   } finally {

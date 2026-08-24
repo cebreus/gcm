@@ -13,7 +13,6 @@ interface Args extends ParsedArgs {
   verbose?: boolean;
   debug?: boolean;
   'list-models'?: boolean;
-  listModels?: boolean;
   exclude?: string | string[];
 }
 
@@ -72,7 +71,7 @@ const flagDefinitions = [
   },
   { name: 'verbose', aliases: ['--verbose', '-v'], takesValue: false },
   { name: 'debug', aliases: ['--debug', '-d'], takesValue: false },
-  { name: 'listModels', aliases: ['--list-models', '--listModels'], takesValue: false },
+  { name: 'listModels', aliases: ['--list-models'], takesValue: false },
   { name: 'exclude', aliases: ['--exclude', '-e'], takesValue: true, allowsRepeat: true },
 ] satisfies FlagDefinition[];
 
@@ -201,7 +200,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     mode: finalMode,
     verbose: Boolean(parsed.verbose),
     debug: Boolean(parsed.debug),
-    listModels: Boolean(parsed['list-models']) || Boolean(parsed.listModels) || false,
+    listModels: Boolean(parsed['list-models']),
     exclude: excludePatterns,
   };
 }

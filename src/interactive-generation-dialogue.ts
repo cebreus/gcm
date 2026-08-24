@@ -1,10 +1,12 @@
 import type { Logger } from './logger.js';
-import { KNOWN_MODELS } from './model-registry.js';
+import type { ModelSpec } from './model-registry.js';
 import { buildAtomicSplitProposal, detectAtomicGroup } from './atomic-commit-planner.js';
 import { describeExcludedPaths } from './commit-action-service.js';
 import { stripTerminalControlSequences } from './utils.js';
+import { isLanguageModelName } from './language-model-service.js';
 
 export interface GenerationState {
+  providerId: string;
   baselineModelName: string;
   modelName: string;
   outputMode: 'full' | 'commit-only';
@@ -45,7 +47,9 @@ interface PromptOption {
 export interface DialogueDependencies {
   prompts: PromptAdapter;
   clipboard: { write(message: string): Promise<void> };
-  listModels(apiKey: string): Promise<string[]>;
+  listModels(): Promise<string[]>;
+  fallbackModels: ModelSpec[];
+  providers: Array<{ id: string; label: string }>;
   logger: Pick<Logger, 'log'>;
 }
 
@@ -54,7 +58,9 @@ interface CommitMessageResult {
 }
 
 export interface InteractiveGenerationDialogue {
-  configure(state: GenerationState, apiKey: string): Promise<'continue' | 'exit'>;
+  configure(
+    state: GenerationState,
+  ): Promise<'continue' | 'exit' | { type: 'switch-provider'; providerId: string }>;
   handleEmptyStaging(
     targetCommit: string | null,
     stagedFilesFromWorktree: readonly string[],
@@ -62,7 +68,6 @@ export interface InteractiveGenerationDialogue {
   review(params: {
     state: GenerationState;
     result: CommitMessageResult;
-    apiKey: string;
     commitCapability: ReviewCommitCapability;
   }): Promise<ActionMenuResult>;
   confirmAtomicity(stagedFiles: string[], targetCommit: string | null): Promise<boolean>;
@@ -71,62 +76,55 @@ export interface InteractiveGenerationDialogue {
 type ActionChoice =
   'commit' | 'copy' | 'edit' | 'regenerate' | 'regenerate-hint' | 'switch' | 'cancel';
 
-function toModelOption(name: string): PromptOption {
-  const normalizedName = name.replace(/^models\//, '');
-  const knownModel = KNOWN_MODELS.find(function (model) {
-    return model.name === normalizedName;
+function toModelOption(name: string, knownModels: ModelSpec[]): PromptOption {
+  const knownModel = knownModels.find(function (model) {
+    return model.name === name;
   });
 
   if (knownModel) {
     return {
       value: knownModel.name,
-      label: knownModel.label,
-      hint: knownModel.description,
+      label: stripTerminalControlSequences(knownModel.label).replace(/[\r\n\t]/g, ' '),
+      hint: stripTerminalControlSequences(knownModel.description ?? '').replace(/[\r\n\t]/g, ' '),
     };
   }
 
   return {
-    value: normalizedName,
-    label: normalizedName,
-    hint: 'Available from Gemini API',
+    value: name,
+    label: name,
+    hint: 'Available from provider',
   };
 }
 
-function isSelectableTextModel(name: string): boolean {
-  return !/(embedding|image|tts|audio|live|robotics|computer-use|veo|imagen)/i.test(name);
-}
-
 async function getModelSelectionOptions(
-  apiKey: string,
   dependencies: DialogueDependencies,
 ): Promise<PromptOption[]> {
+  const knownModels = dependencies.fallbackModels;
   try {
-    const apiModels = await dependencies.listModels(apiKey);
-    const uniqueModels = [
-      ...new Set(
-        apiModels.map(function (name) {
-          return name.replace(/^models\//, '');
-        }),
-      ),
-    ]
-      .filter(function (name) {
-        return name.startsWith('gemini-');
-      })
-      .filter(isSelectableTextModel);
+    const apiModels = await dependencies.listModels();
+    const uniqueModels = [...new Set(apiModels)].filter(isLanguageModelName);
 
-    if (uniqueModels.length > 0) return uniqueModels.map(toModelOption);
+    if (uniqueModels.length > 0) {
+      return uniqueModels.map(function (name) {
+        return toModelOption(name, knownModels);
+      });
+    }
   } catch (error) {
     dependencies.logger.log(
       'debug',
-      'Failed to load live Gemini model list; falling back to known models',
+      'Failed to load live model list; falling back to known models',
       {
         error: String(error),
       },
     );
   }
 
-  return KNOWN_MODELS.map(function (model) {
-    return { value: model.name, label: model.label, hint: model.description };
+  return knownModels.map(function (model) {
+    return {
+      value: model.name,
+      label: stripTerminalControlSequences(model.label).replace(/[\r\n\t]/g, ' '),
+      hint: stripTerminalControlSequences(model.description ?? '').replace(/[\r\n\t]/g, ' '),
+    };
   });
 }
 
@@ -205,7 +203,6 @@ async function confirmExcludedPathCommit(
 async function chooseRegeneration(
   action: 'regenerate' | 'regenerate-hint' | 'switch',
   state: GenerationState,
-  apiKey: string,
   dependencies: DialogueDependencies,
 ): Promise<ReviewActionResult> {
   if (action === 'regenerate') {
@@ -225,7 +222,7 @@ async function chooseRegeneration(
       result: { type: 'regenerate', modelName: state.modelName, userHint: String(hint) },
     };
   }
-  const modelOptions = await getModelSelectionOptions(apiKey, dependencies);
+  const modelOptions = await getModelSelectionOptions(dependencies);
   const selectedModel = await dependencies.prompts.select({
     message: 'Select AI Model for Regeneration',
     options: modelOptions,
@@ -242,11 +239,10 @@ async function handleActionChoice(params: {
   message: string;
   result: CommitMessageResult;
   state: GenerationState;
-  apiKey: string;
   dependencies: DialogueDependencies;
   excludedPaths: string[];
 }): Promise<ReviewActionResult> {
-  const { action, message, result, state, apiKey, dependencies, excludedPaths } = params;
+  const { action, message, result, state, dependencies, excludedPaths } = params;
   if (action === 'commit') {
     if (!(await confirmExcludedPathCommit(dependencies.prompts, excludedPaths))) {
       dependencies.prompts.outro('Commit cancelled.');
@@ -273,7 +269,7 @@ async function handleActionChoice(params: {
   if (action === 'edit')
     return { type: 'update-message', message: await editMessage(dependencies.prompts, message) };
   if (action === 'regenerate' || action === 'regenerate-hint' || action === 'switch') {
-    return chooseRegeneration(action, state, apiKey, dependencies);
+    return chooseRegeneration(action, state, dependencies);
   }
   return { type: 'continue' };
 }
@@ -321,11 +317,14 @@ export function createInteractiveGenerationDialogue(
         return 'retry';
       }
     },
-    configure: async function (state, apiKey) {
+    configure: async function (state) {
       for (;;) {
         const modeLabel = state.outputMode === 'full' ? 'Full Report' : 'Commit Msg Only';
+        const providerLabel =
+          dependencies.providers.find(provider => provider.id === state.providerId)?.label ??
+          state.providerId;
         const action = await prompts.select({
-          message: `Settings: [Model: ${state.modelName}] [Mode: ${modeLabel}]`,
+          message: `Settings: [Provider: ${providerLabel}] [Model: ${state.modelName}] [Mode: ${modeLabel}]`,
           options: [
             { value: 'generate', label: 'Generate' },
             { value: 'configure', label: 'Configure...' },
@@ -342,14 +341,35 @@ export function createInteractiveGenerationDialogue(
         const configAction = await prompts.select({
           message: 'Configure Settings',
           options: [
+            ...(dependencies.providers.length > 1
+              ? [
+                  {
+                    value: 'provider',
+                    label: `Change Provider (Current: ${providerLabel})`,
+                  },
+                ]
+              : []),
             { value: 'model', label: `Change Model (Current: ${state.modelName})` },
             { value: 'mode', label: `Change Mode (Current: ${state.outputMode})` },
             { value: 'back', label: 'Back' },
           ],
         });
 
-        if (configAction === 'model') {
-          const modelOptions = await getModelSelectionOptions(apiKey, dependencies);
+        if (configAction === 'provider') {
+          const selectedProvider = await prompts.select({
+            message: 'Select AI Provider',
+            options: dependencies.providers.map(function (provider) {
+              return { value: provider.id, label: provider.label };
+            }),
+          });
+          if (
+            !prompts.isCancel(selectedProvider) &&
+            selectedProvider !== state.providerId
+          ) {
+            return { type: 'switch-provider', providerId: String(selectedProvider) };
+          }
+        } else if (configAction === 'model') {
+          const modelOptions = await getModelSelectionOptions(dependencies);
           const selectedModel = await prompts.select({
             message: 'Select AI Model',
             options: modelOptions,
@@ -375,7 +395,7 @@ export function createInteractiveGenerationDialogue(
         }
       }
     },
-    review: async function ({ state, result, apiKey, commitCapability }) {
+    review: async function ({ state, result, commitCapability }) {
       let finalMessage = result.COMMIT_MESSAGE;
       if (!commitCapability.allowed && commitCapability.reason) {
         prompts.note(commitCapability.reason, 'Commit unavailable');
@@ -395,7 +415,6 @@ export function createInteractiveGenerationDialogue(
           message: finalMessage,
           result,
           state,
-          apiKey,
           dependencies,
           excludedPaths: commitCapability.excludedPaths ?? [],
         });

@@ -19,16 +19,17 @@ test('runner-utils: estimateTokenCount - should handle unicode characters', () =
 
 // --- Tests for generateFallbackCommitDetails ---
 test('runner-utils: generateFallbackCommitDetails - should handle a single file', () => {
-  const result = generateFallbackCommitDetails(['file1.ts']);
+  const result = generateFallbackCommitDetails(['file1.ts'], 'Local');
   expect(result.BRANCH).toBe('chore/update-1-files');
   expect(result.COMMIT_MESSAGE).toContain('chore: update 1 file');
   expect(result.COMMIT_MESSAGE).toContain('- file1.ts');
   expect(result.PR_TITLE).toBe('chore: update 1 file');
   expect(result.PR_DESCRIPTION).toContain('- file1.ts');
+  expect(result.PR_DESCRIPTION).toContain('Local failed to respond');
 });
 
 test('runner-utils: generateFallbackCommitDetails - should handle multiple files', () => {
-  const result = generateFallbackCommitDetails(['file1.ts', 'file2.js']);
+  const result = generateFallbackCommitDetails(['file1.ts', 'file2.js'], 'Gemini');
   expect(result.BRANCH).toBe('chore/update-2-files');
   expect(result.COMMIT_MESSAGE).toContain('chore: update 2 files');
   expect(result.COMMIT_MESSAGE).toContain('- file1.ts\n- file2.js');
@@ -36,7 +37,7 @@ test('runner-utils: generateFallbackCommitDetails - should handle multiple files
 
 test('runner-utils: generateFallbackCommitDetails - should truncate file list over 12 files', () => {
   const files = Array.from({ length: 15 }, (_, i) => `file${i + 1}.ts`);
-  const result = generateFallbackCommitDetails(files);
+  const result = generateFallbackCommitDetails(files, 'Gemini');
   expect(result.COMMIT_MESSAGE).not.toContain('file13.ts');
   expect(result.PR_DESCRIPTION).toContain('(Truncated list if more files)');
 });

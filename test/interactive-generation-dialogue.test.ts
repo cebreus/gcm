@@ -6,11 +6,13 @@ import {
   type PromptAdapter,
 } from '../src/interactive-generation-dialogue.js';
 import { KNOWN_MODELS } from '../src/model-registry.js';
+import type { ModelSpec } from '../src/model-registry.js';
 
 const escape = Symbol('escape');
 
 function createState(): GenerationState {
   return {
+    providerId: 'gemini',
     baselineModelName: 'gemini-3.7-flash',
     modelName: 'gemini-3.7-flash',
     outputMode: 'commit-only',
@@ -25,13 +27,14 @@ function createScriptedDialogue(
   choices: unknown[],
   options: {
     clipboard?: { write(message: string): Promise<void> };
-    listModels?: (apiKey: string) => Promise<string[]>;
+    listModels?: () => Promise<string[]>;
+    fallbackModels?: ModelSpec[];
+    providers?: Array<{ id: string; label: string }>;
   } = {},
 ) {
   const notes: Array<[string, string | undefined]> = [];
   const outros: string[] = [];
   const copied: string[] = [];
-  const listModelApiKeys: string[] = [];
   const confirmations: string[] = [];
   const cancellations: string[] = [];
   const selectOptions: Array<Array<{ value: string; label: string; hint?: string }>> = [];
@@ -68,11 +71,12 @@ function createScriptedDialogue(
         copied.push(message);
       },
     },
-    listModels: async function (apiKey) {
-      listModelApiKeys.push(apiKey);
-      if (options.listModels) return options.listModels(apiKey);
-      return ['models/gemini-3.7-flash', 'models/gemini-3.1-pro-preview'];
+    listModels: async function () {
+      if (options.listModels) return options.listModels();
+      return ['gemini-3.7-flash', 'gemini-3.1-pro-preview'];
     },
+    fallbackModels: options.fallbackModels ?? KNOWN_MODELS,
+    providers: options.providers ?? [{ id: 'gemini', label: 'Gemini' }],
     logger: { log: function () {} },
   });
   return {
@@ -81,20 +85,42 @@ function createScriptedDialogue(
     outros,
     copied,
     selectOptions,
-    listModelApiKeys,
     confirmations,
     cancellations,
   };
 }
 
 describe('interactive generation dialogue', () => {
+  test('returns a provider switch request from Configure', async function () {
+    const state = createState();
+    const { dialogue, selectOptions } = createScriptedDialogue(
+      ['configure', 'provider', 'lm-studio'],
+      {
+        providers: [
+          { id: 'gemini', label: 'Gemini' },
+          { id: 'lm-studio', label: 'LM Studio' },
+        ],
+      },
+    );
+
+    await expect(dialogue.configure(state)).resolves.toEqual({
+      type: 'switch-provider',
+      providerId: 'lm-studio',
+    });
+    expect(selectOptions[1]?.[0]?.label).toBe('Change Provider (Current: Gemini)');
+    expect(selectOptions[2]).toEqual([
+      { value: 'gemini', label: 'Gemini' },
+      { value: 'lm-studio', label: 'LM Studio' },
+    ]);
+  });
+
   test('returns the unchanged state when review selects the visible Cancel option', async () => {
     const state = createState();
     const result = { COMMIT_MESSAGE: 'keep this message' };
     const { dialogue, outros } = createScriptedDialogue(['cancel']);
 
     await expect(
-      dialogue.review({ state, result, apiKey: 'key', commitCapability: createCapability() }),
+      dialogue.review({ state, result, commitCapability: createCapability() }),
     ).resolves.toEqual({ type: 'cancel', modelName: state.modelName, userHint: undefined });
     expect(state).toEqual(createState());
     expect(result.COMMIT_MESSAGE).toBe('keep this message');
@@ -107,7 +133,7 @@ describe('interactive generation dialogue', () => {
     const { dialogue, outros } = createScriptedDialogue([escape]);
 
     await expect(
-      dialogue.review({ state, result, apiKey: 'key', commitCapability: createCapability() }),
+      dialogue.review({ state, result, commitCapability: createCapability() }),
     ).resolves.toEqual({ type: 'cancel', modelName: state.modelName, userHint: undefined });
     expect(state).toEqual(createState());
     expect(result.COMMIT_MESSAGE).toBe('keep this message');
@@ -120,7 +146,6 @@ describe('interactive generation dialogue', () => {
     await dialogue.review({
       state: createState(),
       result: { COMMIT_MESSAGE: 'message' },
-      apiKey: 'key',
       commitCapability: createCapability({ allowed: false, reason: 'No staged changes.' }),
     });
 
@@ -145,7 +170,6 @@ describe('interactive generation dialogue', () => {
     await dialogue.review({
       state: createState(),
       result: { COMMIT_MESSAGE: 'message' },
-      apiKey: 'key',
       commitCapability: createCapability({
         mode: 'amend',
         target: { subject: 'feat: safe\u001B[2J subject\u0000' },
@@ -161,7 +185,6 @@ describe('interactive generation dialogue', () => {
     await dialogue.review({
       state: createState(),
       result: { COMMIT_MESSAGE: 'message' },
-      apiKey: 'key',
       commitCapability: createCapability({
         mode: 'reword',
         target: { subject: 'fix: target message' },
@@ -181,7 +204,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'key',
         commitCapability: createCapability({ excludedPaths: ['secrets.txt', excludedPath] }),
       }),
     ).resolves.toEqual({
@@ -204,7 +226,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'key',
         commitCapability: createCapability({ excludedPaths: ['secrets.txt'] }),
       }),
     ).resolves.toEqual({ type: 'cancel', modelName: 'gemini-3.7-flash', userHint: undefined });
@@ -218,7 +239,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'key',
         commitCapability: createCapability({ excludedPaths: ['secrets.txt'] }),
       }),
     ).resolves.toEqual({ type: 'cancel', modelName: 'gemini-3.7-flash', userHint: undefined });
@@ -231,7 +251,6 @@ describe('interactive generation dialogue', () => {
     await dialogue.review({
       state: createState(),
       result: { COMMIT_MESSAGE: 'message' },
-      apiKey: 'key',
       commitCapability: createCapability(),
     });
 
@@ -246,7 +265,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result,
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
@@ -269,7 +287,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
@@ -289,7 +306,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result,
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
@@ -305,7 +321,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result,
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
@@ -322,7 +337,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result,
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
@@ -338,7 +352,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
@@ -353,7 +366,6 @@ describe('interactive generation dialogue', () => {
       sameModel.dialogue.review({
         state: createState(),
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({ type: 'regenerate', modelName: 'gemini-3.7-flash', userHint: undefined });
@@ -361,7 +373,6 @@ describe('interactive generation dialogue', () => {
       withHint.dialogue.review({
         state: createState(),
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({
@@ -378,7 +389,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({ type: 'regenerate', modelName: 'gemini-3.7-flash', userHint: '' });
@@ -397,7 +407,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state,
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
@@ -412,7 +421,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({
@@ -420,6 +428,32 @@ describe('interactive generation dialogue', () => {
       modelName: 'gemini-3.1-pro-preview',
       userHint: undefined,
     });
+  });
+
+  test('uses active provider metadata for a live model', async () => {
+    const localModel = {
+      name: 'models/olive-model',
+      label: 'Local Model',
+      description: 'Runs locally.',
+      maxInputTokens: 8_192,
+      maxOutputTokens: 1_024,
+    };
+    const { dialogue, selectOptions } = createScriptedDialogue(['switch', 'models/olive-model'], {
+      listModels: async function () {
+        return ['models/olive-model'];
+      },
+      fallbackModels: [localModel],
+    });
+
+    await dialogue.review({
+      state: createState(),
+      result: { COMMIT_MESSAGE: 'message' },
+      commitCapability: createCapability(),
+    });
+
+    expect(selectOptions[1]).toEqual([
+      { value: 'models/olive-model', label: 'Local Model', hint: 'Runs locally.' },
+    ]);
   });
 
   test('continues after escaping the model prompt', async () => {
@@ -430,7 +464,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state,
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
@@ -452,7 +485,7 @@ describe('interactive generation dialogue', () => {
       },
     ],
   ])('falls back to known models %s', async (_, listModels) => {
-    const { dialogue, listModelApiKeys, selectOptions } = createScriptedDialogue(
+    const { dialogue, selectOptions } = createScriptedDialogue(
       ['switch', 'gemini-3.1-pro-preview'],
       {
         listModels,
@@ -463,7 +496,6 @@ describe('interactive generation dialogue', () => {
       dialogue.review({
         state: createState(),
         result: { COMMIT_MESSAGE: 'message' },
-        apiKey: 'api-key',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({
@@ -471,7 +503,6 @@ describe('interactive generation dialogue', () => {
       modelName: 'gemini-3.1-pro-preview',
       userHint: undefined,
     });
-    expect(listModelApiKeys).toEqual(['api-key']);
     expect(selectOptions[1]).toEqual(
       KNOWN_MODELS.map(function (model) {
         return { value: model.name, label: model.label, hint: model.description };
@@ -483,7 +514,7 @@ describe('interactive generation dialogue', () => {
     const state = createState();
     const { dialogue } = createScriptedDialogue(['generate']);
 
-    await expect(dialogue.configure(state, 'key')).resolves.toBe('continue');
+    await expect(dialogue.configure(state)).resolves.toBe('continue');
     expect(state).toEqual(createState());
   });
 
@@ -494,7 +525,7 @@ describe('interactive generation dialogue', () => {
     const state = createState();
     const { dialogue, outros } = createScriptedDialogue([choice]);
 
-    await expect(dialogue.configure(state, 'key')).resolves.toBe('exit');
+    await expect(dialogue.configure(state)).resolves.toBe('exit');
     expect(state).toEqual(createState());
     expect(outros).toEqual(['Bye!']);
   });
@@ -508,8 +539,9 @@ describe('interactive generation dialogue', () => {
       'generate',
     ]);
 
-    await expect(dialogue.configure(state, 'key')).resolves.toBe('continue');
+    await expect(dialogue.configure(state)).resolves.toBe('continue');
     expect(state).toEqual({
+      providerId: 'gemini',
       baselineModelName: 'gemini-3.1-pro-preview',
       modelName: 'gemini-3.1-pro-preview',
       outputMode: 'commit-only',
@@ -526,7 +558,7 @@ describe('interactive generation dialogue', () => {
       'generate',
     ]);
 
-    await expect(dialogue.configure(state, 'key')).resolves.toBe('continue');
+    await expect(dialogue.configure(state)).resolves.toBe('continue');
     expect(state).toEqual({ ...createState(), outputMode: 'full' });
     expect(selectOptions).toHaveLength(4);
   });
@@ -535,7 +567,7 @@ describe('interactive generation dialogue', () => {
     const state = createState();
     const { dialogue, selectOptions } = createScriptedDialogue(['configure', 'back', 'generate']);
 
-    await expect(dialogue.configure(state, 'key')).resolves.toBe('continue');
+    await expect(dialogue.configure(state)).resolves.toBe('continue');
     expect(state).toEqual(createState());
     expect(selectOptions).toHaveLength(3);
   });

@@ -30,3 +30,8 @@ separate commits. `gcm` displays them but never runs them.
 **Exclude pattern** — `--exclude` glob deciding which staged files stay out
 of prompt. Supports `*` (any characters, including `/`) and `?` (exactly
 one character); case-sensitive; matches whole path.
+
+## Language models
+
+**Language model provider** — backend used for generation. Owns its model
+catalogue and model limits; a saved model belongs to that provider identity.
