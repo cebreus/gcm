@@ -169,8 +169,9 @@ describe('commit actions', () => {
     expect(writeEntered).toBe(false);
   });
 
-  // The amend! subject is what git matches during autosquash; the second -m
-  // becomes the replacement message.
+  // The amend! hash is what git matches during autosquash; the second -m
+  // becomes the replacement message. Hash targeting stays unambiguous when
+  // multiple commits have the same subject.
   test('reword creates an amend! commit instead of rewriting history', async () => {
     const { calls, runner } = createRecorder({ commit: '' });
     const service = createGitService({ gitCommandRunner: runner });
@@ -182,7 +183,7 @@ describe('commit actions', () => {
         'commit',
         '--allow-empty',
         '-m',
-        'amend! feat: original subject',
+        `amend! ${TARGET.hash}`,
         '-m',
         'feat(scope): new subject\n\n- new bullet',
       ],

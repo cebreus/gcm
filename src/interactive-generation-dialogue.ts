@@ -11,6 +11,8 @@ export interface GenerationState {
   baselineModelName: string;
   modelName: string;
   outputMode: OutputMode;
+  nonInteractive?: boolean;
+  apply?: boolean;
   userHint?: string;
 }
 

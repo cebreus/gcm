@@ -4,6 +4,10 @@
 `--exclude`, `--verbose` and `--debug` modify these flows; they do not create
 separate ones.
 
+`--non-interactive` skips configuration, atomicity, and review prompts. It
+stops after generation unless explicit `--apply` requests the available Git
+action.
+
 ## Staged changes: `gcm`
 
 ```mermaid

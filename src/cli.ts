@@ -11,6 +11,8 @@ interface Args extends ParsedArgs {
   mode?: OutputMode | null;
   verbose?: boolean;
   debug?: boolean;
+  nonInteractive?: boolean;
+  apply?: boolean;
   'list-models'?: boolean;
   exclude?: string | string[];
 }
@@ -23,6 +25,8 @@ export interface ParsedOptions {
   mode: OutputMode | null;
   verbose: boolean;
   debug: boolean;
+  nonInteractive: boolean;
+  apply: boolean;
   listModels: boolean;
   exclude: string[];
 }
@@ -66,6 +70,8 @@ const flagDefinitions = [
   },
   { name: 'verbose', aliases: ['--verbose', '-v'], takesValue: false },
   { name: 'debug', aliases: ['--debug', '-d'], takesValue: false },
+  { name: 'nonInteractive', aliases: ['--non-interactive'], takesValue: false },
+  { name: 'apply', aliases: ['--apply'], takesValue: false },
   { name: 'listModels', aliases: ['--list-models'], takesValue: false },
   { name: 'exclude', aliases: ['--exclude', '-e'], takesValue: true, allowsRepeat: true },
 ] satisfies FlagDefinition[];
@@ -165,7 +171,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     optionTerminator === -1 ? normalisedArgv : normalisedArgv.slice(0, optionTerminator),
     {
       alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug', e: 'exclude', m: 'mode' },
-      boolean: ['help', 'version', 'verbose', 'debug', 'list-models'],
+      boolean: ['help', 'version', 'verbose', 'debug', 'non-interactive', 'apply', 'list-models'],
       string: ['commit', 'model', 'mode', 'exclude'],
     },
   );
@@ -186,6 +192,11 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
   }
 
   const finalMode = parsed.mode && isOutputMode(parsed.mode) ? parsed.mode : null;
+  const nonInteractive = Boolean(parsed['non-interactive']);
+  const apply = Boolean(parsed.apply);
+  if (apply && !nonInteractive) {
+    throw createArgumentValidationError('--apply requires --non-interactive');
+  }
 
   return {
     commit: parsed.commit ?? null,
@@ -195,6 +206,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     mode: finalMode,
     verbose: Boolean(parsed.verbose),
     debug: Boolean(parsed.debug),
+    nonInteractive,
+    apply,
     listModels: Boolean(parsed['list-models']),
     exclude: excludePatterns,
   };

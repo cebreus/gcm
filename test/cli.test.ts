@@ -12,6 +12,8 @@ test('cli: should parse default arguments with empty argv', () => {
     verbose: false,
     debug: false,
     listModels: false,
+    nonInteractive: false,
+    apply: false,
     exclude: [],
   });
 });
@@ -36,6 +38,17 @@ test('cli: should handle -h/--help flag', () => {
 test('cli: should handle --version flag', () => {
   const result = parseArgs(['--version']);
   expect(result.version).toBe(true);
+});
+
+test('cli: parses explicit non-interactive generation and apply flags', () => {
+  const result = parseArgs(['--non-interactive', '--apply']);
+
+  expect(result.nonInteractive).toBe(true);
+  expect(result.apply).toBe(true);
+});
+
+test('cli: refuses --apply without --non-interactive', () => {
+  expect(() => parseArgs(['--apply'])).toThrow('--apply requires --non-interactive');
 });
 
 test('cli: should handle -v/--verbose flag', () => {

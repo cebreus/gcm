@@ -84,6 +84,8 @@ function showHelp(providerLabel: string) {
       ${C.cyan}--version${C.reset}                 Show package version and exit.
       ${C.cyan}-v, --verbose${C.reset}             Show detailed logs (debug level) in the console.
       ${C.cyan}-d, --debug${C.reset}               Save bounded API traces to '.debug.log' for debugging.
+      ${C.cyan}--non-interactive${C.reset}         Generate without prompts; read-only unless --apply is set.
+      ${C.cyan}--apply${C.reset}                   Apply the generated message in non-interactive mode.
       ${C.cyan}-e, --exclude <pattern>${C.reset}   Exclude files matching pattern (e.g., *manifest*).
                                 Can be comma-separated or used multiple times.
       ${C.cyan}-m, --mode <mode>${C.reset}         Output mode: 'full' or 'commit-only'.
@@ -475,7 +477,7 @@ export async function executeCommitMessageGeneration(
         break;
       }
       const s = spinner();
-      const output = createRunnerOutput(s, isInteractive);
+      const output = createRunnerOutput(s, isInteractive && !parsedArgs.nonInteractive);
       const activeParsedArgs = providerSwitched ? { ...parsedArgs, model: null } : parsedArgs;
       const { targetCommit, state } = createGenerationState(
         activeParsedArgs,

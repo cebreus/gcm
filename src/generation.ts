@@ -75,6 +75,8 @@ export function createGenerationState(
       baselineModelName: initialModelName,
       modelName: initialModelName,
       outputMode: parsedArgs.mode ?? session.outputMode ?? 'commit-only',
+      nonInteractive: parsedArgs.nonInteractive,
+      apply: parsedArgs.apply,
       userHint: undefined,
     },
   };
@@ -343,7 +345,7 @@ async function runGenerationWorkflow(params: {
     services.output,
   );
   const preflight =
-    canSwitchProvider || (parsedArgs.model && parsedArgs.mode)
+    state.nonInteractive || canSwitchProvider || (parsedArgs.model && parsedArgs.mode)
       ? 'continue'
       : await services.dialogue.configure(state);
   if (preflight === 'exit') return 'success';
@@ -354,7 +356,9 @@ async function runGenerationWorkflow(params: {
   };
   const meta = buildLogMetadata(staged, targetCommit);
   const commitContextHints = await resolveCommitContextHints(services, staged.stagedFiles, logger);
-  const shouldContinue = await services.dialogue.confirmAtomicity(staged.stagedFiles, targetCommit);
+  const shouldContinue = state.nonInteractive
+    ? true
+    : await services.dialogue.confirmAtomicity(staged.stagedFiles, targetCommit);
   if (!shouldContinue) return 'success';
   return runGenerationCycle({
     services,
@@ -696,6 +700,16 @@ async function handleSuccessfulGeneration(params: {
     (state.outputMode === 'full' ? 'Generated Report' : 'Generated Commit Message') + warningIcon,
   );
   reportStats(services.output, logger, state.modelName, response.usage, response.text.length);
+  if (state.nonInteractive) {
+    if (!state.apply) return 'success';
+    return commitGeneratedMessage({
+      commitMessage: parsedOut.COMMIT_MESSAGE,
+      commitCapability,
+      services,
+      state,
+      logger,
+    });
+  }
   const actionResult: ActionMenuResult = await services.dialogue.review({
     state,
     result: parsedOut,

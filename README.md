@@ -34,6 +34,9 @@ gcm --mode full
 # Review an existing commit
 gcm --commit HEAD
 
+# Generate without prompts; add --apply to perform the available Git action
+gcm --commit HEAD --mode commit-only --model gemini-3.7-flash --non-interactive
+
 # Exclude generated files from Gemini analysis
 gcm --exclude 'dist/*'
 
@@ -59,6 +62,8 @@ See [user-flow diagrams](docs/user-flow.md) for complete staged and existing-com
 | `-m, --mode <mode>`       | Use `commit-only` or `full`. Default: last successfully used mode, initially `commit-only`. |
 | `--model <name>`          | Select a model from the active provider.                                                    |
 | `--list-models`           | List available text-generation models and exit.                                             |
+| `--non-interactive`       | Generate without prompts; read-only unless `--apply` is also set.                           |
+| `--apply`                 | Perform the available Git action; requires `--non-interactive`.                             |
 | `-v, --verbose`           | Show debug-level console logs. Default: off.                                                |
 | `-d, --debug`             | Write bounded API traces to `.debug.log`. Default: off.                                     |
 | `-h, --help`              | Show built-in help.                                                                         |
@@ -75,6 +80,7 @@ LM Studio uses `gemma-4-e4b-it-mlx` by default and waits for LM Studio to load i
 - **Staged changes:** create normal commit.
 - **Unpublished `HEAD` with clean index:** amend `HEAD`.
 - **Published `HEAD` or older reachable commit with clean index:** create `amend!` commit, print exact manual rebase command.
+- **Autosquash targeting:** identify `amend!` targets by commit hash, so duplicate subjects remain unambiguous.
 - **Unreachable target, detached `HEAD`, staged index, or Git operation in progress:** generate read-only mode.
 - **Conflicts or unverifiable snapshot:** stop before generation or writing.
 
