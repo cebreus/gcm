@@ -656,6 +656,10 @@ async function runSingleGenerationAttempt(params: {
       logger,
       generateFallbackCommitDetails(staged.stagedFiles, services.providerLabel),
     );
+    if (state.nonInteractive && state.apply) {
+      services.output.cancel('No generated commit message was available to apply.');
+      return 'failure';
+    }
     return 'success';
   }
   const action = await handleSuccessfulGeneration({

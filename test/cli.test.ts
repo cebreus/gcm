@@ -1,10 +1,21 @@
 import { test, expect } from 'bun:test';
-import { parseArgs } from '../src/cli';
+import { CLI_OPTION_DEFINITIONS, parseArgs } from '../src/cli';
+
+test('cli: every public long flag is documented in README', async () => {
+  const readme = await Bun.file(new URL('../README.md', import.meta.url)).text();
+
+  for (const option of CLI_OPTION_DEFINITIONS) {
+    const longFlag = option.aliases.find(alias => alias.startsWith('--'));
+    expect(longFlag).toBeDefined();
+    expect(readme).toContain(longFlag ?? '');
+  }
+});
 
 test('cli: should parse default arguments with empty argv', () => {
   const result = parseArgs([]);
   expect(result).toEqual({
     commit: null,
+    commitRange: null,
     help: false,
     version: false,
     model: null,
@@ -25,6 +36,24 @@ test('cli: should handle -c/--commit flag with a SHA value', () => {
 
   result = parseArgs([`--commit=${sha}`]);
   expect(result.commit).toBe(sha);
+});
+
+test('cli: accepts a non-interactive commit range', () => {
+  const result = parseArgs(['--commit-range', 'base^..HEAD', '--non-interactive']);
+
+  expect(result.commitRange).toBe('base^..HEAD');
+});
+
+test('cli: validates commit range combinations before execution', () => {
+  expect(() => parseArgs(['--commit-range', 'base..HEAD'])).toThrow(
+    '--commit-range requires --non-interactive',
+  );
+  expect(() =>
+    parseArgs(['--commit', 'HEAD', '--commit-range', 'base..HEAD', '--non-interactive']),
+  ).toThrow('--commit and --commit-range cannot be combined');
+  expect(() => parseArgs(['--commit-range=-danger', '--non-interactive'])).toThrow(
+    '--commit-range cannot start with -',
+  );
 });
 
 test('cli: should handle -h/--help flag', () => {

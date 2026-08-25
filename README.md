@@ -1,6 +1,6 @@
 # GCM
 
-Generate Conventional Commit messages from staged changes or an existing commit with Google Gemini or LM Studio.
+Generate Conventional Commit messages from staged changes or existing commits with Gemini, OpenAI-compatible APIs, or LM Studio.
 
 Default: GCM generate commit message. `full` mode also generate branch name, PR title, PR description. Review every result before any Git write.
 
@@ -34,6 +34,12 @@ gcm --mode full
 # Review an existing commit
 gcm --commit HEAD
 
+# Process a frozen first-parent range, one commit at a time
+gcm --commit-range 'd803946^..HEAD' --mode commit-only --non-interactive --apply
+
+# Process only a narrower inclusive range from abc123 through def456
+gcm --commit-range 'abc123^..def456' --mode commit-only --non-interactive --apply
+
 # Generate without prompts; add --apply to perform the available Git action
 gcm --commit HEAD --mode commit-only --model gemini-3.7-flash --non-interactive
 
@@ -51,13 +57,16 @@ From source checkout, replace `gcm` with `bun run ./gcm.ts`.
 
 Interactive flow lets you configure model and mode, regenerate, add hint, switch models, edit or copy message, select available Git action. Selected model and mode saved only after successful Git action.
 
-See [user-flow diagrams](docs/user-flow.md) for complete staged and existing-commit flows.
+Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Supported values: `gemini`, `openai`, `freellmapi`, `lm-studio`.
+
+See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 
 ## Options
 
 | Option                    | Description                                                                                 |
 | ------------------------- | ------------------------------------------------------------------------------------------- |
 | `-c, --commit <hash>`     | Analyse a commit. Default: staged changes.                                                  |
+| `--commit-range <range>`  | Analyse a first-parent Git revision range, oldest first; requires `--non-interactive`.      |
 | `-e, --exclude <pattern>` | Exclude matching paths; repeat or comma-separate patterns. Default: none.                   |
 | `-m, --mode <mode>`       | Use `commit-only` or `full`. Default: last successfully used mode, initially `commit-only`. |
 | `--model <name>`          | Select a model from the active provider.                                                    |
@@ -81,6 +90,7 @@ LM Studio uses `gemma-4-e4b-it-mlx` by default and waits for LM Studio to load i
 - **Unpublished `HEAD` with clean index:** amend `HEAD`.
 - **Published `HEAD` or older reachable commit with clean index:** create `amend!` commit, print exact manual rebase command.
 - **Autosquash targeting:** identify `amend!` targets by commit hash, so duplicate subjects remain unambiguous.
+- **Commit range:** freeze targets before generation, create only additive `amend!` commits, skip existing exact amendments, stop on the first failure, and never run rebase.
 - **Unreachable target, detached `HEAD`, staged index, or Git operation in progress:** generate read-only mode.
 - **Conflicts or unverifiable snapshot:** stop before generation or writing.
 

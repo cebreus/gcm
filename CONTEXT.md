@@ -4,6 +4,9 @@ Glossary for `gcm`. Terms only — no implementation notes, no specification.
 
 ## Git state
 
+**Commit range** — ordered first-parent snapshot of target commits resolved
+before generation begins. Autosquash commits are not targets.
+
 **Staged snapshot** — set of staged files and their diff read at start
 of run. generated message describes this snapshot, not whatever the
 index holds later.

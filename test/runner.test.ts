@@ -60,6 +60,9 @@ void mock.module('clipboardy', () => ({
 // Mocks
 const mockLogger = { log: mock() };
 const mockGitService = {
+  listCommitHashes: mock(),
+  hasAmendment: mock(),
+  getHeadHash: mock(),
   retrieveStagedChanges: mock(),
   commitChanges: mock(),
   amendCommit: mock(),
@@ -117,6 +120,11 @@ describe('Refactored Runner', () => {
     mockLogger.log.mockClear();
     mockGitService.retrieveStagedChanges.mockClear();
     mockGitService.commitChanges.mockClear();
+    mockGitService.amendCommit.mockClear();
+    mockGitService.rewordCommit.mockClear();
+    mockGitService.listCommitHashes.mockClear();
+    mockGitService.hasAmendment.mockClear();
+    mockGitService.getHeadHash.mockClear();
     mockGitService.getIndexTree.mockClear();
     mockGitService.getIndexTree.mockResolvedValue('index-tree');
     mockGitService.getIndexEntries.mockClear();
@@ -267,7 +275,75 @@ describe('Refactored Runner', () => {
     });
 
     await executeCommitMessageGeneration(
+      ['--non-interactive', '--apply', '--mode', 'commit-only', '--model', 'gemini-3.7-flash'],
+      {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        geminiModelLister: mockListModels,
+      },
+    );
+
+    expect(mockSelect).not.toHaveBeenCalled();
+    expect(mockGitService.commitChanges).toHaveBeenCalledWith(
+      'fix(scope): generated message',
+      mockLogger,
+      expect.anything(),
+    );
+  });
+
+  test('commit range applies one amend! action per frozen target without prompting', async () => {
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    const targets = ['a'.repeat(40), 'b'.repeat(40)];
+    const rewordedTargets: string[] = [];
+    let currentHead = 'c'.repeat(40);
+    mockGitService.listCommitHashes.mockResolvedValue(targets);
+    mockGitService.hasAmendment.mockResolvedValue(false);
+    mockGitService.getHeadHash.mockImplementation(async () => currentHead);
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
+      snapshot: { tree: 'index-tree', entries: [] },
+    });
+    mockGitService.getRepositoryState.mockResolvedValue({
+      hasStagedChanges: false,
+      hasUnstagedChanges: false,
+      hasUntrackedFiles: false,
+      hasUnmergedPaths: false,
+      inProgressOperation: null,
+      changedFiles: [],
+    });
+    mockGitService.inspectCommitTarget.mockImplementation(async (hash: string) => ({
+      hash,
+      headHash: currentHead,
+      subject: 'feat: original',
+      isHead: hash === currentHead,
+      isPublished: false,
+      isAncestorOfHead: true,
+      isHeadDetached: false,
+      hasParent: true,
+      hasAmbiguousSubject: false,
+    }));
+    mockGitService.rewordCommit.mockImplementation(async (target: { hash: string }) => {
+      rewordedTargets.push(target.hash);
+      currentHead = currentHead === 'c'.repeat(40) ? 'd'.repeat(40) : 'e'.repeat(40);
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.generate.mockResolvedValue({
+      text: 'COMMIT_MESSAGE: fix(scope): generated message',
+      usage: {},
+    });
+
+    await executeCommitMessageGeneration(
       [
+        '--commit-range',
+        'base^..HEAD',
         '--non-interactive',
         '--apply',
         '--mode',
@@ -285,10 +361,36 @@ describe('Refactored Runner', () => {
     );
 
     expect(mockSelect).not.toHaveBeenCalled();
-    expect(mockGitService.commitChanges).toHaveBeenCalledWith(
-      'fix(scope): generated message',
-      mockLogger,
-      expect.anything(),
+    expect(mockGitService.rewordCommit).toHaveBeenCalledTimes(2);
+    expect(rewordedTargets).toEqual(targets);
+  });
+
+  test('commit range stops before generation when the index is staged', async () => {
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    mockGitService.getRepositoryState.mockResolvedValue({
+      hasStagedChanges: true,
+      hasUnstagedChanges: false,
+      hasUntrackedFiles: false,
+      hasUnmergedPaths: false,
+      inProgressOperation: null,
+      changedFiles: ['staged.ts'],
+    });
+
+    await executeCommitMessageGeneration(
+      ['--commit-range', 'base^..HEAD', '--non-interactive', '--apply'],
+      {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        geminiModelLister: mockListModels,
+      },
+    );
+
+    expect(mockGitService.listCommitHashes).not.toHaveBeenCalled();
+    expect(mockGeminiService.generate).not.toHaveBeenCalled();
+    expect(mockCancel).toHaveBeenCalledWith(
+      'Commit range apply requires a clean index with no Git operation in progress.',
     );
   });
 
