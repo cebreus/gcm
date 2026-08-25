@@ -29,6 +29,40 @@ const TARGET: CommitTarget = {
 };
 
 describe('commit actions', () => {
+  test('freezes first-parent range targets and excludes autosquash commits', async () => {
+    const first = '1'.repeat(40);
+    const fixup = '2'.repeat(40);
+    const second = '3'.repeat(40);
+    const { calls, runner } = createRecorder({
+      log: `${first}\0feat: first\0${fixup}\0amend! ${first}\0${second}\0fix: second\0`,
+    });
+    const service = createGitService({ gitCommandRunner: runner });
+
+    const hashes = await service.listCommitHashes?.('base^..HEAD', null);
+
+    expect(hashes).toEqual([first, second]);
+    expect(calls[0]).toEqual([
+      'log',
+      '--reverse',
+      '--first-parent',
+      '--format=%H%x00%s%x00',
+      'base^..HEAD',
+    ]);
+  });
+
+  test('detects an existing exact amend marker and reads HEAD', async () => {
+    const target = 'a'.repeat(40);
+    const head = 'b'.repeat(40);
+    const { runner } = createRecorder({
+      log: `other\namend! ${target}\n`,
+      'rev-parse --verify HEAD': `${head}\n`,
+    });
+    const service = createGitService({ gitCommandRunner: runner });
+
+    expect(await service.hasAmendment?.(target, null)).toBe(true);
+    expect(await service.getHeadHash?.(null)).toBe(head);
+  });
+
   test('refuses a truncated repository status', async () => {
     const gitService = createGitService({
       gitCommandRunner: async function (args) {
@@ -111,7 +145,11 @@ describe('commit actions', () => {
   });
 
   test('amend rewrites the message of HEAD', async () => {
-    const { calls, runner } = createRecorder({ commit: '' });
+    const { calls, runner } = createRecorder({
+      commit: '',
+      'rev-parse --verify HEAD^{tree}': 'tree',
+      'rev-parse --verify HEAD^1^{tree}': 'tree',
+    });
     const service = createGitService({ gitCommandRunner: runner });
 
     await service.amendCommit('feat(scope): new subject', null);
@@ -173,25 +211,31 @@ describe('commit actions', () => {
   // becomes the replacement message. Hash targeting stays unambiguous when
   // multiple commits have the same subject.
   test('reword creates an amend! commit instead of rewriting history', async () => {
-    const { calls, runner } = createRecorder({ commit: '' });
+    const { calls, runner } = createRecorder({
+      commit: '',
+      'rev-parse --verify HEAD^{tree}': 'tree',
+      'rev-parse --verify HEAD^1^{tree}': 'tree',
+    });
     const service = createGitService({ gitCommandRunner: runner });
 
     await service.rewordCommit(TARGET, 'feat(scope): new subject\n\n- new bullet', null);
 
-    expect(calls).toEqual([
-      [
-        'commit',
-        '--allow-empty',
-        '-m',
-        `amend! ${TARGET.hash}`,
-        '-m',
-        'feat(scope): new subject\n\n- new bullet',
-      ],
+    expect(calls[0]).toEqual([
+      'commit',
+      '--allow-empty',
+      '-m',
+      `amend! ${TARGET.hash}`,
+      '-m',
+      'feat(scope): new subject\n\n- new bullet',
     ]);
   });
 
   test('reword never rewrites history on its own', async () => {
-    const { calls, runner } = createRecorder({ commit: '' });
+    const { calls, runner } = createRecorder({
+      commit: '',
+      'rev-parse --verify HEAD^{tree}': 'tree',
+      'rev-parse --verify HEAD^1^{tree}': 'tree',
+    });
     const service = createGitService({ gitCommandRunner: runner });
 
     await service.rewordCommit(TARGET, 'chore: message', null);
@@ -199,6 +243,25 @@ describe('commit actions', () => {
     const rewriting = calls.filter(args => ['rebase', 'reset', 'push'].includes(args[0] ?? ''));
     expect(rewriting).toEqual([]);
     expect(calls.some(args => args.includes('--amend'))).toBe(false);
+  });
+
+  test('reword stops after a hook adds content to the amend commit', async () => {
+    const service = createGitService({
+      gitCommandRunner: async function (args) {
+        if (args[0] === 'commit') return { text: '', truncated: false };
+        if (args.join(' ') === 'rev-parse --verify HEAD^{tree}') {
+          return { text: 'changed-tree\n', truncated: false };
+        }
+        if (args.join(' ') === 'rev-parse --verify HEAD^1^{tree}') {
+          return { text: 'parent-tree\n', truncated: false };
+        }
+        throw new Error(`unexpected git command: ${args.join(' ')}`);
+      },
+    });
+
+    await expect(service.rewordCommit(TARGET, 'fix: replacement', null)).rejects.toThrow(
+      'amend! commit contains file changes',
+    );
   });
 
   test('inspect reports an unpublished head', async () => {

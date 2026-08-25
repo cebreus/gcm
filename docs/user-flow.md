@@ -1,6 +1,6 @@
 # User flows
 
-`gcm` has two generation use cases. Flags such as `--model`, `--mode`,
+`gcm` has three generation use cases. Flags such as `--model`, `--mode`,
 `--exclude`, `--verbose` and `--debug` modify these flows; they do not create
 separate ones.
 
@@ -91,3 +91,29 @@ state, conflicts, the index snapshot and capability. Target actions also
 revalidate HEAD and the resolved target. The delegated Git write boundary then
 checks the index and HEAD/target once more. Session model and mode are saved
 only after that Git action succeeds.
+
+## Commit range: `gcm --commit-range <range>`
+
+```mermaid
+flowchart TD
+  A[Resolve first-parent range once] --> B{Targets found?}
+  B -- No --> X[Stop before generation]
+  B -- Yes --> C[Process oldest target]
+  C --> D{Exact amend exists?}
+  D -- Yes --> E[Skip target]
+  D -- No --> F[Run existing commit generation]
+  F --> G{Generation and amend-only action succeed?}
+  G -- No --> X2[Stop; keep completed amend commits]
+  G -- Yes --> H{Amend commit tree equals parent?}
+  H -- No --> X2
+  H -- Yes --> I{More frozen targets?}
+  E --> I
+  I -- Yes --> C
+  I -- No --> Z[Report summary; never run rebase]
+```
+
+The range is sequential, non-interactive and first-parent only. Existing
+`amend!`, `fixup!` and `squash!` commits are excluded from its frozen targets.
+Unexpected HEAD movement, index changes, Git operations and hook-added file
+changes stop the batch without rollback. Re-running skips exact existing
+`amend! <full-hash>` commits.

@@ -180,6 +180,28 @@ describe('commit action service', () => {
     expect(inspection.capability.reason).toContain('Staged changes');
   });
 
+  test('range policy creates amend! even when the target is unpublished HEAD', async () => {
+    const head = { ...TARGET, hash: 'b'.repeat(40), headHash: 'b'.repeat(40), isHead: true };
+    const fake = createFakeGitService({
+      states: [
+        { ...CLEAN, hasStagedChanges: false },
+        { ...CLEAN, hasStagedChanges: false },
+      ],
+      target: head,
+    });
+    const actions = createCommitActionService({
+      gitService: fake.service,
+      logger: { log: function () {} },
+      allowDirectAmend: false,
+    });
+
+    const inspection = await actions.inspect(head.hash);
+    await actions.apply(inspection.capability, 'fix: replacement');
+
+    expect(inspection.capability.mode).toBe('reword');
+    expect(fake.writes).toEqual(['reword:fix: replacement']);
+  });
+
   test('refuses excluded staged paths until they are explicitly acknowledged', async () => {
     const fake = createFakeGitService({});
     const actions = createActionService(fake.service);

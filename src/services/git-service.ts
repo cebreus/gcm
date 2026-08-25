@@ -39,6 +39,9 @@ export interface CommitWriteSafety {
 }
 
 export interface GitService {
+  listCommitHashes?(range: string, logger: Logger | null): Promise<string[]>;
+  hasAmendment?(hash: string, logger: Logger | null): Promise<boolean>;
+  getHeadHash?(logger: Logger | null): Promise<string>;
   retrieveStagedChanges(
     commitHash: string | null,
     logger: Logger | null,
@@ -157,6 +160,15 @@ function logNoChanges(logger: Logger | null, commitHash: string | null): void {
 export function createGitService(opts: GitServiceOptions = {}): GitService {
   const deps: GitServiceDeps = { gitCommandRunner: opts.gitCommandRunner ?? spawnGitStream };
   return {
+    listCommitHashes: function (range: string, logger: Logger | null = null): Promise<string[]> {
+      return listCommitHashesWithDeps({ deps, range, logger });
+    },
+    hasAmendment: function (hash: string, logger: Logger | null = null): Promise<boolean> {
+      return hasAmendmentWithDeps({ deps, hash, logger });
+    },
+    getHeadHash: function (logger: Logger | null = null): Promise<string> {
+      return getHeadHashWithDeps({ deps, logger });
+    },
     retrieveStagedChanges: function (
       commitHash: string | null,
       logger: Logger | null = null,
@@ -207,6 +219,58 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       return getRepositoryStateWithDeps({ deps, logger });
     },
   };
+}
+
+async function listCommitHashesWithDeps(params: {
+  deps: GitServiceDeps;
+  range: string;
+  logger: Logger | null;
+}): Promise<string[]> {
+  const { deps, range, logger } = params;
+  logger?.log('debug', `Resolving commit range ${range}`);
+  const result = await deps.gitCommandRunner([
+    'log',
+    '--reverse',
+    '--first-parent',
+    '--format=%H%x00%s%x00',
+    range,
+  ]);
+  if (result.truncated) throw new Error('Commit range output was truncated.');
+  const fields = result.text.split('\0');
+  const hashes: string[] = [];
+  for (let index = 0; index + 1 < fields.length; index += 2) {
+    const hash = fields[index]?.trim();
+    const subject = fields[index + 1]?.trim() ?? '';
+    if (!hash || /^(amend|fixup|squash)! /.test(subject)) continue;
+    hashes.push(hash);
+  }
+  return hashes;
+}
+
+async function hasAmendmentWithDeps(params: {
+  deps: GitServiceDeps;
+  hash: string;
+  logger: Logger | null;
+}): Promise<boolean> {
+  const { deps, hash, logger } = params;
+  logger?.log('debug', `Checking for an existing amend! commit for ${hash}`);
+  const result = await deps.gitCommandRunner([
+    'log',
+    '--format=%s',
+    '--fixed-strings',
+    `--grep=amend! ${hash}`,
+    'HEAD',
+  ]);
+  return result.text.split('\n').some(subject => subject.trim() === `amend! ${hash}`);
+}
+
+async function getHeadHashWithDeps(params: {
+  deps: GitServiceDeps;
+  logger: Logger | null;
+}): Promise<string> {
+  const { deps, logger } = params;
+  logger?.log('debug', 'Reading HEAD');
+  return (await deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^{commit}'])).text.trim();
 }
 
 async function retrieveStagedChangesWithDeps(params: {
@@ -359,7 +423,24 @@ async function rewordCommitWithDeps(params: {
     '-m',
     message,
   ]);
-  await warnIfCommittedTreeChanged({ deps, logger, safety });
+  await assertAmendCommitIsEmpty(deps);
+}
+
+async function assertAmendCommitIsEmpty(deps: GitServiceDeps): Promise<void> {
+  try {
+    const [committed, parent] = await Promise.all([
+      deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^{tree}']),
+      deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^1^{tree}']),
+    ]);
+    if (committed.text.trim() === parent.text.trim()) return;
+  } catch {
+    throw commitSafetyRefusal(
+      'The amend! commit was created, but its tree could not be verified. Batch processing must stop.',
+    );
+  }
+  throw commitSafetyRefusal(
+    'The amend! commit contains file changes introduced by a Git hook. Batch processing must stop.',
+  );
 }
 
 async function warnIfCommittedTreeChanged(params: {

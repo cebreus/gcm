@@ -1,4 +1,4 @@
-import { isArgumentValidationError, parseArgs } from './cli.js';
+import { CLI_OPTION_DEFINITIONS, isArgumentValidationError, parseArgs } from './cli.js';
 import type { ParsedOptions } from './cli.js';
 import { CONFIG } from '../gcm.config.js';
 import { createLogger } from './logger.js';
@@ -48,6 +48,7 @@ import {
   runGenerationCommand,
   type GenerationServices,
 } from './generation.js';
+import { runCommitBatch } from './batch-generation.js';
 
 const C = {
   reset: '\x1b[0m',
@@ -69,6 +70,11 @@ function getPackageInfo(): PackageInfo {
 
 function showHelp(providerLabel: string) {
   const packageInfo = getPackageInfo();
+  const optionWidth = Math.max(...CLI_OPTION_DEFINITIONS.map(option => option.usage.length));
+  const options = CLI_OPTION_DEFINITIONS.map(function (option) {
+    const description = option.description.replaceAll('{provider}', providerLabel);
+    return `      ${C.cyan}${option.usage.padEnd(optionWidth)}${C.reset}  ${description}`;
+  }).join('\n');
   const helpText = `
     ${C.bright}${providerLabel} Commit Message Helper${C.reset}
     Version: ${packageInfo.version}
@@ -79,18 +85,19 @@ function showHelp(providerLabel: string) {
       gcm [options]
 
     ${C.bright}Options:${C.reset}
-      ${C.cyan}-c, --commit <hash>${C.reset}       Analyse a specific commit instead of staged changes.
-      ${C.cyan}-h, --help${C.reset}                Show this help message.
-      ${C.cyan}--version${C.reset}                 Show package version and exit.
-      ${C.cyan}-v, --verbose${C.reset}             Show detailed logs (debug level) in the console.
-      ${C.cyan}-d, --debug${C.reset}               Save bounded API traces to '.debug.log' for debugging.
-      ${C.cyan}--non-interactive${C.reset}         Generate without prompts; read-only unless --apply is set.
-      ${C.cyan}--apply${C.reset}                   Apply the generated message in non-interactive mode.
-      ${C.cyan}-e, --exclude <pattern>${C.reset}   Exclude files matching pattern (e.g., *manifest*).
-                                Can be comma-separated or used multiple times.
-      ${C.cyan}-m, --mode <mode>${C.reset}         Output mode: 'full' or 'commit-only'.
-      ${C.cyan}--model <name>${C.reset}            Specify an alternative ${providerLabel} model to use.
-      ${C.cyan}--list-models${C.reset}             List available ${providerLabel} models and exit.
+${options}
+
+    ${C.bright}Provider:${C.reset}
+      Choose another provider in interactive Settings, or set ${C.cyan}GCM_PROVIDER${C.reset} before gcm.
+      Available values: gemini, openai, freellmapi, lm-studio.
+      Example: ${C.cyan}GCM_PROVIDER=lm-studio gcm${C.reset}
+
+    ${C.bright}Examples:${C.reset}
+      gcm                                      Generate from staged changes.
+      gcm --commit HEAD                        Generate from the latest commit.
+      gcm --commit-range 'abc123^..def456' --non-interactive --apply
+                                               Generate from abc123 through def456.
+                                               The first commit is included because of ^.
 
     ${C.bright}Commit Safety:${C.reset}
       - Without ${C.cyan}--commit${C.reset} the action commits the staged changes.
@@ -102,6 +109,7 @@ function showHelp(providerLabel: string) {
         or while the index has staged changes.
       - All actions are disabled when git has unresolved conflicts.
       - All actions are disabled while merge/rebase/cherry-pick/revert/bisect is in progress.
+      - ${C.cyan}--commit-range${C.reset} creates one separate 'amend!' commit per target and never runs rebase.
 
     `;
   process.stdout.write(helpText.trim() + '\n');
@@ -162,12 +170,13 @@ function createRunnerServices(
   logger: Logger,
   provider: LanguageModelProvider,
   providers: Array<{ id: string; label: string }>,
+  gitService: GitService,
+  allowDirectAmend = true,
 ): Omit<GenerationServices, 'output'> {
-  const gitService = opts.gitService ?? createGitService();
   const contextService =
     opts.contextService ?? createContextService({ summarizeLargeDiff: summarizeRepositoryDiff });
   const dialogue = createRunnerDialogue(logger, provider, providers);
-  const commitActions = createCommitActionService({ gitService, logger });
+  const commitActions = createCommitActionService({ gitService, logger, allowDirectAmend });
   async function resolveCommitContextHints(files: string[]) {
     return getCommitContextHints(files, await readCommitContextFacts(files));
   }
@@ -369,6 +378,100 @@ function parseArgsOrReport(argv: string[]): ParsedOptions | null {
   }
 }
 
+async function runCommitRangeCommand(params: {
+  gitService: GitService;
+  range: string;
+  createServices(): Omit<GenerationServices, 'output'>;
+  parsedArgs: ParsedOptions;
+  logger: Logger;
+  providerReadinessError?: string;
+  state: ReturnType<typeof createGenerationState>['state'];
+  output: GenerationServices['output'];
+}): Promise<'success' | 'failure'> {
+  const {
+    gitService,
+    range,
+    createServices,
+    parsedArgs,
+    logger,
+    providerReadinessError,
+    state,
+    output,
+  } = params;
+  if (!gitService.listCommitHashes || !gitService.hasAmendment || !gitService.getHeadHash) {
+    output.cancel('The configured Git adapter does not support commit ranges.');
+    return 'failure';
+  }
+  const listCommitHashes = gitService.listCommitHashes.bind(gitService);
+  const hasAmendment = gitService.hasAmendment.bind(gitService);
+  const getHeadHash = gitService.getHeadHash.bind(gitService);
+  try {
+    const repositoryState = await gitService.getRepositoryState(logger);
+    if (
+      parsedArgs.apply &&
+      (repositoryState.hasStagedChanges ||
+        repositoryState.hasUnmergedPaths ||
+        repositoryState.inProgressOperation)
+    ) {
+      output.cancel('Commit range apply requires a clean index with no Git operation in progress.');
+      return 'failure';
+    }
+    const targets = await listCommitHashes(range, logger);
+    if (targets.length === 0) {
+      output.cancel(`Commit range ${range} contains no commits.`);
+      return 'failure';
+    }
+    const initialHead = await getHeadHash(logger);
+    const result = await runCommitBatch({
+      targets,
+      initialHead,
+      getHead: function () {
+        return getHeadHash(logger);
+      },
+      hasAmendment: function (hash) {
+        return parsedArgs.apply ? hasAmendment(hash, logger) : Promise.resolve(false);
+      },
+      runOne: async function (hash) {
+        try {
+          const outcome = await runGenerationCommand({
+            createServices,
+            parsedArgs,
+            logger,
+            providerReadinessError,
+            canSwitchProvider: false,
+            targetCommit: hash,
+            state,
+            output,
+          });
+          return outcome === 'success';
+        } catch (error) {
+          logger.log('error', `Commit range target failed: ${error}`);
+          return false;
+        }
+      },
+      report: function (message) {
+        logger.log('info', message);
+      },
+    });
+    const summary = `Commit range: ${result.completed.length} completed, ${result.skipped.length} skipped.`;
+    if (result.failed) {
+      const failedIndex = targets.indexOf(result.failed);
+      const remaining = targets.slice(Math.max(0, failedIndex)).join(', ');
+      output.cancel(
+        `${summary} Failed at ${result.failed}. Remaining: ${remaining}. No rebase was run.`,
+      );
+      return 'failure';
+    }
+    output.outro(`${summary} No rebase was run.`);
+    return 'success';
+  } catch (error) {
+    output.cancel(
+      `Commit range failed before completion: ${output.sanitizeTerminalText(String(error))}`,
+    );
+    return 'failure';
+  }
+}
+
 export async function executeCommitMessageGeneration(
   argv?: string[],
   dependencies?: RunnerOptions,
@@ -394,6 +497,7 @@ export async function executeCommitMessageGeneration(
       return;
     }
     const session = await loadSession();
+    const gitService = opts.gitService ?? createGitService();
     const environmentProviderId =
       process.env.GCM_PROVIDER === 'freellmapi' ? 'openai' : process.env.GCM_PROVIDER;
     let providerId = opts.languageModelProvider
@@ -485,9 +589,25 @@ export async function executeCommitMessageGeneration(
         provider.defaultModel,
         provider.id,
       );
+      if (activeParsedArgs.commitRange) {
+        const outcome = await runCommitRangeCommand({
+          gitService,
+          range: activeParsedArgs.commitRange,
+          createServices: function () {
+            return createRunnerServices(opts, logger, provider, factories, gitService, false);
+          },
+          parsedArgs: activeParsedArgs,
+          logger,
+          providerReadinessError: provider.readinessError,
+          state,
+          output,
+        });
+        exitCode = outcome === 'failure' ? 1 : 0;
+        break;
+      }
       const outcome = await runGenerationCommand({
         createServices: function () {
-          return createRunnerServices(opts, logger, provider, factories);
+          return createRunnerServices(opts, logger, provider, factories, gitService);
         },
         parsedArgs: activeParsedArgs,
         logger,

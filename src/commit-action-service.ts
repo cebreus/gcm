@@ -101,6 +101,7 @@ export function evaluateCommitCapability(
   repositoryState: RepositoryState,
   targetCommit: string | null,
   commitTarget: CommitTarget | null,
+  allowDirectAmend = true,
 ): CommitCapability {
   if (repositoryState.inProgressOperation) {
     return {
@@ -133,7 +134,7 @@ export function evaluateCommitCapability(
         'HEAD is detached. A commit made here is orphaned as soon as another branch is checked out. Check out a branch first.',
     };
   }
-  if (commitTarget.isHead && !commitTarget.isPublished) {
+  if (allowDirectAmend && commitTarget.isHead && !commitTarget.isPublished) {
     return { allowed: true, mode: 'amend', target: commitTarget };
   }
   if (!commitTarget.isAncestorOfHead) {
@@ -259,6 +260,7 @@ async function inspectTargetCapability(
   logger: Logger,
   targetHash: string | null,
   snapshot: IndexSnapshot,
+  allowDirectAmend: boolean,
 ): Promise<CommitActionInspection> {
   const repositoryState = await inspectRepositoryState(gitService, logger);
   if (!repositoryState) return cannotInspectRepository();
@@ -268,7 +270,10 @@ async function inspectTargetCapability(
   const target = await inspectTarget(gitService, targetHash, logger);
   return {
     repositoryState,
-    capability: { ...evaluateCommitCapability(repositoryState, targetHash, target), snapshot },
+    capability: {
+      ...evaluateCommitCapability(repositoryState, targetHash, target, allowDirectAmend),
+      snapshot,
+    },
   };
 }
 
@@ -295,8 +300,9 @@ async function writeCommitAction(params: {
 export function createCommitActionService(params: {
   gitService: GitService;
   logger: Logger;
+  allowDirectAmend?: boolean;
 }): CommitActionService {
-  const { gitService, logger } = params;
+  const { gitService, logger, allowDirectAmend = true } = params;
 
   async function inspect(
     targetHash: string | null,
@@ -325,7 +331,7 @@ export function createCommitActionService(params: {
     }
     if (!snapshot)
       return cannotInspectIndex(repositoryState, 'the index changed while it was being checked');
-    return inspectTargetCapability(gitService, logger, targetHash, snapshot);
+    return inspectTargetCapability(gitService, logger, targetHash, snapshot, allowDirectAmend);
   }
 
   async function apply(

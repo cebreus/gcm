@@ -5,6 +5,7 @@ export type { OutputMode } from './output-mode.js';
 
 interface Args extends ParsedArgs {
   commit?: string | null;
+  'commit-range'?: string | null;
   help?: boolean;
   version?: boolean;
   model?: string | null;
@@ -19,6 +20,7 @@ interface Args extends ParsedArgs {
 
 export interface ParsedOptions {
   commit: string | null;
+  commitRange: string | null;
   help: boolean;
   version: boolean;
   model: string | null;
@@ -49,35 +51,107 @@ function validateOutputMode(value: string): void {
   }
 }
 
-interface FlagDefinition {
+export interface CliOptionDefinition {
   name: string;
   aliases: string[];
+  usage: string;
+  description: string;
   takesValue: boolean;
   allowsRepeat?: boolean;
   validateValue?: (value: string) => void;
 }
 
-const flagDefinitions = [
-  { name: 'commit', aliases: ['--commit', '-c'], takesValue: true },
-  { name: 'help', aliases: ['--help', '-h'], takesValue: false },
-  { name: 'version', aliases: ['--version'], takesValue: false },
-  { name: 'model', aliases: ['--model'], takesValue: true },
+export const CLI_OPTION_DEFINITIONS = [
+  {
+    name: 'commit',
+    aliases: ['--commit', '-c'],
+    usage: '-c, --commit <hash>',
+    description: 'Generate from one existing commit instead of staged changes.',
+    takesValue: true,
+  },
+  {
+    name: 'commitRange',
+    aliases: ['--commit-range'],
+    usage: '--commit-range <range>',
+    description: 'Generate each commit in a range, oldest first; requires --non-interactive.',
+    takesValue: true,
+  },
+  {
+    name: 'help',
+    aliases: ['--help', '-h'],
+    usage: '-h, --help',
+    description: 'Show this help.',
+    takesValue: false,
+  },
+  {
+    name: 'version',
+    aliases: ['--version'],
+    usage: '--version',
+    description: 'Show the version and exit.',
+    takesValue: false,
+  },
+  {
+    name: 'model',
+    aliases: ['--model'],
+    usage: '--model <name>',
+    description: 'Use another {provider} model.',
+    takesValue: true,
+  },
   {
     name: 'mode',
     aliases: ['--mode', '-m'],
+    usage: '-m, --mode <mode>',
+    description: "Output 'commit-only' or 'full'.",
     takesValue: true,
     validateValue: validateOutputMode,
   },
-  { name: 'verbose', aliases: ['--verbose', '-v'], takesValue: false },
-  { name: 'debug', aliases: ['--debug', '-d'], takesValue: false },
-  { name: 'nonInteractive', aliases: ['--non-interactive'], takesValue: false },
-  { name: 'apply', aliases: ['--apply'], takesValue: false },
-  { name: 'listModels', aliases: ['--list-models'], takesValue: false },
-  { name: 'exclude', aliases: ['--exclude', '-e'], takesValue: true, allowsRepeat: true },
-] satisfies FlagDefinition[];
+  {
+    name: 'verbose',
+    aliases: ['--verbose', '-v'],
+    usage: '-v, --verbose',
+    description: 'Show detailed logs.',
+    takesValue: false,
+  },
+  {
+    name: 'debug',
+    aliases: ['--debug', '-d'],
+    usage: '-d, --debug',
+    description: "Save bounded API traces to '.debug.log'.",
+    takesValue: false,
+  },
+  {
+    name: 'nonInteractive',
+    aliases: ['--non-interactive'],
+    usage: '--non-interactive',
+    description: 'Run without questions; read-only unless --apply is set.',
+    takesValue: false,
+  },
+  {
+    name: 'apply',
+    aliases: ['--apply'],
+    usage: '--apply',
+    description: 'Write the generated message; requires --non-interactive.',
+    takesValue: false,
+  },
+  {
+    name: 'listModels',
+    aliases: ['--list-models'],
+    usage: '--list-models',
+    description: 'List available {provider} models and exit.',
+    takesValue: false,
+  },
+  {
+    name: 'exclude',
+    aliases: ['--exclude', '-e'],
+    usage: '-e, --exclude <pattern>',
+    description: 'Exclude matching files; repeat or separate patterns with commas.',
+    takesValue: true,
+    allowsRepeat: true,
+  },
+] satisfies CliOptionDefinition[];
 
-const flagsByAlias = new Map<string, FlagDefinition>(
-  flagDefinitions.flatMap(definition =>
+const flagsByAlias = new Map<string, CliOptionDefinition>(
+  CLI_OPTION_DEFINITIONS.flatMap(definition =>
     definition.aliases.map(alias => [alias, definition] as const),
   ),
 );
@@ -103,11 +177,13 @@ function validateValueFlag(
   if (aliases.at(-1) !== valueFlag) {
     throw createArgumentValidationError(`Value-taking flag must be last in cluster: ${flag}`);
   }
-  const isExcludePattern = flagsByAlias.get(valueFlag)?.name === 'exclude';
+  const valueDefinition = flagsByAlias.get(valueFlag)?.name;
+  const allowsDashPrefixedValue =
+    valueDefinition === 'exclude' || valueDefinition === 'commitRange';
   if (
     !value ||
     value === '--' ||
-    (value.startsWith('-') && (!isExcludePattern || flagsByAlias.has(value)))
+    (value.startsWith('-') && (!allowsDashPrefixedValue || flagsByAlias.has(value)))
   ) {
     throw createArgumentValidationError(`Missing value for flag: ${valueFlag}`);
   }
@@ -172,7 +248,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     {
       alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug', e: 'exclude', m: 'mode' },
       boolean: ['help', 'version', 'verbose', 'debug', 'non-interactive', 'apply', 'list-models'],
-      string: ['commit', 'model', 'mode', 'exclude'],
+      string: ['commit', 'commit-range', 'model', 'mode', 'exclude'],
     },
   );
 
@@ -194,12 +270,23 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
   const finalMode = parsed.mode && isOutputMode(parsed.mode) ? parsed.mode : null;
   const nonInteractive = Boolean(parsed['non-interactive']);
   const apply = Boolean(parsed.apply);
+  const commitRange = parsed['commit-range'] ?? null;
   if (apply && !nonInteractive) {
     throw createArgumentValidationError('--apply requires --non-interactive');
+  }
+  if (commitRange && !nonInteractive) {
+    throw createArgumentValidationError('--commit-range requires --non-interactive');
+  }
+  if (commitRange && parsed.commit) {
+    throw createArgumentValidationError('--commit and --commit-range cannot be combined');
+  }
+  if (commitRange?.startsWith('-')) {
+    throw createArgumentValidationError('--commit-range cannot start with -');
   }
 
   return {
     commit: parsed.commit ?? null,
+    commitRange,
     help: Boolean(parsed.help),
     version: Boolean(parsed.version),
     model: parsed.model ?? null,
