@@ -116,6 +116,18 @@ describe('Refactored Runner', () => {
     ).toBe('gemini-model');
   });
 
+  test('Should seed generation with a CLI hint', () => {
+    const session = { providerId: null, modelName: null, outputMode: null } as const;
+    const state = createGenerationState(
+      parseArgs(['--hint', 'emphasize migration']),
+      session,
+      'gemini-model',
+      'gemini',
+    ).state;
+
+    expect(state.userHint).toBe('emphasize migration');
+  });
+
   beforeEach(() => {
     mockLogger.log.mockClear();
     mockGitService.retrieveStagedChanges.mockClear();

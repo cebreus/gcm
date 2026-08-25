@@ -1,6 +1,6 @@
 # User flows
 
-`gcm` has three generation use cases. Flags such as `--provider`, `--model`, `--mode`,
+`gcm` has three generation use cases. Flags such as `--provider`, `--model`, `--hint`, `--mode`,
 `--exclude`, `--verbose` and `--debug` modify these flows; they do not create
 separate ones.
 

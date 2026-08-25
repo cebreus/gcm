@@ -54,6 +54,9 @@ GCM_PROVIDER=lm-studio gcm
 
 # Select FreeLLMAPI and let its router choose a model
 gcm --provider freellmapi --model auto
+
+# Add a generation instruction
+gcm --hint 'emphasize migration'
 ```
 
 From source checkout, replace `gcm` with `bun run ./gcm.ts`.
@@ -74,6 +77,7 @@ See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 | `-m, --mode <mode>`       | Use `commit-only` or `full`. Default: last successfully used mode, initially `commit-only`. |
 | `--model <name>`          | Select a model from the active provider.                                                    |
 | `--provider <name>`       | Select `gemini`, `openai`, `freellmapi`, or `lm-studio`.                                    |
+| `--hint <text>`           | Add an instruction for generation.                                                          |
 | `--list-models`           | List available text-generation models and exit.                                             |
 | `--non-interactive`       | Generate without prompts; read-only unless `--apply` is also set.                           |
 | `--apply`                 | Perform the available Git action; requires `--non-interactive`.                             |

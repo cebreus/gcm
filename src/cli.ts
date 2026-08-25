@@ -10,6 +10,7 @@ interface Args extends ParsedArgs {
   version?: boolean;
   model?: string | null;
   provider?: string | null;
+  hint?: string | null;
   mode?: OutputMode | null;
   verbose?: boolean;
   debug?: boolean;
@@ -26,6 +27,7 @@ export interface ParsedOptions {
   version: boolean;
   model: string | null;
   provider: string | null;
+  hint: string | null;
   mode: OutputMode | null;
   verbose: boolean;
   debug: boolean;
@@ -104,6 +106,13 @@ export const CLI_OPTION_DEFINITIONS = [
     aliases: ['--provider'],
     usage: '--provider <name>',
     description: 'Use gemini, openai, freellmapi, or lm-studio.',
+    takesValue: true,
+  },
+  {
+    name: 'hint',
+    aliases: ['--hint'],
+    usage: '--hint <text>',
+    description: 'Add an instruction for generation.',
     takesValue: true,
   },
   {
@@ -257,7 +266,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     {
       alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug', e: 'exclude', m: 'mode' },
       boolean: ['help', 'version', 'verbose', 'debug', 'non-interactive', 'apply', 'list-models'],
-      string: ['commit', 'commit-range', 'model', 'provider', 'mode', 'exclude'],
+      string: ['commit', 'commit-range', 'model', 'provider', 'hint', 'mode', 'exclude'],
     },
   );
 
@@ -300,6 +309,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     version: Boolean(parsed.version),
     model: parsed.model ?? null,
     provider: parsed.provider ?? null,
+    hint: parsed.hint ?? null,
     mode: finalMode,
     verbose: Boolean(parsed.verbose),
     debug: Boolean(parsed.debug),
