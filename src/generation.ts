@@ -77,7 +77,7 @@ export function createGenerationState(
       outputMode: parsedArgs.mode ?? session.outputMode ?? 'commit-only',
       nonInteractive: parsedArgs.nonInteractive,
       apply: parsedArgs.apply,
-      userHint: undefined,
+      userHint: parsedArgs.hint ?? undefined,
     },
   };
 }
