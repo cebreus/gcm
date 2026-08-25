@@ -292,6 +292,7 @@ test('binary contract: shows documented help', async () => {
     '--exclude',
     '--mode',
     '--model',
+    '--provider',
     '--list-models',
     '--non-interactive',
     '--apply',
