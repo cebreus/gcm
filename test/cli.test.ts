@@ -19,6 +19,7 @@ test('cli: should parse default arguments with empty argv', () => {
     help: false,
     version: false,
     model: null,
+    provider: null,
     mode: null,
     verbose: false,
     debug: false,
@@ -27,6 +28,12 @@ test('cli: should parse default arguments with empty argv', () => {
     apply: false,
     exclude: [],
   });
+});
+
+test('cli: parses provider', () => {
+  const result = parseArgs(['--provider', 'freellmapi']);
+
+  expect(result.provider).toBe('freellmapi');
 });
 
 test('cli: should handle -c/--commit flag with a SHA value', () => {

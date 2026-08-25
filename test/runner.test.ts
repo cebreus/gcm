@@ -639,6 +639,21 @@ describe('Refactored Runner', () => {
     }
   });
 
+  test('Should prefer --provider over the environment and accept the freellmapi alias', async () => {
+    const originalProvider = process.env.GCM_PROVIDER;
+    process.env.GCM_PROVIDER = 'lm-studio';
+    try {
+      await executeCommitMessageGeneration(['--provider', 'freellmapi', '--help'], {
+        logger: mockLogger,
+      });
+      expect(process.exitCode).toBe(0);
+      expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('OpenAI-FreeLLMAPI'));
+    } finally {
+      if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
+      else process.env.GCM_PROVIDER = originalProvider;
+    }
+  });
+
   test('Should reject an unknown provider before showing help', async () => {
     const originalProvider = process.env.GCM_PROVIDER;
     process.env.GCM_PROVIDER = 'missing';

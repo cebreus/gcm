@@ -88,7 +88,7 @@ function showHelp(providerLabel: string) {
 ${options}
 
     ${C.bright}Provider:${C.reset}
-      Choose another provider in interactive Settings, or set ${C.cyan}GCM_PROVIDER${C.reset} before gcm.
+      Use ${C.cyan}--provider <name>${C.reset}, choose in interactive Settings, or set ${C.cyan}GCM_PROVIDER${C.reset}.
       Available values: gemini, openai, freellmapi, lm-studio.
       Example: ${C.cyan}GCM_PROVIDER=lm-studio gcm${C.reset}
 
@@ -498,11 +498,12 @@ export async function executeCommitMessageGeneration(
     }
     const session = await loadSession();
     const gitService = opts.gitService ?? createGitService();
-    const environmentProviderId =
-      process.env.GCM_PROVIDER === 'freellmapi' ? 'openai' : process.env.GCM_PROVIDER;
+    const requestedProviderId = parsedArgs.provider ?? process.env.GCM_PROVIDER;
+    const configuredProviderId =
+      requestedProviderId === 'freellmapi' ? 'openai' : requestedProviderId;
     let providerId = opts.languageModelProvider
       ? opts.languageModelProvider.id
-      : (environmentProviderId ?? factories[0]?.id);
+      : (configuredProviderId ?? factories[0]?.id);
     if (!providerId || (parsedArgs.model && !isLanguageModelName(parsedArgs.model))) {
       cancel(
         `Error: ${providerId ? 'Invalid model name' : 'No language model provider available'}.`,
