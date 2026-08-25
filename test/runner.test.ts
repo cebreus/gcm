@@ -211,6 +211,87 @@ describe('Refactored Runner', () => {
     );
   });
 
+  test('non-interactive generation does not prompt or write without --apply', async () => {
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
+      snapshot: { tree: 'index-tree', entries: [] },
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.generate.mockResolvedValue({
+      text: 'COMMIT_MESSAGE: fix(scope): generated message',
+      usage: {},
+    });
+
+    await executeCommitMessageGeneration(
+      ['--non-interactive', '--mode', 'commit-only', '--model', 'gemini-3.7-flash'],
+      {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        geminiModelLister: mockListModels,
+      },
+    );
+
+    expect(mockSelect).not.toHaveBeenCalled();
+    expect(mockNote).toHaveBeenCalledWith(
+      'fix(scope): generated message',
+      'Generated Commit Message',
+    );
+    expect(mockGitService.commitChanges).not.toHaveBeenCalled();
+  });
+
+  test('non-interactive --apply writes the generated message without prompting', async () => {
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
+      snapshot: { tree: 'index-tree', entries: [] },
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.generate.mockResolvedValue({
+      text: 'COMMIT_MESSAGE: fix(scope): generated message',
+      usage: {},
+    });
+
+    await executeCommitMessageGeneration(
+      [
+        '--non-interactive',
+        '--apply',
+        '--mode',
+        'commit-only',
+        '--model',
+        'gemini-3.7-flash',
+      ],
+      {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        geminiModelLister: mockListModels,
+      },
+    );
+
+    expect(mockSelect).not.toHaveBeenCalled();
+    expect(mockGitService.commitChanges).toHaveBeenCalledWith(
+      'fix(scope): generated message',
+      mockLogger,
+      expect.anything(),
+    );
+  });
+
   test('Should run a keyless provider through the complete generation seam', async () => {
     const generate = mock(async () => ({
       text: 'COMMIT_MESSAGE: test: local result',

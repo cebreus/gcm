@@ -339,7 +339,8 @@ async function amendCommitWithDeps(params: {
 
 // An `amend!` commit carries the replacement message as an ordinary commit, so
 // nothing is rewritten here. `git rebase --autosquash` folds it into the target
-// later, when the user asks for it.
+// later, when the user asks for it. Hash targeting remains unambiguous when
+// multiple commits share a subject.
 async function rewordCommitWithDeps(params: {
   deps: GitServiceDeps;
   target: CommitTarget;
@@ -354,7 +355,7 @@ async function rewordCommitWithDeps(params: {
     'commit',
     '--allow-empty',
     '-m',
-    `amend! ${target.subject}`,
+    `amend! ${target.hash}`,
     '-m',
     message,
   ]);

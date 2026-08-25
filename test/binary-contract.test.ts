@@ -267,7 +267,7 @@ test.skipIf(expectPath === null)(
       .trim()
       .split('\n');
     expect(subjects).toEqual([
-      'amend! feat: original subject',
+      `amend! ${target}`,
       'feat: later work',
       'feat: original subject',
     ]);
