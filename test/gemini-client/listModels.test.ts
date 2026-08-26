@@ -29,3 +29,16 @@ test('listModels: sends the API key only as a request header', async function ()
   expect(requestUrl).toBe('https://generativelanguage.googleapis.com/v1beta/models');
   expect(requestHeaders.get('x-goog-api-key')).toBe(apiKey);
 });
+
+test('listModels: applies a request timeout', async function () {
+  let signal: AbortSignal | null = null;
+  globalThis.fetch = async function (_input, init) {
+    signal = init?.signal ?? null;
+    return new Response(JSON.stringify({ models: [] }));
+  } as typeof fetch;
+
+  const { listGeminiModels } = await import('../../src/gemini-client/listModels.js');
+  await listGeminiModels('test-key');
+
+  expect(signal).toBeInstanceOf(AbortSignal);
+});

@@ -22,7 +22,11 @@ export async function listGeminiModels(apiKey: string): Promise<string[]> {
   };
 
   const url = 'https://generativelanguage.googleapis.com/v1beta/models';
-  const res = await fetch(url, { method: 'GET', headers: { 'x-goog-api-key': apiKey } });
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { 'x-goog-api-key': apiKey },
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) {
     throw new Error(`Failed to fetch models: ${res.status} ${res.statusText}`);
   }
