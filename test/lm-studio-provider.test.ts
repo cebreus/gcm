@@ -114,6 +114,18 @@ test('LM Studio loads an explicit unloaded model, waits, and refreshes its conte
     },
   });
   try {
+    const probe = await createLmStudioProvider({
+      baseUrl: server.url.origin,
+      model: 'preferred-model',
+      token: 'local-token',
+      probeOnly: true,
+    });
+    expect(requests).toEqual([
+      { method: 'GET', path: '/api/v1/models', authorization: 'Bearer local-token' },
+    ]);
+    expect(probe.defaultModel).toBe('preferred-model');
+
+    requests.length = 0;
     const provider = await createLmStudioProvider({
       baseUrl: server.url.origin,
       model: 'preferred-model',

@@ -38,3 +38,6 @@ one character); case-sensitive; matches whole path.
 
 **Language model provider** — backend used for generation. Owns its model
 catalogue and model limits; a saved model belongs to that provider identity.
+
+**Provider availability probe** — active, read-only check that creates every
+configured provider without loading a model and verifies its text-model catalogue.

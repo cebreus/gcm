@@ -63,7 +63,7 @@ From source checkout, replace `gcm` with `bun run ./gcm.ts`.
 
 Interactive flow lets you configure model and mode, regenerate, add hint, switch models, edit or copy message, select available Git action. Selected model and mode saved only after successful Git action.
 
-Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Supported values: `gemini`, `openai`, `freellmapi`, `lm-studio`.
+Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Supported values: `gemini`, `freellmapi`, `lm-studio`.
 
 See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 
@@ -76,15 +76,19 @@ See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 | `-e, --exclude <pattern>` | Exclude matching paths; repeat or comma-separate patterns. Default: none.                   |
 | `-m, --mode <mode>`       | Use `commit-only` or `full`. Default: last successfully used mode, initially `commit-only`. |
 | `--model <name>`          | Select a model from the active provider.                                                    |
-| `--provider <name>`       | Select `gemini`, `openai`, `freellmapi`, or `lm-studio`.                                    |
+| `--provider <name>`       | Select `gemini`, `freellmapi`, or `lm-studio`.                                              |
 | `--hint <text>`           | Add an instruction for generation.                                                          |
 | `--list-models`           | List available text-generation models and exit.                                             |
+| `--list-providers`        | Actively check available AI providers and exit.                                             |
 | `--non-interactive`       | Generate without prompts; read-only unless `--apply` is also set.                           |
 | `--apply`                 | Perform the available Git action; requires `--non-interactive`.                             |
 | `-v, --verbose`           | Show debug-level console logs. Default: off.                                                |
 | `-d, --debug`             | Write bounded API traces to `.debug.log`. Default: off.                                     |
 | `-h, --help`              | Show built-in help.                                                                         |
 | `--version`               | Show the version.                                                                           |
+
+`--list-providers` returns `0` when all providers are available, `1` when only some are
+available, and `2` when none are available. Checks do not load LM Studio models.
 
 `--exclude` patterns case-sensitive, match whole path, support `*` and `?`. Excluded files stay staged, will commit; GCM asks confirmation before writing. Merge commit analysed against first parent.
 
@@ -116,29 +120,30 @@ Analysed diff is sent to the selected provider. LM Studio stays on the configure
 
 `GCM_MODEL`, `GCM_TEMP` only model/temperature names; legacy Gemini aliases not read. Invalid numeric values fall back safely.
 
-| Variable                       | Default                 | Purpose                                                    |
-| ------------------------------ | ----------------------- | ---------------------------------------------------------- |
-| `GCM_MODEL`                    | `gemini-3.7-flash`      | Gemini model.                                              |
-| `GCM_PROVIDER`                 | `gemini`                | Provider: `gemini`, `openai`/`freellmapi`, or `lm-studio`. |
-| `GCM_OPENAI_URL`               | `http://127.0.0.1:3001` | OpenAI / FreeLLMAPI endpoint URL.                          |
-| `OPENAI_API_KEY`               | none                    | OpenAI / FreeLLMAPI Bearer token.                          |
-| `GCM_LM_STUDIO_URL`            | `http://127.0.0.1:1234` | LM Studio loopback URL.                                    |
-| `GCM_LM_STUDIO_MODEL`          | Gemma, then fallback    | Strict LM Studio model override.                           |
-| `LM_API_TOKEN`                 | none                    | Optional LM Studio API token.                              |
-| `GCM_TEMP`                     | `1`                     | Temperature from 0 to 1.                                   |
-| `GCM_MAX_BUFFER`               | `50 MiB`                | Maximum Git output.                                        |
-| `GCM_PER_FILE_BUFFER`          | `1 MiB`                 | Maximum per-file diff.                                     |
-| `GCM_MAX_HUNKS`                | `40`                    | Maximum analysed hunks.                                    |
-| `GCM_TOKEN_BYTES_RATIO`        | `3.5`                   | Estimated bytes per input token.                           |
-| `GCM_MAX_OUTPUT_TOKENS`        | `8192`                  | Response-token limit, capped by model.                     |
-| `GCM_ENABLE_HUNK_WEIGHTS`      | `false`                 | Prefer important files when selecting hunks.               |
-| `GCM_LOG_LEVEL`                | `info`                  | Console log level.                                         |
-| `GCM_DEBUG_API`                | `false`                 | Enable API trace logging.                                  |
-| `GCM_DEBUG_FILE`               | `.debug.log`            | Trace file path.                                           |
-| `GCM_DEBUG_MAX_BODY_LOG_BYTES` | `32768`                 | Maximum logged body size.                                  |
-| `GCM_GEMINI_MAX_RETRIES`       | `3`                     | Gemini request attempts.                                   |
-| `GCM_GEMINI_RETRY_BASE_MS`     | `1000`                  | Initial retry delay.                                       |
-| `GCM_GEMINI_RETRY_MAX_MS`      | `60000`                 | Maximum retry delay.                                       |
+| Variable                       | Default                 | Purpose                                           |
+| ------------------------------ | ----------------------- | ------------------------------------------------- |
+| `GCM_MODEL`                    | `gemini-3.7-flash`      | Gemini model.                                     |
+| `GCM_PROVIDER`                 | `gemini`                | Provider: `gemini`, `freellmapi`, or `lm-studio`. |
+| `GCM_FREELLMAPI_URL`           | `http://127.0.0.1:3001` | FreeLLMAPI endpoint URL.                          |
+| `GCM_FREELLMAPI_MODEL`         | `auto`                  | FreeLLMAPI routing model.                         |
+| `GCM_FREELLMAPI_TOKEN`         | none                    | FreeLLMAPI Bearer token.                          |
+| `GCM_LM_STUDIO_URL`            | `http://127.0.0.1:1234` | LM Studio loopback URL.                           |
+| `GCM_LM_STUDIO_MODEL`          | Gemma, then fallback    | Strict LM Studio model override.                  |
+| `LM_API_TOKEN`                 | none                    | Optional LM Studio API token.                     |
+| `GCM_TEMP`                     | `1`                     | Temperature from 0 to 1.                          |
+| `GCM_MAX_BUFFER`               | `50 MiB`                | Maximum Git output.                               |
+| `GCM_PER_FILE_BUFFER`          | `1 MiB`                 | Maximum per-file diff.                            |
+| `GCM_MAX_HUNKS`                | `40`                    | Maximum analysed hunks.                           |
+| `GCM_TOKEN_BYTES_RATIO`        | `3.5`                   | Estimated bytes per input token.                  |
+| `GCM_MAX_OUTPUT_TOKENS`        | `8192`                  | Response-token limit, capped by model.            |
+| `GCM_ENABLE_HUNK_WEIGHTS`      | `false`                 | Prefer important files when selecting hunks.      |
+| `GCM_LOG_LEVEL`                | `info`                  | Console log level.                                |
+| `GCM_DEBUG_API`                | `false`                 | Enable API trace logging.                         |
+| `GCM_DEBUG_FILE`               | `.debug.log`            | Trace file path.                                  |
+| `GCM_DEBUG_MAX_BODY_LOG_BYTES` | `32768`                 | Maximum logged body size.                         |
+| `GCM_GEMINI_MAX_RETRIES`       | `3`                     | Gemini request attempts.                          |
+| `GCM_GEMINI_RETRY_BASE_MS`     | `1000`                  | Initial retry delay.                              |
+| `GCM_GEMINI_RETRY_MAX_MS`      | `60000`                 | Maximum retry delay.                              |
 
 ## Development
 

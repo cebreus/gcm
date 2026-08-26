@@ -6,6 +6,7 @@ import type { Logger, LoggerConfig } from './logger.js';
 import { createGeminiClient } from './gemini-client.js';
 import { listGeminiModels } from './gemini-client/listModels.js';
 import { runListModelsCommand } from './list-models-command.js';
+import { runListProvidersCommand } from './list-providers-command.js';
 import { createGitService } from './services/git-service.js';
 import type { GitService } from './services/git-service.js';
 import { createCommitActionService } from './commit-action-service.js';
@@ -16,8 +17,12 @@ import { createContextService } from './services/context-service.js';
 import type { ContextService } from './services/context-service.js';
 import { createGeminiService } from './services/gemini-service.js';
 import { createLmStudioProvider } from './lm-studio-provider.js';
-import { createOpenAiProvider } from './openai-provider.js';
-import type { LanguageModelProvider, LanguageModelService } from './language-model-service.js';
+import { createFreeLlmApiProvider } from './freellmapi-provider.js';
+import type {
+  LanguageModelProvider,
+  LanguageModelProviderFactory,
+  LanguageModelService,
+} from './language-model-service.js';
 import {
   getLanguageModelProviderValidationError,
   isLanguageModelProviderId,
@@ -55,6 +60,7 @@ const C = {
   bright: '\x1b[1m',
   dim: '\x1b[2m',
   cyan: '\x1b[36m',
+  green: '\x1b[32m',
   yellow: '\x1b[33m',
   magenta: '\x1b[35m',
 };
@@ -89,7 +95,7 @@ ${options}
 
     ${C.bright}Provider:${C.reset}
       Use ${C.cyan}--provider <name>${C.reset}, choose in interactive Settings, or set ${C.cyan}GCM_PROVIDER${C.reset}.
-      Available values: gemini, openai, freellmapi, lm-studio.
+      Available values: gemini, freellmapi, lm-studio.
       Example: ${C.cyan}GCM_PROVIDER=lm-studio gcm${C.reset}
 
     ${C.bright}Examples:${C.reset}
@@ -122,11 +128,7 @@ export interface RunnerOptions {
   contextService?: ContextService;
   geminiService?: LanguageModelService;
   languageModelProvider?: LanguageModelProvider;
-  languageModelProviderFactories?: Array<{
-    id: string;
-    label: string;
-    create(): Promise<LanguageModelProvider>;
-  }>;
+  languageModelProviderFactories?: LanguageModelProviderFactory[];
   geminiModelLister?: (credential: string) => Promise<string[]>;
 }
 
@@ -257,14 +259,13 @@ function getProviderFactories(opts: RunnerOptions, logger: Logger, debugApi = fa
         },
       },
       {
-        id: 'openai',
-        label: 'OpenAI-FreeLLMAPI',
+        id: 'freellmapi',
+        label: 'FreeLLMAPI',
         create: async function () {
-          return createOpenAiProvider({
-            baseUrl: process.env.GCM_OPENAI_URL ?? process.env.OPENAI_BASE_URL ?? CONFIG.OPENAI_URL,
-            model: process.env.GCM_OPENAI_MODEL ?? process.env.OPENAI_MODEL ?? CONFIG.OPENAI_MODEL,
-            token:
-              process.env.GCM_OPENAI_TOKEN ?? process.env.OPENAI_API_KEY ?? CONFIG.OPENAI_TOKEN,
+          return createFreeLlmApiProvider({
+            baseUrl: CONFIG.FREELLMAPI_URL,
+            model: CONFIG.FREELLMAPI_MODEL,
+            token: CONFIG.FREELLMAPI_TOKEN,
             temperature: CONFIG.TEMP,
             maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS,
           });
@@ -273,13 +274,14 @@ function getProviderFactories(opts: RunnerOptions, logger: Logger, debugApi = fa
       {
         id: 'lm-studio',
         label: 'LM Studio',
-        create: async function () {
+        create: async function (factoryOptions) {
           return createLmStudioProvider({
             baseUrl: process.env.GCM_LM_STUDIO_URL ?? 'http://127.0.0.1:1234',
             model: process.env.GCM_LM_STUDIO_MODEL,
             token: process.env.LM_API_TOKEN,
             temperature: CONFIG.TEMP,
             maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS,
+            probeOnly: factoryOptions?.probeOnly,
           });
         },
       },
@@ -496,11 +498,30 @@ export async function executeCommitMessageGeneration(
       process.exitCode = 1;
       return;
     }
+    if (parsedArgs.listProviders && !parsedArgs.help) {
+      process.exitCode = await runListProvidersCommand({
+        factories,
+        output: {
+          note,
+          outro,
+          style: process.stdout.isTTY
+            ? {
+                available: function (message) {
+                  return `${C.green}${message}${C.reset}`;
+                },
+                unavailable: function (message) {
+                  return `${C.yellow}${message}${C.reset}`;
+                },
+              }
+            : undefined,
+        },
+      });
+      return;
+    }
     const session = await loadSession();
     const gitService = opts.gitService ?? createGitService();
     const requestedProviderId = parsedArgs.provider ?? process.env.GCM_PROVIDER;
-    const configuredProviderId =
-      requestedProviderId === 'freellmapi' ? 'openai' : requestedProviderId;
+    const configuredProviderId = requestedProviderId;
     let providerId = opts.languageModelProvider
       ? opts.languageModelProvider.id
       : (configuredProviderId ?? factories[0]?.id);

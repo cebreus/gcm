@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { createOpenAiProvider } from '../src/openai-provider.js';
+import { createFreeLlmApiProvider } from '../src/freellmapi-provider.js';
 
-test('createOpenAiProvider rejects plaintext remote URLs', async function () {
-  await expect(createOpenAiProvider({ baseUrl: 'http://example.com/v1' })).rejects.toThrow(
-    'OpenAI API URL must use HTTPS or a loopback hostname',
+test('createFreeLlmApiProvider rejects plaintext remote URLs', async function () {
+  await expect(createFreeLlmApiProvider({ baseUrl: 'http://example.com/v1' })).rejects.toThrow(
+    'FreeLLMAPI URL must use HTTPS or a loopback hostname',
   );
 });
 
@@ -15,12 +15,12 @@ for (const baseUrl of [
   'http://2130706433:3001',
   'http://0177.0.0.1:3001',
 ]) {
-  test(`createOpenAiProvider rejects unsafe URL ${baseUrl}`, async function () {
-    await expect(createOpenAiProvider({ baseUrl })).rejects.toThrow();
+  test(`createFreeLlmApiProvider rejects unsafe URL ${baseUrl}`, async function () {
+    await expect(createFreeLlmApiProvider({ baseUrl })).rejects.toThrow();
   });
 }
 
-test('createOpenAiProvider fetches models from GET /v1/models and generates text via POST /v1/chat/completions', async function () {
+test('createFreeLlmApiProvider fetches models and generates text', async function () {
   let receivedAuthHeader = '';
   let receivedChatBody: Record<string, unknown> = {};
 
@@ -53,7 +53,7 @@ test('createOpenAiProvider fetches models from GET /v1/models and generates text
               index: 0,
               message: {
                 role: 'assistant',
-                content: 'COMMIT_MESSAGE: feat: add openai provider',
+                content: 'COMMIT_MESSAGE: feat: add freellmapi provider',
               },
               finish_reason: 'stop',
             },
@@ -71,15 +71,17 @@ test('createOpenAiProvider fetches models from GET /v1/models and generates text
   });
 
   try {
-    const provider = await createOpenAiProvider({
+    const provider = await createFreeLlmApiProvider({
       baseUrl: server.url.origin,
       token: 'test-secret-token',
     });
 
-    expect(provider.id).toBe('openai');
-    expect(provider.label).toBe('OpenAI-FreeLLMAPI');
+    expect(provider.id).toBe('freellmapi');
+    expect(provider.label).toBe('FreeLLMAPI');
 
     const models = await provider.listModels();
+    expect(provider.defaultModel).toBe('auto');
+    expect(models).toContain('auto');
     expect(models).toContain('gemini-2.5-flash');
     expect(models).toContain('groq/llama-3.3-70b');
 
@@ -88,12 +90,11 @@ test('createOpenAiProvider fetches models from GET /v1/models and generates text
       systemPrompt: 'System instructions',
       reduceForRetry: async () => ({ mode: 'unreducible' }),
       meta: { scope: 'test' },
-      opts: { modelOverride: 'gemini-2.5-flash' },
     });
 
     expect(receivedAuthHeader).toBe('Bearer test-secret-token');
-    expect(receivedChatBody.model).toBe('gemini-2.5-flash');
-    expect(response?.text).toBe('COMMIT_MESSAGE: feat: add openai provider');
+    expect(receivedChatBody.model).toBe('auto');
+    expect(response?.text).toBe('COMMIT_MESSAGE: feat: add freellmapi provider');
     expect(response?.usage.promptTokens).toBe(15);
     expect(response?.usage.outputTokens).toBe(8);
   } finally {
@@ -101,7 +102,7 @@ test('createOpenAiProvider fetches models from GET /v1/models and generates text
   }
 });
 
-test('createOpenAiProvider handles custom baseUrl ending with /models/chat or /chat/completions', async function () {
+test('createFreeLlmApiProvider handles custom baseUrl endings', async function () {
   let chatCalled = false;
 
   const server = Bun.serve({
@@ -137,7 +138,7 @@ test('createOpenAiProvider handles custom baseUrl ending with /models/chat or /c
   });
 
   try {
-    const provider = await createOpenAiProvider({
+    const provider = await createFreeLlmApiProvider({
       baseUrl: `${server.url.origin}/models/chat`,
     });
 
@@ -156,7 +157,7 @@ test('createOpenAiProvider handles custom baseUrl ending with /models/chat or /c
   }
 });
 
-test('createOpenAiProvider preserves a custom base path for model discovery and generation', async function () {
+test('createFreeLlmApiProvider preserves a custom base path', async function () {
   let chatCalled = false;
 
   const server = Bun.serve({
@@ -178,7 +179,7 @@ test('createOpenAiProvider preserves a custom base path for model discovery and 
   });
 
   try {
-    const provider = await createOpenAiProvider({ baseUrl: `${server.url.origin}/proxy` });
+    const provider = await createFreeLlmApiProvider({ baseUrl: `${server.url.origin}/proxy` });
     await provider.service.generate({
       promptContext: 'Diff snippet',
       systemPrompt: 'System instructions',
@@ -191,7 +192,7 @@ test('createOpenAiProvider preserves a custom base path for model discovery and 
   }
 });
 
-test('createOpenAiProvider derives proxied model discovery from a full chat endpoint', async function () {
+test('createFreeLlmApiProvider derives model discovery from a full chat endpoint', async function () {
   let modelPath = '';
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -206,14 +207,14 @@ test('createOpenAiProvider derives proxied model discovery from a full chat endp
     },
   });
   try {
-    await createOpenAiProvider({ baseUrl: `${server.url.origin}/proxy/v1/chat/completions` });
+    await createFreeLlmApiProvider({ baseUrl: `${server.url.origin}/proxy/v1/chat/completions` });
     expect(modelPath).toBe('/proxy/v1/models');
   } finally {
     await server.stop(true);
   }
 });
 
-test('createOpenAiProvider excludes known non-text models', async function () {
+test('createFreeLlmApiProvider excludes known non-text models', async function () {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -230,14 +231,14 @@ test('createOpenAiProvider excludes known non-text models', async function () {
     },
   });
   try {
-    const provider = await createOpenAiProvider({ baseUrl: server.url.origin });
-    expect(await provider.listModels()).toEqual(['gpt-4o']);
+    const provider = await createFreeLlmApiProvider({ baseUrl: server.url.origin });
+    expect(await provider.listModels()).toEqual(['auto', 'gpt-4o']);
   } finally {
     await server.stop(true);
   }
 });
 
-test('createOpenAiProvider rejects unknown model overrides', async function () {
+test('createFreeLlmApiProvider rejects unknown model overrides', async function () {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -246,7 +247,7 @@ test('createOpenAiProvider rejects unknown model overrides', async function () {
     },
   });
   try {
-    const provider = await createOpenAiProvider({ baseUrl: server.url.origin });
+    const provider = await createFreeLlmApiProvider({ baseUrl: server.url.origin });
     await expect(
       provider.service.generate({
         promptContext: 'Diff',
@@ -255,13 +256,13 @@ test('createOpenAiProvider rejects unknown model overrides', async function () {
         meta: { scope: 'test' },
         opts: { modelOverride: 'missing-model' },
       }),
-    ).rejects.toThrow('Unknown OpenAI model');
+    ).rejects.toThrow('Unknown FreeLLMAPI model');
   } finally {
     await server.stop(true);
   }
 });
 
-test('createOpenAiProvider preserves authentication errors during endpoint fallback', async function () {
+test('createFreeLlmApiProvider preserves authentication errors during endpoint fallback', async function () {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -272,7 +273,7 @@ test('createOpenAiProvider preserves authentication errors during endpoint fallb
     },
   });
   try {
-    await expect(createOpenAiProvider({ baseUrl: server.url.origin })).rejects.toMatchObject({
+    await expect(createFreeLlmApiProvider({ baseUrl: server.url.origin })).rejects.toMatchObject({
       metadata: { status: 401 },
     });
   } finally {
@@ -280,7 +281,7 @@ test('createOpenAiProvider preserves authentication errors during endpoint fallb
   }
 });
 
-test('createOpenAiProvider rejects secret-bearing catalogue metadata', async function () {
+test('createFreeLlmApiProvider rejects secret-bearing catalogue metadata', async function () {
   const token = 'catalogue-secret-token';
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -290,15 +291,15 @@ test('createOpenAiProvider rejects secret-bearing catalogue metadata', async fun
     },
   });
   try {
-    await expect(createOpenAiProvider({ baseUrl: server.url.origin, token })).rejects.toThrow(
-      'Invalid OpenAI model metadata',
+    await expect(createFreeLlmApiProvider({ baseUrl: server.url.origin, token })).rejects.toThrow(
+      'Invalid FreeLLMAPI model metadata',
     );
   } finally {
     await server.stop(true);
   }
 });
 
-test('createOpenAiProvider falls back only after a missing model endpoint', async function () {
+test('createFreeLlmApiProvider falls back only after a missing model endpoint', async function () {
   const requestedPaths: string[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -311,15 +312,15 @@ test('createOpenAiProvider falls back only after a missing model endpoint', asyn
     },
   });
   try {
-    const provider = await createOpenAiProvider({ baseUrl: server.url.origin });
-    expect(await provider.listModels()).toEqual(['gpt-4o']);
+    const provider = await createFreeLlmApiProvider({ baseUrl: server.url.origin });
+    expect(await provider.listModels()).toEqual(['auto', 'gpt-4o']);
     expect(requestedPaths).toEqual(['/v1/models', '/models']);
   } finally {
     await server.stop(true);
   }
 });
 
-test('createOpenAiProvider rejects malformed catalogues', async function () {
+test('createFreeLlmApiProvider rejects malformed catalogues', async function () {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -328,8 +329,8 @@ test('createOpenAiProvider rejects malformed catalogues', async function () {
     },
   });
   try {
-    await expect(createOpenAiProvider({ baseUrl: server.url.origin })).rejects.toThrow(
-      'OpenAI returned no compatible text models',
+    await expect(createFreeLlmApiProvider({ baseUrl: server.url.origin })).rejects.toThrow(
+      'FreeLLMAPI returned no compatible text models',
     );
   } finally {
     await server.stop(true);

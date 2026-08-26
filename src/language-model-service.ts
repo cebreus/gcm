@@ -113,6 +113,12 @@ export interface LanguageModelProvider {
   getModelSpec(modelName: string): ModelSpec;
 }
 
+export interface LanguageModelProviderFactory {
+  id: string;
+  label: string;
+  create(options?: { probeOnly?: boolean }): Promise<LanguageModelProvider>;
+}
+
 export interface LanguageModelGenerateParams {
   promptContext: string;
   promptParts?: PromptContextParts;

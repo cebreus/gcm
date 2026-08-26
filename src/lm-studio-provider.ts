@@ -20,7 +20,6 @@ function readPositiveInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
 }
 
-
 function parseModel(value: unknown): ModelSpec | null {
   if (!isRecord(value) || value.type !== 'llm' || !isLanguageModelName(value.key)) return null;
   const loadedContexts = Array.isArray(value.loaded_instances)
@@ -154,6 +153,7 @@ export async function createLmStudioProvider(options: {
   token?: string;
   temperature?: number;
   maxOutputTokens?: number;
+  probeOnly?: boolean;
 }): Promise<LanguageModelProvider> {
   const url = parseBaseUrl(options.baseUrl);
   if (options.token && !/^[\x21-\x7E]+$/.test(options.token)) {
@@ -197,7 +197,7 @@ export async function createLmStudioProvider(options: {
       return model.name === PREFERRED_LM_STUDIO_MODEL;
     })?.name;
   let selectionNotice: string | undefined;
-  if (selectedModel) {
+  if (selectedModel && !options.probeOnly) {
     try {
       await loadModel(selectedModel);
     } catch (error) {

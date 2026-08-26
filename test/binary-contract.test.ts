@@ -303,7 +303,7 @@ test('binary contract: shows documented help', async () => {
   expect(result.stdout).toContain("gcm --commit-range 'abc123^..def456'");
   expect(result.stdout).toContain('The first commit is included because of ^.');
   expect(result.stdout).toContain('GCM_PROVIDER=lm-studio gcm');
-  expect(result.stdout).toContain('gemini, openai, freellmapi, lm-studio');
+  expect(result.stdout).toContain('gemini, freellmapi, lm-studio');
   expect(result.stderr).toBe('');
 });
 

@@ -17,6 +17,7 @@ interface Args extends ParsedArgs {
   nonInteractive?: boolean;
   apply?: boolean;
   'list-models'?: boolean;
+  'list-providers'?: boolean;
   exclude?: string | string[];
 }
 
@@ -34,6 +35,7 @@ export interface ParsedOptions {
   nonInteractive: boolean;
   apply: boolean;
   listModels: boolean;
+  listProviders: boolean;
   exclude: string[];
 }
 
@@ -105,7 +107,7 @@ export const CLI_OPTION_DEFINITIONS = [
     name: 'provider',
     aliases: ['--provider'],
     usage: '--provider <name>',
-    description: 'Use gemini, openai, freellmapi, or lm-studio.',
+    description: 'Use gemini, freellmapi, or lm-studio.',
     takesValue: true,
   },
   {
@@ -156,6 +158,13 @@ export const CLI_OPTION_DEFINITIONS = [
     aliases: ['--list-models'],
     usage: '--list-models',
     description: 'List available {provider} models and exit.',
+    takesValue: false,
+  },
+  {
+    name: 'listProviders',
+    aliases: ['--list-providers'],
+    usage: '--list-providers',
+    description: 'Actively check available AI providers and exit.',
     takesValue: false,
   },
   {
@@ -265,7 +274,16 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     optionTerminator === -1 ? normalisedArgv : normalisedArgv.slice(0, optionTerminator),
     {
       alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug', e: 'exclude', m: 'mode' },
-      boolean: ['help', 'version', 'verbose', 'debug', 'non-interactive', 'apply', 'list-models'],
+      boolean: [
+        'help',
+        'version',
+        'verbose',
+        'debug',
+        'non-interactive',
+        'apply',
+        'list-models',
+        'list-providers',
+      ],
       string: ['commit', 'commit-range', 'model', 'provider', 'hint', 'mode', 'exclude'],
     },
   );
@@ -316,6 +334,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     nonInteractive,
     apply,
     listModels: Boolean(parsed['list-models']),
+    listProviders: Boolean(parsed['list-providers']),
     exclude: excludePatterns,
   };
 }
