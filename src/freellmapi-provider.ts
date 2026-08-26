@@ -13,11 +13,10 @@ import {
 } from './openai-compatible-client.js';
 import type { ModelSpec } from './model-registry.js';
 
-const PREFERRED_OPENAI_MODEL = 'gemini-2.5-flash';
-const DEFAULT_OPENAI_MODEL = 'gpt-4o';
+const DEFAULT_FREELLMAPI_MODEL = 'auto';
 
-const DEFAULT_OPENAI_INPUT_TOKENS = 32_768;
-const DEFAULT_OPENAI_OUTPUT_TOKENS = 8_192;
+const DEFAULT_FREELLMAPI_INPUT_TOKENS = 32_768;
+const DEFAULT_FREELLMAPI_OUTPUT_TOKENS = 8_192;
 
 function parseModelId(entry: unknown): string | null {
   if (typeof entry === 'string' && isLanguageModelName(entry)) return entry;
@@ -36,8 +35,8 @@ function parseModel(entry: unknown): ModelSpec | null {
   if (/(^|[/._-])(dall-e|embed(?:ding)?|moderation|tts|whisper)([/._-]|$)/i.test(name)) return null;
   const label = isRecord(entry) && typeof entry.label === 'string' ? entry.label : name;
   if (!isLanguageModelName(label)) return null;
-  const maxInputTokens = DEFAULT_OPENAI_INPUT_TOKENS;
-  const maxOutputTokens = DEFAULT_OPENAI_OUTPUT_TOKENS;
+  const maxInputTokens = DEFAULT_FREELLMAPI_INPUT_TOKENS;
+  const maxOutputTokens = DEFAULT_FREELLMAPI_OUTPUT_TOKENS;
   return {
     name,
     label,
@@ -51,10 +50,10 @@ function parseBaseUrl(baseUrl: string): URL {
   try {
     url = new URL(baseUrl);
   } catch {
-    throw new Error('Invalid OpenAI API URL');
+    throw new Error('Invalid FreeLLMAPI URL');
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Invalid OpenAI API URL');
+    throw new Error('Invalid FreeLLMAPI URL');
   }
   if (
     url.username !== '' ||
@@ -62,7 +61,7 @@ function parseBaseUrl(baseUrl: string): URL {
     baseUrl.includes('?') ||
     baseUrl.includes('#')
   ) {
-    throw new Error('Invalid OpenAI API URL');
+    throw new Error('Invalid FreeLLMAPI URL');
   }
   if (url.protocol === 'http:') {
     const authority = baseUrl.slice('http://'.length).split(/[/?#]/, 1)[0] ?? '';
@@ -71,7 +70,7 @@ function parseBaseUrl(baseUrl: string): URL {
       : (authority.split(':', 1)[0] ?? '');
     const loopbackHostnames = ['127.0.0.1', 'localhost', '[::1]'];
     if (!loopbackHostnames.includes(url.hostname) || !loopbackHostnames.includes(rawHostname)) {
-      throw new Error('OpenAI API URL must use HTTPS or a loopback hostname');
+      throw new Error('FreeLLMAPI URL must use HTTPS or a loopback hostname');
     }
   }
   return url;
@@ -128,7 +127,7 @@ async function discoverModels(url: URL, token?: string): Promise<{ models: Model
   for (const modelsUrl of candidates) {
     try {
       const payload = await requestLanguageModelJson({
-        providerLabel: 'OpenAI',
+        providerLabel: 'FreeLLMAPI',
         url: modelsUrl,
         timeoutMs: 5_000,
         token,
@@ -153,7 +152,7 @@ async function discoverModels(url: URL, token?: string): Promise<{ models: Model
             typeof metadata === 'string' &&
             sanitizeLanguageModelErrorText(metadata, token) !== metadata
           ) {
-            throw createLanguageModelApiError('Invalid OpenAI model metadata');
+            throw createLanguageModelApiError('Invalid FreeLLMAPI model metadata');
           }
         }
       }
@@ -192,10 +191,10 @@ async function discoverModels(url: URL, token?: string): Promise<{ models: Model
   }
 
   if (lastError) throw lastError;
-  throw createLanguageModelApiError('OpenAI returned no compatible text models');
+  throw createLanguageModelApiError('FreeLLMAPI returned no compatible text models');
 }
 
-export async function createOpenAiProvider(options: {
+export async function createFreeLlmApiProvider(options: {
   baseUrl: string;
   model?: string;
   token?: string;
@@ -204,10 +203,21 @@ export async function createOpenAiProvider(options: {
 }): Promise<LanguageModelProvider> {
   const url = parseBaseUrl(options.baseUrl);
   if (options.token && !/^[\x21-\x7E]+$/.test(options.token)) {
-    throw createLanguageModelApiError('Invalid OpenAI API token');
+    throw createLanguageModelApiError('Invalid FreeLLMAPI API token');
   }
 
-  const { models } = await discoverModels(url, options.token);
+  const discovered = await discoverModels(url, options.token);
+  const models = discovered.models.some(model => model.name === DEFAULT_FREELLMAPI_MODEL)
+    ? discovered.models
+    : [
+        {
+          name: DEFAULT_FREELLMAPI_MODEL,
+          label: DEFAULT_FREELLMAPI_MODEL,
+          maxInputTokens: DEFAULT_FREELLMAPI_INPUT_TOKENS,
+          maxOutputTokens: DEFAULT_FREELLMAPI_OUTPUT_TOKENS,
+        },
+        ...discovered.models,
+      ];
 
   if (
     options.model &&
@@ -215,7 +225,7 @@ export async function createOpenAiProvider(options: {
       return model.name === options.model;
     })
   ) {
-    throw new Error('Configured OpenAI model is not available');
+    throw new Error('Configured FreeLLMAPI model is not available');
   }
 
   const byName = new Map(
@@ -224,35 +234,15 @@ export async function createOpenAiProvider(options: {
     }),
   );
 
-  const preferred = models.find(function (m) {
-    return m.name === PREFERRED_OPENAI_MODEL || m.name.includes(PREFERRED_OPENAI_MODEL);
-  })?.name;
-
-  const defaultModel =
-    options.model ??
-    preferred ??
-    models.find(function (m) {
-      return m.name === DEFAULT_OPENAI_MODEL || m.name.includes('gpt-');
-    })?.name ??
-    models[0]?.name ??
-    DEFAULT_OPENAI_MODEL;
-
-  if (!byName.has(defaultModel) && !options.model) {
-    byName.set(defaultModel, {
-      name: defaultModel,
-      label: defaultModel,
-      maxInputTokens: DEFAULT_OPENAI_INPUT_TOKENS,
-      maxOutputTokens: DEFAULT_OPENAI_OUTPUT_TOKENS,
-    });
-  }
+  const defaultModel = options.model ?? DEFAULT_FREELLMAPI_MODEL;
 
   async function generate(params: LanguageModelGenerateParams) {
     const modelName = params.opts?.modelOverride ?? defaultModel;
     const model = byName.get(modelName);
-    if (!model) throw new Error('Unknown OpenAI model');
+    if (!model) throw new Error('Unknown FreeLLMAPI model');
 
     return generateOpenAiCompatibleChat({
-      providerLabel: 'OpenAI',
+      providerLabel: 'FreeLLMAPI',
       url: resolveChatEndpoint(url),
       token: options.token,
       temperature: options.temperature,
@@ -264,8 +254,8 @@ export async function createOpenAiProvider(options: {
   }
 
   return {
-    id: 'openai',
-    label: 'OpenAI-FreeLLMAPI',
+    id: 'freellmapi',
+    label: 'FreeLLMAPI',
     defaultModel,
     fallbackModels: models,
     service: {
@@ -278,7 +268,7 @@ export async function createOpenAiProvider(options: {
     },
     getModelSpec: function (modelName) {
       const model = byName.get(modelName);
-      if (!model) throw new Error('Unknown OpenAI model');
+      if (!model) throw new Error('Unknown FreeLLMAPI model');
       return model;
     },
   };

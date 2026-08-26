@@ -172,6 +172,108 @@ describe('Refactored Runner', () => {
     mockCancel.mockClear();
   });
 
+  test('Should actively list every provider with probe-only factories and propagate partial exit', async () => {
+    const model = {
+      name: 'model',
+      label: 'Model',
+      maxInputTokens: 8_192,
+      maxOutputTokens: 1_024,
+    };
+    const availableCreate = mock(async function (options?: { probeOnly?: boolean }) {
+      return {
+        id: 'available',
+        label: 'Available',
+        defaultModel: model.name,
+        fallbackModels: [model],
+        service: {
+          generate: async function () {
+            return null;
+          },
+        },
+        listModels: async function () {
+          return [model.name];
+        },
+        getModelSpec: function () {
+          return model;
+        },
+      };
+    });
+    const missingCreate = mock(async function () {
+      throw new Error('offline');
+    });
+
+    await executeCommitMessageGeneration(['--list-providers'], {
+      logger: mockLogger,
+      gitService: mockGitService,
+      languageModelProviderFactories: [
+        { id: 'available', label: 'Available', create: availableCreate },
+        { id: 'missing', label: 'Missing', create: missingCreate },
+      ],
+    });
+
+    expect(availableCreate).toHaveBeenCalledWith({ probeOnly: true });
+    expect(missingCreate).toHaveBeenCalledWith({ probeOnly: true });
+    expect(process.exitCode).toBe(1);
+    expect(mockGitService.getRepositoryState).not.toHaveBeenCalled();
+    if (!process.stdout.isTTY) expect(mockNote.mock.calls[0]?.[0]).not.toContain('\u001b');
+  });
+
+  test('Should list providers even when the configured provider is unknown', async () => {
+    const originalProvider = process.env.GCM_PROVIDER;
+    process.env.GCM_PROVIDER = 'openai';
+    const create = mock(async function () {
+      const model = {
+        name: 'model',
+        label: 'Model',
+        maxInputTokens: 8_192,
+        maxOutputTokens: 1_024,
+      };
+      return {
+        id: 'ready',
+        label: 'Ready',
+        defaultModel: model.name,
+        fallbackModels: [model],
+        service: {
+          generate: async function () {
+            return null;
+          },
+        },
+        listModels: async function () {
+          return [model.name];
+        },
+        getModelSpec: function () {
+          return model;
+        },
+      };
+    });
+
+    try {
+      await executeCommitMessageGeneration(['--list-providers'], {
+        logger: mockLogger,
+        languageModelProviderFactories: [{ id: 'ready', label: 'Ready', create }],
+      });
+      expect(create).toHaveBeenCalledWith({ probeOnly: true });
+      expect(process.exitCode).toBe(0);
+    } finally {
+      if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
+      else process.env.GCM_PROVIDER = originalProvider;
+    }
+  });
+
+  test('Should show help without probing providers when list-providers is also present', async () => {
+    const create = mock(async function () {
+      throw new Error('must not probe');
+    });
+
+    await executeCommitMessageGeneration(['--help', '--list-providers'], {
+      logger: mockLogger,
+      languageModelProviderFactories: [{ id: 'local', label: 'Local', create }],
+    });
+
+    expect(create).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+  });
+
   test('Should orchestrate services correctly', async () => {
     // Setup
     mockGitService.retrieveStagedChanges.mockResolvedValue({
@@ -651,7 +753,7 @@ describe('Refactored Runner', () => {
     }
   });
 
-  test('Should prefer --provider over the environment and accept the freellmapi alias', async () => {
+  test('Should prefer the freellmapi provider over the environment', async () => {
     const originalProvider = process.env.GCM_PROVIDER;
     process.env.GCM_PROVIDER = 'lm-studio';
     try {
@@ -659,7 +761,7 @@ describe('Refactored Runner', () => {
         logger: mockLogger,
       });
       expect(process.exitCode).toBe(0);
-      expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('OpenAI-FreeLLMAPI'));
+      expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('FreeLLMAPI'));
     } finally {
       if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
       else process.env.GCM_PROVIDER = originalProvider;

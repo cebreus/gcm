@@ -12,6 +12,9 @@ const DEFAULT_CONFIG = {
   retries: 3,
   retryBase: 1000,
   retryMax: 60000,
+  freeLlmApiUrl: 'http://127.0.0.1:3001',
+  freeLlmApiModel: 'auto',
+  freeLlmApiToken: null,
 };
 
 async function readConfig(env: Record<string, string>): Promise<unknown> {
@@ -19,7 +22,7 @@ async function readConfig(env: Record<string, string>): Promise<unknown> {
     cmd: [
       'bun',
       '-e',
-      "import { CONFIG } from './gcm.config.ts'; console.log(JSON.stringify({ model: CONFIG.MODEL, temp: CONFIG.TEMP, maxBuffer: CONFIG.CHILD_PROCESS_MAX_BUFFER, maxHunks: CONFIG.MAX_HUNKS, perFileBuffer: CONFIG.PER_FILE_BUFFER, tokenRatio: CONFIG.TOKEN_BYTES_RATIO, maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS, debugBytes: CONFIG.DEBUG_MAX_BODY_LOG_BYTES, retries: CONFIG.GEMINI_MAX_RETRIES, retryBase: CONFIG.GEMINI_RETRY_BASE_MS, retryMax: CONFIG.GEMINI_RETRY_MAX_MS }));",
+      "import { CONFIG } from './gcm.config.ts'; console.log(JSON.stringify({ model: CONFIG.MODEL, temp: CONFIG.TEMP, maxBuffer: CONFIG.CHILD_PROCESS_MAX_BUFFER, maxHunks: CONFIG.MAX_HUNKS, perFileBuffer: CONFIG.PER_FILE_BUFFER, tokenRatio: CONFIG.TOKEN_BYTES_RATIO, maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS, debugBytes: CONFIG.DEBUG_MAX_BODY_LOG_BYTES, retries: CONFIG.GEMINI_MAX_RETRIES, retryBase: CONFIG.GEMINI_RETRY_BASE_MS, retryMax: CONFIG.GEMINI_RETRY_MAX_MS, freeLlmApiUrl: CONFIG.FREELLMAPI_URL, freeLlmApiModel: CONFIG.FREELLMAPI_MODEL, freeLlmApiToken: CONFIG.FREELLMAPI_TOKEN ?? null }));",
     ],
     cwd: process.cwd(),
     env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', ...env },
@@ -38,6 +41,27 @@ test('config: reads the short GCM names', async () => {
     ...DEFAULT_CONFIG,
     model: 'test-model',
     temp: 0.25,
+  });
+});
+
+test('config: reads only FreeLLMAPI-specific names', async () => {
+  await expect(
+    readConfig({
+      GCM_FREELLMAPI_URL: 'https://free.example/v1',
+      GCM_FREELLMAPI_MODEL: 'router',
+      GCM_FREELLMAPI_TOKEN: 'free-token',
+      GCM_OPENAI_URL: 'https://legacy.example/v1',
+      GCM_OPENAI_MODEL: 'legacy-model',
+      GCM_OPENAI_TOKEN: 'legacy-token',
+      OPENAI_BASE_URL: 'https://generic.example/v1',
+      OPENAI_MODEL: 'generic-model',
+      OPENAI_API_KEY: 'generic-token',
+    }),
+  ).resolves.toEqual({
+    ...DEFAULT_CONFIG,
+    freeLlmApiUrl: 'https://free.example/v1',
+    freeLlmApiModel: 'router',
+    freeLlmApiToken: 'free-token',
   });
 });
 

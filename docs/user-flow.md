@@ -8,6 +8,25 @@ separate ones.
 stops after generation unless explicit `--apply` requests the available Git
 action.
 
+## Provider check: `gcm --list-providers`
+
+```mermaid
+flowchart TD
+  A[Run gcm --list-providers] --> B{Provider factory set valid?}
+  B -- No --> X[Show reason and stop]
+  B -- Yes --> C[Check every provider in parallel]
+  C --> D[Create provider without loading a model]
+  D --> E[Check identity, setup and text-model catalogue]
+  E --> F[Show each provider as available or unavailable]
+  F --> G{Available providers}
+  G -- All --> H[Exit 0]
+  G -- Some --> I[Exit 1]
+  G -- None --> J[Exit 2]
+```
+
+The command ignores the selected provider because it checks all providers. It
+does not read Git state, generate text, load an LM Studio model or save a session.
+
 ## Staged changes: `gcm`
 
 ```mermaid

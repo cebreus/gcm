@@ -25,10 +25,15 @@ test('cli: should parse default arguments with empty argv', () => {
     verbose: false,
     debug: false,
     listModels: false,
+    listProviders: false,
     nonInteractive: false,
     apply: false,
     exclude: [],
   });
+});
+
+test('cli: parses --list-providers', () => {
+  expect(parseArgs(['--list-providers']).listProviders).toBe(true);
 });
 
 test('cli: parses provider', () => {
