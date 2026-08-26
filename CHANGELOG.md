@@ -1,5 +1,27 @@
 # gcm
 
+## 0.10.0
+
+> CLI automation and provider selection are expanded: GCM introduces non-interactive execution,
+> commit-range batch processing, generation hints, and direct provider selection. The OpenAI-compatible
+> provider is renamed to FreeLLMAPI with updated configuration variables, and provider reachability
+> can now be inspected directly with `--list-providers`.
+
+### Minor Changes
+
+- feat(cli)!: Replace `openai` provider with `freellmapi` and migrate configuration environment variables to `GCM_FREELLMAPI_URL`, `GCM_FREELLMAPI_MODEL`, and `GCM_FREELLMAPI_TOKEN`.
+- feat(cli): Add `--list-providers` flag to check provider status and reachability without loading models.
+- feat(cli): Add `--provider` CLI flag for active model backend selection (`gemini`, `lm-studio`, `freellmapi`).
+- feat(cli): Add `--hint` (`-H`) flag to pass contextual generation hints to the model prompt.
+- feat(cli): Support `--non-interactive` execution to run without interactive prompts, optionally executing Git actions with `--apply`.
+- feat(cli): Support `--commit-range` batch processing to generate additive `amend!` commits across first-parent revisions.
+- feat(provider): Add OpenAI-compatible provider adapter and FreeLLMAPI support.
+
+### Patch Changes
+
+- fix(api): Bound Gemini model discovery pagination and request limits.
+- refactor(core): Generalize model services and decouple repository context interfaces.
+
 ## 0.9.0
 
 > Local LLMs are now first-class: GCM connects directly to LM Studio for offline model
