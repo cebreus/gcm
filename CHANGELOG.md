@@ -1,5 +1,24 @@
 # gcm
 
+## 0.10.0
+
+> GCM can now run without menus, work on several old commits, use extra user instructions, and select Gemini, FreeLLMAPI, or LM Studio. Users can check which AI services are ready before they start generation.
+
+### Minor Changes
+
+- **Run without menus:** `--non-interactive` runs GCM without questions or review screens. It only prints the result by default. Add `--apply` if GCM may run the matching Git action.
+- **Work on a commit range:** `--commit-range <range>` reads commits from oldest to newest on the main history path. It does not enter merged branches. It needs `--non-interactive`. With `--apply`, it creates one `amend!` commit for each target. It skips a target when an `amend!` commit for the same commit hash already exists. GCM does not run rebase.
+- **Safe range changes:** `--commit-range` with `--apply` needs no files in the staging area, no merge conflict, and no Git operation in progress. It stops if `HEAD` moves or a Git hook adds file changes. This protects work while GCM moves through old commits.
+- **Choose an AI service:** `--provider <name>` selects `gemini`, `freellmapi`, or `lm-studio`. `--model <name>` selects one model from that service.
+- **Add extra guidance:** `--hint <text>` and `-H <text>` add user guidance to the AI request. This can explain intent that is not clear from the Git diff.
+- **Check AI services:** `--list-providers` contacts every configured service and checks for a usable text model. It reports which services are ready and then exits. It exits with `0` when all services are ready, `1` when only some are ready, and `2` when none are ready. It does not create text or change Git.
+- **FreeLLMAPI provider:** GCM adds an OpenAI-compatible service under the public name `freellmapi`. You can set its URL, model, and token with `GCM_FREELLMAPI_URL`, `GCM_FREELLMAPI_MODEL`, and `GCM_FREELLMAPI_TOKEN`. The default URL is `http://127.0.0.1:3001` and the default model is `auto`.
+- **Provider name change:** The old `openai` provider name and its `GCM_OPENAI_*` settings are replaced by `freellmapi` and `GCM_FREELLMAPI_*`. Users must update scripts and environment settings before they upgrade.
+
+### Patch Changes
+
+- **Safe Gemini model list:** GCM limits the size of each Gemini model-list request and the number of pages it will read. A bad or very large reply cannot keep model loading in an endless loop.
+
 ## 0.9.0
 
 > GCM can now use models from LM Studio on the user's computer. Gemini still works as before. A simpler settings menu makes it easier to choose the AI service, model, and output type.
