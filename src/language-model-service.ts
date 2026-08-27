@@ -51,7 +51,7 @@ export function isLanguageModelName(value: unknown): value is string {
     value.length > 0 &&
     value.length <= 128 &&
     value.trim() === value &&
-    !/[\r\n\t]/.test(value) &&
+    !/[\r\n\t\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u.test(value) &&
     stripTerminalControlSequences(value) === value
   );
 }
@@ -63,11 +63,19 @@ export function getModelSpecValidationError(
   if (!isLanguageModelName(model.name) || model.name !== expectedName) {
     return 'Invalid model name';
   }
-  if (
-    !Number.isSafeInteger(model.maxInputTokens) ||
-    !Number.isSafeInteger(model.maxOutputTokens) ||
-    model.maxOutputTokens <= 0 ||
-    model.maxInputTokens <= model.maxOutputTokens + 1_000
+  if (model.limits.kind === 'separate') {
+    if (
+      !Number.isSafeInteger(model.limits.maxInputTokens) ||
+      !Number.isSafeInteger(model.limits.maxOutputTokens) ||
+      model.limits.maxInputTokens <= 0 ||
+      model.limits.maxOutputTokens <= 0
+    ) {
+      return 'Invalid model token limits';
+    }
+  } else if (
+    model.limits.kind !== 'shared-context' ||
+    !Number.isSafeInteger(model.limits.contextWindowTokens) ||
+    model.limits.contextWindowTokens <= 0
   ) {
     return 'Invalid model token limits';
   }
@@ -82,17 +90,7 @@ export function getLanguageModelProviderValidationError(
     return 'Invalid language model provider label';
   }
   if (!isLanguageModelName(provider.defaultModel)) return 'Invalid default model name';
-  if (provider.fallbackModels.some(model => !isLanguageModelName(model.name))) {
-    return 'Invalid fallback model name';
-  }
-  if (provider.fallbackModels.length === 0) return 'Provider requires a fallback model';
-  try {
-    const modelSpecs = [provider.getModelSpec(provider.defaultModel), ...provider.fallbackModels];
-    const invalidSpec = modelSpecs.map(model => getModelSpecValidationError(model)).find(Boolean);
-    if (invalidSpec) return invalidSpec;
-  } catch {
-    return 'Invalid model specification';
-  }
+  if (typeof provider.models !== 'function') return 'Provider requires a model catalogue';
   return null;
 }
 
@@ -106,11 +104,9 @@ export interface LanguageModelProvider {
   readinessError?: string;
   selectionNotice?: string;
   defaultModel: string;
-  fallbackModels: ModelSpec[];
   service: LanguageModelService;
-  /** Returns only models compatible with this application's text-generation contract. */
-  listModels(): Promise<string[]>;
-  getModelSpec(modelName: string): ModelSpec;
+  /** Returns validated models compatible with this application's text-generation contract. */
+  models(): Promise<ModelSpec[]>;
 }
 
 export interface LanguageModelProviderFactory {
@@ -130,50 +126,30 @@ export interface LanguageModelGenerateParams {
   }): Promise<RetryReductionResult>;
   meta: LogMetadata;
   opts?: {
-    retryIfTruncated?: boolean;
-    retryIfTruncatedMaxRetries?: number;
-    retryIfTruncatedIncreaseTokens?: number;
     timeoutMs?: number;
     modelOverride?: string;
+    maxOutputTokensLimit?: number;
   };
 }
 
-export interface SemanticRetryState {
+export interface GenerationAttemptState {
   promptContext: string;
   promptParts: PromptContextParts;
   summaryAttempted: boolean;
   maxOutputTokens: number;
 }
 
-export async function generateWithSemanticRetries<T extends LanguageModelResponse>(options: {
+export async function generateWithContextRecovery<T extends LanguageModelResponse>(options: {
   params: LanguageModelGenerateParams;
   initialMaxOutputTokens: number;
-  maxOutputTokensLimit: number;
-  defaultRetryLimit: number;
-  maximumRetryLimit: number;
-  defaultTokenIncrease: number;
-  reduceInputOnTruncation: boolean;
-  retryWhenOutputLimitUnchanged?: boolean;
-  generateOnce(state: SemanticRetryState): Promise<T | null>;
-  recoverError?(error: unknown, state: SemanticRetryState): Promise<SemanticRetryState | null>;
-  onTruncationRetry?(retry: number, limit: number, response: T): Promise<void>;
-  onOutputLimit?(): void;
+  generateOnce(state: GenerationAttemptState): Promise<T | null>;
+  recoverError(
+    error: unknown,
+    state: GenerationAttemptState,
+  ): Promise<GenerationAttemptState | null>;
 }): Promise<T | null> {
   const { params } = options;
-  const configuredRetryLimit = params.opts?.retryIfTruncatedMaxRetries;
-  const retryLimit =
-    Number.isSafeInteger(configuredRetryLimit) &&
-    Number(configuredRetryLimit) >= 0 &&
-    Number(configuredRetryLimit) <= options.maximumRetryLimit
-      ? Number(configuredRetryLimit)
-      : options.defaultRetryLimit;
-  const configuredIncrease = params.opts?.retryIfTruncatedIncreaseTokens;
-  const tokenIncrease =
-    Number.isSafeInteger(configuredIncrease) && Number(configuredIncrease) > 0
-      ? Number(configuredIncrease)
-      : options.defaultTokenIncrease;
-  let retries = 0;
-  let state: SemanticRetryState = {
+  let state: GenerationAttemptState = {
     promptContext: params.promptContext,
     promptParts: params.promptParts ?? {
       prefix: '',
@@ -186,41 +162,12 @@ export async function generateWithSemanticRetries<T extends LanguageModelRespons
   };
 
   for (;;) {
-    let response: T | null;
     try {
-      response = await options.generateOnce(state);
+      return await options.generateOnce(state);
     } catch (error) {
-      const recovered = await options.recoverError?.(error, state);
+      const recovered = await options.recoverError(error, state);
       if (!recovered) throw error;
       state = recovered;
-      continue;
     }
-    if (!(response?.truncated && params.opts?.retryIfTruncated && retries < retryLimit)) {
-      return response;
-    }
-    const nextMaxOutputTokens = Math.min(
-      state.maxOutputTokens + tokenIncrease,
-      options.maxOutputTokensLimit,
-    );
-    if (nextMaxOutputTokens <= state.maxOutputTokens && !options.retryWhenOutputLimitUnchanged) {
-      options.onOutputLimit?.();
-      return response;
-    }
-    if (options.reduceInputOnTruncation) {
-      const reduction = await params.reduceForRetry({
-        promptParts: state.promptParts,
-        summaryAttempted: state.summaryAttempted,
-      });
-      if (reduction.mode === 'unreducible') return response;
-      state = {
-        ...state,
-        promptContext: reduction.promptContext,
-        promptParts: reduction.promptParts,
-        summaryAttempted: reduction.summaryAttempted,
-      };
-    }
-    retries += 1;
-    state.maxOutputTokens = nextMaxOutputTokens;
-    await options.onTruncationRetry?.(retries, retryLimit, response);
   }
 }

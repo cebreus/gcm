@@ -63,30 +63,21 @@ test('a keyless provider generates from a real staged Git snapshot', async funct
       id: 'local',
       label: 'Local',
       defaultModel: 'local-model',
-      fallbackModels: [
-        {
-          name: 'local-model',
-          label: 'Local model',
-          maxInputTokens: 8_192,
-          maxOutputTokens: 1_024,
-        },
-      ],
+      models: async function () {
+        if (this.id !== 'local') throw new Error('Provider receiver was lost');
+        return [
+          {
+            name: 'local-model',
+            label: 'Local model',
+            limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+          },
+        ];
+      },
       service: {
         generate: async function (params) {
           receivedPrompt = params.promptContext;
           return { text: 'COMMIT_MESSAGE: test: use local provider', usage: {} };
         },
-      },
-      listModels: async function () {
-        return ['local-model'];
-      },
-      getModelSpec: function (name) {
-        return {
-          name,
-          label: 'Local model',
-          maxInputTokens: 8_192,
-          maxOutputTokens: 1_024,
-        };
       },
     },
   });

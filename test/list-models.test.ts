@@ -3,11 +3,31 @@ import { test, expect, mock } from 'bun:test';
 // Mock the listGeminiModels module before importing the runner
 const listMock = mock(() =>
   Promise.resolve([
-    'models/gemini-3.7-flash',
-    'models/gemini-3.1-pro-preview',
-    'models/gemini-3-pro-image',
-    'models/gemini-3.1-flash-tts-preview',
-    'models/gemini-robotics-er-2-preview',
+    {
+      name: 'models/gemini-3.7-flash',
+      label: 'Gemini 3.7 Flash',
+      limits: { kind: 'separate' as const, maxInputTokens: 1_000_000, maxOutputTokens: 65_536 },
+    },
+    {
+      name: 'models/gemini-3.1-pro-preview',
+      label: 'Gemini 3.1 Pro Preview',
+      limits: { kind: 'separate' as const, maxInputTokens: 1_000_000, maxOutputTokens: 65_536 },
+    },
+    {
+      name: 'models/gemini-3-pro-image',
+      label: 'Gemini 3 Pro Image',
+      limits: { kind: 'separate' as const, maxInputTokens: 1_000_000, maxOutputTokens: 65_536 },
+    },
+    {
+      name: 'models/gemini-3.1-flash-tts-preview',
+      label: 'Gemini 3.1 Flash TTS Preview',
+      limits: { kind: 'separate' as const, maxInputTokens: 1_000_000, maxOutputTokens: 65_536 },
+    },
+    {
+      name: 'models/gemini-robotics-er-2-preview',
+      label: 'Gemini Robotics ER 2 Preview',
+      limits: { kind: 'separate' as const, maxInputTokens: 1_000_000, maxOutputTokens: 65_536 },
+    },
   ]),
 );
 await mock.module('../src/gemini-client/listModels', () => ({ listGeminiModels: listMock }));
@@ -27,20 +47,17 @@ test('cli: --list-models prints available models', async () => {
 
   try {
     await executeCommitMessageGeneration(['--list-models']);
+    expect(listMock).toHaveBeenCalledWith('test-key');
+    expect(stdoutChunks.join('')).toContain('gemini-3.7-flash');
+    expect(stdoutChunks.join('')).not.toContain('image');
+    expect(stdoutChunks.join('')).not.toContain('tts');
+    expect(stdoutChunks.join('')).not.toContain('robotics');
   } finally {
     process.stdout.write = originalStdoutWrite;
+    process.exitCode = originalExitCode ?? 0;
+    if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+    else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
   }
-
-  expect(listMock).toHaveBeenCalledWith('test-key');
-  expect(stdoutChunks.join('')).toContain('gemini-3.7-flash');
-  expect(stdoutChunks.join('')).not.toContain('image');
-  expect(stdoutChunks.join('')).not.toContain('tts');
-  expect(stdoutChunks.join('')).not.toContain('robotics');
-
-  // restore
-  process.exitCode = originalExitCode ?? 0;
-  if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-  else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
 });
 
 test('cli: --list-models without API key exits with code 1', async () => {
@@ -53,14 +70,15 @@ test('cli: --list-models without API key exits with code 1', async () => {
   const originalConsoleError = console.error;
   console.error = consoleErrorMock;
   process.exitCode = undefined;
-  await executeCommitMessageGeneration(['--list-models']);
-  expect(Number(process.exitCode)).toBe(1);
-
-  // restore
-  console.error = originalConsoleError;
-  process.exitCode = originalExitCode ?? 0;
-  if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-  else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+  try {
+    await executeCommitMessageGeneration(['--list-models']);
+    expect(Number(process.exitCode)).toBe(1);
+  } finally {
+    console.error = originalConsoleError;
+    process.exitCode = originalExitCode ?? 0;
+    if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+    else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+  }
 });
 
 test('cli: --list-models uses the injected model list failure contract', async () => {

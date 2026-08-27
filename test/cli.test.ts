@@ -1,6 +1,12 @@
 import { test, expect } from 'bun:test';
 import { CLI_OPTION_DEFINITIONS, parseArgs } from '../src/cli';
 
+test('README installs from this repository', async function () {
+  const readme = await Bun.file(new URL('../README.md', import.meta.url)).text();
+  expect(readme).toContain('git clone https://github.com/cebreus/gcm.git');
+  expect(readme).toContain('cd gcm');
+});
+
 test('cli: every public long flag is documented in README', async () => {
   const readme = await Bun.file(new URL('../README.md', import.meta.url)).text();
 
@@ -173,10 +179,10 @@ test('cli: rejects clusters with a non-final value-taking flag', () => {
   expect(() => parseArgs(['-cv', 'sha'])).toThrow('Value-taking flag must be last in cluster: -cv');
 });
 
-test('cli: rejects malformed short flags but allows a bare dash', () => {
+test('cli: rejects malformed short flags and a bare positional dash', () => {
   expect(() => parseArgs(['-='])).toThrow('Unknown flag: -');
   expect(() => parseArgs(['-=x'])).toThrow('Unknown flag: -');
-  expect(parseArgs(['-'])).toEqual(parseArgs([]));
+  expect(() => parseArgs(['-'])).toThrow('Unexpected positional argument');
 });
 
 test('cli: rejects string flags without a value', () => {
@@ -239,11 +245,10 @@ test('cli: rejects an option terminator and known flags as separated exclude val
   }
 });
 
-test('cli: ignores flags after the option terminator', () => {
-  const result = parseArgs(['--', '--debug', '--exclude', 'private/*']);
-
-  expect(result.debug).toBe(false);
-  expect(result.exclude).toEqual([]);
+test('cli: rejects positional arguments after the option terminator', () => {
+  expect(() => parseArgs(['--', '--debug', '--exclude', 'private/*'])).toThrow(
+    'Unexpected positional argument',
+  );
 });
 
 const valueTakingFlagCases = [

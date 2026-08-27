@@ -2,6 +2,13 @@ import { expect, test } from 'bun:test';
 import { ESLint } from 'eslint';
 import type { Linter } from 'eslint';
 
+test('ESLint TypeScript project includes the JavaScript config file', async () => {
+  const config = await Bun.file('tsconfig.eslint.json').text();
+
+  expect(config).toContain('eslint.config.js');
+  expect(config).not.toContain('eslint.config.ts');
+});
+
 test('production code rejects Node I/O imports', async () => {
   const eslint = new ESLint();
   const resolvedConfig = (await eslint.calculateConfigForFile('src/runner.ts')) as Linter.Config;

@@ -56,7 +56,7 @@ flowchart TD
   I -- Continue --> J[Generate with active provider]
   H -- No --> J
   J --> K{Generated result?}
-  K -- No text --> Y[Show four-artifact deterministic fallback;<br/>exit without write or session save]
+  K -- No text --> X
   K -- Invalid --> X
   K -- Valid --> L{Review action}
   L -- Copy or edit --> L
@@ -86,7 +86,7 @@ flowchart TD
   R --> D
   D --> E[Generate with active provider]
   E --> F{Generated result?}
-  F -- No text --> Y[Show four-artifact deterministic fallback;<br/>exit without write or session save]
+  F -- No text --> X
   F -- Invalid --> X
   F -- Valid --> G{Review action}
   G -- Copy or edit --> G
@@ -124,7 +124,7 @@ flowchart TD
   F --> G{Generation and amend-only action succeed?}
   G -- No --> X2[Stop; keep completed amend commits]
   G -- Yes --> H{Amend commit tree equals parent?}
-  H -- No --> X2
+  H -- No --> X3[Roll back unsafe amend; stop; keep hook changes staged]
   H -- Yes --> I{More frozen targets?}
   E --> I
   I -- Yes --> C
@@ -133,6 +133,7 @@ flowchart TD
 
 The range is sequential, non-interactive and first-parent only. Existing
 `amend!`, `fixup!` and `squash!` commits are excluded from its frozen targets.
-Unexpected HEAD movement, index changes, Git operations and hook-added file
-changes stop the batch without rollback. Re-running skips exact existing
-`amend! <full-hash>` commits.
+Unexpected HEAD movement, index changes and Git operations stop the batch
+without rollback. A hook-modified `amend!` is rolled back only when its parent
+still equals the verified pre-write `HEAD`; hook changes remain staged.
+Re-running skips exact existing `amend! <full-hash>` commits.

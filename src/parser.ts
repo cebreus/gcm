@@ -1,4 +1,4 @@
-import { formatCommitMessage } from './utils.js';
+import { formatCommitMessage, sanitizeForDisplay } from './utils.js';
 import type { OutputMode } from './output-mode.js';
 
 export interface Labels {
@@ -39,8 +39,10 @@ function trimLabels(labels: Labels): Labels {
 
 function ensureRequiredFields(labels: Labels, mode: OutputMode, text: string): Labels {
   if (mode === 'full') {
-    if (!labels.BRANCH || !labels.COMMIT_MESSAGE) {
-      throw new Error('LLM output missing required BRANCH or COMMIT_MESSAGE fields');
+    if (!labels.BRANCH || !labels.COMMIT_MESSAGE || !labels.PR_TITLE || !labels.PR_DESCRIPTION) {
+      throw new Error(
+        'LLM output missing required BRANCH or COMMIT_MESSAGE fields, or required PR_TITLE or PR_DESCRIPTION fields',
+      );
     }
     return labels;
   }
@@ -53,15 +55,26 @@ function ensureRequiredFields(labels: Labels, mode: OutputMode, text: string): L
 }
 
 function sanitizeBranchName(branch: string): string {
-  const isValidBranchName = /^\w+\/[a-z0-9_.-]+$/i.test(branch);
-  if (isValidBranchName) return branch;
-  return branch.replace(/[^a-zA-Z0-9/_-]/g, '-').toLowerCase();
+  const segments = branch
+    .replace(/[^a-zA-Z0-9/_-]/g, '-')
+    .replace(/\/{2,}/g, '/')
+    .replace(/\.{2,}/g, '-')
+    .toLowerCase()
+    .split('/')
+    .map(function (segment) {
+      const safeSegment = segment.replace(/^[.-]+|[.-]+$/g, '') || 'change';
+      return safeSegment.endsWith('.lock') ? `${safeSegment}-branch` : safeSegment;
+    });
+  if (segments.length === 1) segments.unshift('change');
+  return segments.join('/');
 }
 
 export function parseLanguageModelOutput(text: string, mode: OutputMode = 'full'): Labels {
   if (!text || typeof text !== 'string') {
     throw new Error('parseLanguageModelOutput expects a string');
   }
+
+  text = sanitizeForDisplay(text);
 
   if (
     /<\|[^>\r\n]+\|?>/i.test(text) ||

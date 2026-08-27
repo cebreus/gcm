@@ -54,6 +54,27 @@ test('context-service: hard truncation keeps large hints and file lists within t
   expect(result.tokens).toBeLessThanOrEqual(maxAvailableTokens);
 });
 
+test('context-service: hard truncation respects a UTF-8 byte budget', async () => {
+  const maxAvailableTokens = 400;
+  const result = await createContextService({
+    summarizeLargeDiff: async function () {
+      return { text: 'Žluťoučký 🚀 '.repeat(1_000), numHunks: 1, totalTruncated: 0 };
+    },
+  }).constructLLMPromptContext({
+    diffContent: 'diff',
+    promptSuffix: 'staged changes',
+    maxAvailableTokens,
+    tokenBytesRatio: 1,
+    stagedFiles: ['src/žluťoučký.ts'],
+    scopeSuggestions: [],
+    recentCommitSubjects: [],
+    logger: null,
+    userHint: '🚀'.repeat(1_000),
+  });
+
+  expect(result.tokens).toBeLessThanOrEqual(maxAvailableTokens);
+});
+
 const retryParts: PromptContextParts = {
   prefix:
     'Analyse the staged changes:\n\nChanged files:\n- src/service.ts\n\nScope candidates:\n- service\n\nRecent commit style examples for these files:\n- feat(service): add retry context\n\nUse recent examples only to align type, scope, and wording style. Do not copy unrelated content.\n\n',
@@ -191,4 +212,66 @@ test('context-service: retry reduction is unreducible only after the diff body i
   expect(result.mode).toBe('unreducible');
   expect('promptContext' in result).toBe(false);
   expect(promptParts.suffix).toContain(userHint);
+});
+
+test('context service refuses an empty summary for a non-empty diff', async () => {
+  const service = createContextService({
+    summarizeLargeDiff: async function () {
+      return { text: 'File changes summary:\n\n', numHunks: 0, totalTruncated: 0 };
+    },
+  });
+
+  await expect(
+    service.constructLLMPromptContext({
+      diffContent: 'x'.repeat(100),
+      promptSuffix: 'diff',
+      maxAvailableTokens: 1,
+      tokenBytesRatio: 1,
+      stagedFiles: ['example.ts'],
+      scopeSuggestions: [],
+      logger: null,
+      targetCommit: 'abc123',
+    }),
+  ).rejects.toThrow('Diff summary contains no evidence');
+});
+
+test('context service refuses a stats-only summary without content evidence', async () => {
+  const service = createContextService({
+    summarizeLargeDiff: async function () {
+      return {
+        text: 'File changes summary:\n example.ts | 2 +-',
+        numHunks: 0,
+        numSkippedFiles: 0,
+        totalTruncated: 0,
+      };
+    },
+  });
+
+  await expect(
+    service.constructLLMPromptContext({
+      diffContent: 'changed content',
+      promptSuffix: 'diff',
+      maxAvailableTokens: 1,
+      tokenBytesRatio: 1,
+      stagedFiles: ['example.ts'],
+      scopeSuggestions: [],
+      logger: null,
+    }),
+  ).rejects.toThrow('Diff summary contains no evidence');
+});
+
+test('context service refuses an empty summary while reducing a retry', async () => {
+  const service = createContextService({
+    summarizeLargeDiff: async function () {
+      return { text: 'File changes summary:\n\n', numHunks: 0, totalTruncated: 0 };
+    },
+  });
+
+  await expect(
+    service.reduceForRetry({
+      promptParts: retryParts,
+      stagedFiles: ['example.ts'],
+      summaryAttempted: false,
+    }),
+  ).rejects.toThrow('Diff summary contains no evidence');
 });

@@ -16,7 +16,7 @@ export interface Hunk {
 }
 
 function redactAuthorizationCredentials(text: string): string {
-  return text.replace(/(\bAuthorization\s*:\s*(?:Bearer|Basic)\s+)[^\s,;]+/gi, '$1[REDACTED]');
+  return text.replace(/(\bAuthorization\s*:\s*[!#$%&'*+.^_`|~\w-]+\s+)[^\s,;]+/gi, '$1[REDACTED]');
 }
 
 export function redactSensitiveText(text: string): string {

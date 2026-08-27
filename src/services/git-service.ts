@@ -1,5 +1,6 @@
 import { spawnGitStream } from '../git-utils.js';
-import { filterExcludedFiles } from '../utils.js';
+import { filterExcludedFiles, shouldExcludeFile } from '../utils.js';
+import { DEFAULT_ANALYSIS_EXCLUDE_PATTERNS } from '../constants.js';
 import type { Logger } from '../logger.js';
 
 export interface StagedChangesResult {
@@ -280,30 +281,33 @@ async function retrieveStagedChangesWithDeps(params: {
   excludePatterns: string[];
 }): Promise<StagedChangesResult | null> {
   const { deps, commitHash, logger, excludePatterns } = params;
+  const analysisExcludePatterns = [...DEFAULT_ANALYSIS_EXCLUDE_PATTERNS, ...excludePatterns];
   logger?.log('debug', 'Checking git status');
   const fileListRes = await deps.gitCommandRunner(buildFileListArgs(commitHash));
   if (fileListRes.truncated) {
     throw new Error('File list output was truncated. Reduce the change set, then try again.');
   }
   const allFiles = parseFileList(fileListRes.text);
-  const files = filterExcludedFiles(allFiles, excludePatterns);
-  const includedPaths = new Set(files);
+  const files = filterExcludedFiles(allFiles, analysisExcludePatterns);
+  const explicitlyIncludedPaths = new Set(filterExcludedFiles(allFiles, excludePatterns));
   const excludedPaths = allFiles.filter(function (path) {
-    return !includedPaths.has(path);
+    return !explicitlyIncludedPaths.has(path);
   });
   const originalFileCount = allFiles.length;
-  logExcludedFiles(logger, excludePatterns, originalFileCount, files.length);
+  const matchedExcludePatterns = analysisExcludePatterns.filter(function (pattern) {
+    return allFiles.some(path => shouldExcludeFile(path, [pattern]));
+  });
+  logExcludedFiles(logger, matchedExcludePatterns, originalFileCount, files.length);
   if (files.length === 0) {
     logNoChanges(logger, commitHash);
     return null;
   }
   const diff = commitHash
     ? {
-        result: await deps.gitCommandRunner([
-          ...buildDiffArgs(commitHash),
-          '--',
-          ...files.map(literalPathspec),
-        ]),
+        result: await deps.gitCommandRunner(
+          [...buildDiffArgs(commitHash), '--', ...files.map(literalPathspec)],
+          { allowTruncated: true },
+        ),
       }
     : await readStableStagedDiff({ deps, files, logger });
   const diffRes = diff.result;
@@ -328,11 +332,10 @@ async function readStableStagedDiff(params: {
     const entries = await getIndexEntriesWithDeps({ deps, logger });
     const beforeDiff = await getIndexTreeWithDeps({ deps, logger });
     if (beforeEntries !== beforeDiff) continue;
-    const result = await deps.gitCommandRunner([
-      ...buildDiffArgs(null),
-      '--',
-      ...files.map(literalPathspec),
-    ]);
+    const result = await deps.gitCommandRunner(
+      [...buildDiffArgs(null), '--', ...files.map(literalPathspec)],
+      { allowTruncated: true },
+    );
     const afterDiff = await getIndexTreeWithDeps({ deps, logger });
     if (beforeDiff === afterDiff) return { result, snapshot: { tree: afterDiff, entries } };
   }
@@ -415,6 +418,7 @@ async function rewordCommitWithDeps(params: {
   const { deps, target, message, logger, safety } = params;
   await assertCommitWriteSafety({ deps, logger, safety });
   logger?.log('debug', `Creating amend! commit for ${target.hash}`);
+  const previousHead = (await deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD'])).text.trim();
   await deps.gitCommandRunner([
     'commit',
     '--allow-empty',
@@ -423,7 +427,35 @@ async function rewordCommitWithDeps(params: {
     '-m',
     message,
   ]);
-  await assertAmendCommitIsEmpty(deps);
+  try {
+    await assertAmendCommitIsEmpty(deps);
+  } catch (error) {
+    await rollBackUnsafeAmendCommit(deps, previousHead);
+    throw error;
+  }
+}
+
+async function rollBackUnsafeAmendCommit(
+  deps: GitServiceDeps,
+  previousHead: string,
+): Promise<void> {
+  let createdHead = 'HEAD';
+  try {
+    const [head, parent] = await Promise.all([
+      deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD']),
+      deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^']),
+    ]);
+    createdHead = head.text.trim();
+    if (parent.text.trim() !== previousHead) {
+      throw new Error('HEAD parent does not match the pre-write HEAD');
+    }
+    await deps.gitCommandRunner(['reset', '--soft', previousHead]);
+  } catch {
+    throw commitSafetyRefusal(
+      `The unsafe amend! commit ${createdHead} could not be rolled back automatically. ` +
+        'Inspect HEAD and use git reset --soft only after confirming the target.',
+    );
+  }
 }
 
 async function assertAmendCommitIsEmpty(deps: GitServiceDeps): Promise<void> {
@@ -636,12 +668,13 @@ function parsePorcelainStatus(text: string): {
     changedFiles: new Set<string>(),
   };
 
-  const lines = text
-    .split('\n')
-    .map(line => line.trimEnd())
-    .filter(Boolean);
-  for (const line of lines) {
-    parsePorcelainLine(line, state);
+  const records = text.split('\0');
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    parsePorcelainLine(record, state);
+    const status = record.slice(0, 2);
+    if (status.includes('R') || status.includes('C')) index += 1;
   }
 
   return {
@@ -681,13 +714,7 @@ function isUnmergedStatus(x: string, y: string): boolean {
 }
 
 function addChangedPath(rawPathInput: string, changedFiles: Set<string>): void {
-  const rawPath = rawPathInput.trim();
-  if (!rawPath) return;
-  const renamedParts = rawPath.split(' -> ');
-  const normalizedPath = (
-    renamedParts.length > 1 ? renamedParts[renamedParts.length - 1] : rawPath
-  ).trim();
-  if (normalizedPath) changedFiles.add(normalizedPath);
+  if (rawPathInput) changedFiles.add(rawPathInput);
 }
 
 async function detectInProgressOperation(
@@ -713,7 +740,7 @@ async function getRepositoryStateWithDeps(params: {
   logger: Logger | null;
 }): Promise<RepositoryState> {
   const { deps, logger } = params;
-  const status = await deps.gitCommandRunner(['status', '--porcelain']);
+  const status = await deps.gitCommandRunner(['status', '--porcelain=v1', '-z']);
   if (status.truncated) {
     throw new Error(
       'Repository status output was truncated. Reduce the worktree size, then try again.',

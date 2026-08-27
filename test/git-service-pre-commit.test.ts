@@ -82,6 +82,43 @@ test('git service: warns when a pre-commit hook stages an extra path', async fun
   }
 });
 
+test('git service: rolls back a hook-modified amend! commit and keeps its files staged', async function () {
+  const repository = `/tmp/gcm-reword-hook-${crypto.randomUUID()}`;
+  try {
+    await runCommand(['mkdir', '-p', repository]);
+    await runGit(repository, ['init', '-q']);
+    await runGit(repository, ['config', 'user.name', 'Test User']);
+    await runGit(repository, ['config', 'user.email', 'test@example.com']);
+    await Bun.write(`${repository}/analysed.txt`, 'content\n');
+    await runGit(repository, ['add', 'analysed.txt']);
+    await runGit(repository, ['commit', '-qm', 'chore: initial']);
+    await Bun.write(
+      `${repository}/.git/hooks/pre-commit`,
+      '#!/bin/sh\nprintf "extra\\n" > hook-added.txt\ngit add hook-added.txt\n',
+    );
+    await runCommand(['chmod', '+x', `${repository}/.git/hooks/pre-commit`]);
+
+    const service = createGitService({
+      gitCommandRunner: async function (args) {
+        return await runGit(repository, args);
+      },
+    });
+    const target = await service.inspectCommitTarget('HEAD', null);
+    const originalHead = (await runGit(repository, ['rev-parse', 'HEAD'])).text.trim();
+
+    await expect(service.rewordCommit(target, 'fix: replacement', null)).rejects.toThrow(
+      'amend! commit contains file changes',
+    );
+
+    expect((await runGit(repository, ['rev-parse', 'HEAD'])).text.trim()).toBe(originalHead);
+    expect((await runGit(repository, ['diff', '--cached', '--name-only'])).text).toContain(
+      'hook-added.txt',
+    );
+  } finally {
+    await runCommand(['rm', '-rf', repository]);
+  }
+});
+
 async function createRepository(repository: string): Promise<void> {
   await runCommand(['mkdir', '-p', repository]);
   await runGit(repository, ['init', '-q']);

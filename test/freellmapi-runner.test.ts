@@ -9,8 +9,10 @@ const originalModel = process.env.GCM_FREELLMAPI_MODEL;
 const originalToken = process.env.GCM_FREELLMAPI_TOKEN;
 const originalLmToken = process.env.LM_API_TOKEN;
 const originalGeminiKey = process.env.GOOGLE_GEMINI_API_KEY;
+const originalExitCode = process.exitCode;
 const repository = await mkdtemp(`${Bun.env.TMPDIR ?? '/tmp'}/gcm-freellmapi-`);
 const note = mock(function () {});
+const cancel = mock(function () {});
 
 await mock.module('@clack/prompts', function () {
   return {
@@ -33,7 +35,7 @@ await mock.module('@clack/prompts', function () {
     isCancel: function (value: unknown) {
       return value === 'cancel';
     },
-    cancel: function () {},
+    cancel,
   };
 });
 
@@ -63,10 +65,12 @@ afterAll(async function () {
   else process.env.LM_API_TOKEN = originalLmToken;
   if (originalGeminiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
   else process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
+  process.exitCode = originalExitCode;
   await rm(repository, { recursive: true, force: true });
 });
 
 test('FreeLLMAPI provider runs end to end without Gemini API key', async function () {
+  process.exitCode = 0;
   let generatedPrompt = '';
   let receivedAuth = '';
 
@@ -80,7 +84,18 @@ test('FreeLLMAPI provider runs end to end without Gemini API key', async functio
       if (request.method === 'GET' && url.pathname === '/v1/models') {
         return Response.json({
           object: 'list',
-          data: [{ id: 'gemini-2.5-flash', object: 'model' }],
+          data: [
+            {
+              id: 'auto',
+              context_window: 32_768,
+              object: 'model',
+            },
+            {
+              id: 'gemini-2.5-flash',
+              context_window: 32_768,
+              object: 'model',
+            },
+          ],
         });
       }
 
@@ -116,7 +131,10 @@ test('FreeLLMAPI provider runs end to end without Gemini API key', async functio
       logger: { log: function () {} },
     });
 
-    expect(process.exitCode).toBe(0);
+    expect({ exitCode: process.exitCode, errors: cancel.mock.calls }).toEqual({
+      exitCode: 0,
+      errors: [],
+    });
     expect(receivedAuth).toBe('Bearer provider-specific-token');
     expect(generatedPrompt).toContain('app.ts');
     expect(note).toHaveBeenCalledWith(

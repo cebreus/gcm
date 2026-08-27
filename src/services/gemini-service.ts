@@ -4,16 +4,18 @@ import { renderPromptContext } from './context-service.js';
 import type { PromptContextParts, RetryReductionResult } from './context-service.js';
 import { CONFIG } from '../../gcm.config.js';
 import type {
+  GenerationAttemptState,
   LanguageModelGenerateParams,
   LanguageModelService,
-  SemanticRetryState,
 } from '../language-model-service.js';
 import {
   createLanguageModelApiError,
-  generateWithSemanticRetries,
+  generateWithContextRecovery,
 } from '../language-model-service.js';
 import { isGeminiApiError } from '../gemini-client/errors.js';
-import { getEffectiveMaxOutputTokens, getModelSpec } from '../model-registry.js';
+import { getEffectiveMaxOutputTokens } from '../model-registry.js';
+
+const MAX_CONTEXT_REDUCTION_ATTEMPTS = 3;
 
 export interface GeminiServiceDeps {
   client: GeminiClient;
@@ -34,6 +36,7 @@ async function handleContextOverflow(params: {
   reduceForRetry: CallGeminiApiParams['reduceForRetry'];
   promptParts: PromptContextParts;
   maxOutputTokens: number;
+  maxOutputTokensLimit: number;
   attempt: number;
   summaryAttempted: boolean;
 }): Promise<{
@@ -42,13 +45,21 @@ async function handleContextOverflow(params: {
   maxOutputTokens: number;
   summaryAttempted: boolean;
 } | null> {
-  const { deps, reduceForRetry, promptParts, maxOutputTokens, attempt, summaryAttempted } = params;
+  const {
+    deps,
+    reduceForRetry,
+    promptParts,
+    maxOutputTokens,
+    maxOutputTokensLimit,
+    attempt,
+    summaryAttempted,
+  } = params;
   const result = await reduceForRetry({
     promptParts,
     summaryAttempted,
   });
   if (result.mode === 'unreducible') return null;
-  const newMaxOutput = maxOutputTokens + 1024;
+  const newMaxOutput = Math.min(maxOutputTokens, maxOutputTokensLimit);
   if (result.mode === 'summary') {
     deps.logger.log(
       'warn',
@@ -56,11 +67,11 @@ async function handleContextOverflow(params: {
       { attempt },
     );
   } else {
-    deps.logger.log(
-      'warn',
-      'Gemini returned MAX_TOKENS or no text; retrying with smaller input and lower maxOutputTokens',
-      { attempt, newInputLength: result.promptContext.length, maxOutputOverride: newMaxOutput },
-    );
+    deps.logger.log('warn', 'Gemini returned MAX_TOKENS or no text; retrying with smaller input', {
+      attempt,
+      newInputLength: result.promptContext.length,
+      maxOutputOverride: newMaxOutput,
+    });
   }
   await deps.sleep((result.mode === 'summary' ? 200 : 500) * attempt);
   return {
@@ -96,12 +107,13 @@ async function callOnce(params: {
 async function maybeHandleOverflow(params: {
   deps: GeminiServiceRuntimeDeps;
   err: unknown;
-  state: SemanticRetryState;
+  state: GenerationAttemptState;
   attempt: number;
   maxAttempts: number;
   reduceForRetry: CallGeminiApiParams['reduceForRetry'];
-}): Promise<SemanticRetryState | null> {
-  const { deps, err, state, attempt, maxAttempts, reduceForRetry } = params;
+  maxOutputTokensLimit: number;
+}): Promise<GenerationAttemptState | null> {
+  const { deps, err, state, attempt, maxAttempts, reduceForRetry, maxOutputTokensLimit } = params;
   const errStr = String(err);
   const isMaxTokens = /MAX_TOKENS/i.test(errStr) || /returned no text/i.test(errStr);
   if (!(isMaxTokens && attempt < maxAttempts)) return null;
@@ -110,6 +122,7 @@ async function maybeHandleOverflow(params: {
     reduceForRetry,
     promptParts: state.promptParts,
     maxOutputTokens: state.maxOutputTokens,
+    maxOutputTokensLimit,
     attempt,
     summaryAttempted: state.summaryAttempted,
   });
@@ -142,9 +155,16 @@ async function generateWithDeps(params: {
     meta,
     opts,
   } = params;
-  const modelName = opts?.modelOverride ?? CONFIG.MODEL;
-  const initialMaxOutputTokens = getEffectiveMaxOutputTokens(modelName, CONFIG.MAX_OUTPUT_TOKENS);
-  const maxAttempts = CONFIG.GEMINI_MAX_RETRIES;
+  const maxOutputTokensLimit = opts?.maxOutputTokensLimit;
+  if (!Number.isSafeInteger(maxOutputTokensLimit) || Number(maxOutputTokensLimit) <= 0) {
+    throw createLanguageModelApiError('Gemini model output limit is required');
+  }
+  const validatedMaxOutputTokensLimit = Number(maxOutputTokensLimit);
+  const initialMaxOutputTokens = getEffectiveMaxOutputTokens(
+    CONFIG.MAX_OUTPUT_TOKENS,
+    validatedMaxOutputTokensLimit,
+  );
+  const maxAttempts = MAX_CONTEXT_REDUCTION_ATTEMPTS;
   let overflowRetries = 0;
   const initialPromptParts = promptParts ?? {
     prefix: '',
@@ -152,7 +172,7 @@ async function generateWithDeps(params: {
     diffBody: promptContext,
     suffix: '',
   };
-  return generateWithSemanticRetries({
+  return generateWithContextRecovery({
     params: {
       promptContext: renderPromptContext(initialPromptParts),
       promptParts: initialPromptParts,
@@ -163,11 +183,6 @@ async function generateWithDeps(params: {
       opts,
     },
     initialMaxOutputTokens,
-    maxOutputTokensLimit: getModelSpec(modelName).maxOutputTokens,
-    defaultRetryLimit: 1,
-    maximumRetryLimit: 10,
-    defaultTokenIncrease: initialMaxOutputTokens,
-    reduceInputOnTruncation: false,
     generateOnce: function (state) {
       return callOnce({
         deps,
@@ -186,23 +201,10 @@ async function generateWithDeps(params: {
         attempt: overflowRetries + 1,
         maxAttempts,
         reduceForRetry,
+        maxOutputTokensLimit: initialMaxOutputTokens,
       });
       if (recovered) overflowRetries += 1;
       return recovered;
-    },
-    onTruncationRetry: async function (retry, limit, response) {
-      deps.logger.log(
-        'warn',
-        `Gemini response appeared truncated; retrying with higher maxOutputTokens (attempt ${retry}/${limit})`,
-        { previousTextSnippet: response.text.slice(0, 256) },
-      );
-      await deps.sleep(50);
-    },
-    onOutputLimit: function () {
-      deps.logger.log(
-        'warn',
-        "Gemini response was truncated because the model's output limit was reached.",
-      );
     },
   });
 }

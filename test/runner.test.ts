@@ -5,6 +5,7 @@ import { parseArgs } from '../src/cli.js';
 import packageJson from '../package.json';
 import type { Logger } from '../src/logger.js';
 import { CONFIG } from '../gcm.config.js';
+import { estimateTokenCount } from '../src/runner-utils.js';
 
 // Mock @clack/prompts
 const mockIntro = mock();
@@ -94,7 +95,33 @@ const mockContextService = {
 };
 const mockGeminiService = { generate: mock() };
 const mockListModels = mock(() =>
-  Promise.resolve(['models/gemini-3.7-flash', 'models/gemini-3.1-pro-preview']),
+  Promise.resolve([
+    {
+      name: 'models/gemini-3.7-flash',
+      label: 'Gemini 3.7 Flash',
+      limits: { kind: 'separate' as const, maxInputTokens: 1_048_576, maxOutputTokens: 65_536 },
+    },
+    {
+      name: 'models/gemini-3.1-pro-preview',
+      label: 'Gemini 3.1 Pro Preview',
+      limits: { kind: 'separate' as const, maxInputTokens: 1_048_576, maxOutputTokens: 65_536 },
+    },
+    {
+      name: 'models/gemini-special',
+      label: 'Gemini Special',
+      limits: { kind: 'separate' as const, maxInputTokens: 1_048_576, maxOutputTokens: 65_536 },
+    },
+    {
+      name: 'models/gemini-2.5-flash',
+      label: 'Gemini 2.5 Flash',
+      limits: { kind: 'separate' as const, maxInputTokens: 1_048_576, maxOutputTokens: 65_536 },
+    },
+    {
+      name: 'models/gemini-2.5-pro',
+      label: 'Gemini 2.5 Pro',
+      limits: { kind: 'separate' as const, maxInputTokens: 1_048_576, maxOutputTokens: 65_536 },
+    },
+  ]),
 );
 
 describe('Refactored Runner', () => {
@@ -176,25 +203,20 @@ describe('Refactored Runner', () => {
     const model = {
       name: 'model',
       label: 'Model',
-      maxInputTokens: 8_192,
-      maxOutputTokens: 1_024,
+      limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
     };
     const availableCreate = mock(async function (options?: { probeOnly?: boolean }) {
       return {
         id: 'available',
         label: 'Available',
         defaultModel: model.name,
-        fallbackModels: [model],
+        models: async function () {
+          return [model];
+        },
         service: {
           generate: async function () {
             return null;
           },
-        },
-        listModels: async function () {
-          return [model.name];
-        },
-        getModelSpec: function () {
-          return model;
         },
       };
     });
@@ -225,24 +247,19 @@ describe('Refactored Runner', () => {
       const model = {
         name: 'model',
         label: 'Model',
-        maxInputTokens: 8_192,
-        maxOutputTokens: 1_024,
+        limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
       };
       return {
         id: 'ready',
         label: 'Ready',
         defaultModel: model.name,
-        fallbackModels: [model],
+        models: async function () {
+          return [model];
+        },
         service: {
           generate: async function () {
             return null;
           },
-        },
-        listModels: async function () {
-          return [model.name];
-        },
-        getModelSpec: function () {
-          return model;
         },
       };
     });
@@ -310,6 +327,18 @@ describe('Refactored Runner', () => {
     expect(mockGitService.retrieveStagedChanges).toHaveBeenCalled();
     expect(mockContextService.constructLLMPromptContext).toHaveBeenCalled();
     expect(mockGeminiService.generate).toHaveBeenCalled();
+    expect(mockListModels).toHaveBeenCalledTimes(1);
+    const generationParams = mockGeminiService.generate.mock.calls[0]?.[0] as unknown as {
+      systemPrompt: string;
+    };
+    const contextParams = mockContextService.constructLLMPromptContext.mock
+      .calls[0]?.[0] as unknown as {
+      maxAvailableTokens: number;
+    };
+    expect(contextParams?.maxAvailableTokens).toBe(
+      1_048_576 -
+        estimateTokenCount(generationParams?.systemPrompt ?? '', CONFIG.TOKEN_BYTES_RATIO),
+    );
     expect(mockGeminiService.generate).toHaveBeenCalledWith(
       expect.objectContaining({
         summaryAttempted: true,
@@ -537,26 +566,16 @@ describe('Refactored Runner', () => {
       label: 'Local',
       selectionNotice: 'Preferred model is unavailable; using local-model',
       defaultModel: 'local-model',
-      fallbackModels: [
-        {
-          name: 'local-alt',
-          label: 'Local Alternative',
-          maxInputTokens: 8_192,
-          maxOutputTokens: 1_024,
-        },
-      ],
+      models: async function () {
+        return [
+          {
+            name: 'local-alt',
+            label: 'Local Alternative',
+            limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+          },
+        ];
+      },
       service: { generate },
-      listModels: async function () {
-        return ['local-alt'];
-      },
-      getModelSpec: function (name: string) {
-        return {
-          name,
-          label: name,
-          maxInputTokens: 8_192,
-          maxOutputTokens: 1_024,
-        };
-      },
     };
 
     await executeCommitMessageGeneration(['--mode', 'commit-only'], {
@@ -624,16 +643,16 @@ describe('Refactored Runner', () => {
         id,
         label,
         defaultModel: `${id}-model`,
-        fallbackModels: [
-          { name: `${id}-model`, label, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
-        ],
+        models: async function () {
+          return [
+            {
+              name: `${id}-model`,
+              label,
+              limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+            },
+          ];
+        },
         service: { generate },
-        listModels: async function () {
-          return [`${id}-model`];
-        },
-        getModelSpec: function (name: string) {
-          return { name, label, maxInputTokens: 8_192, maxOutputTokens: 1_024 };
-        },
       };
     }
 
@@ -690,7 +709,11 @@ describe('Refactored Runner', () => {
       .mockResolvedValueOnce('local')
       .mockResolvedValueOnce('generate')
       .mockResolvedValueOnce('commit');
-    const spec = { name: 'model', label: 'Model', maxInputTokens: 8_192, maxOutputTokens: 1_024 };
+    const spec = {
+      name: 'model',
+      label: 'Model',
+      limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+    };
     await executeCommitMessageGeneration(['--mode', 'commit-only'], {
       isInteractive: true,
       logger: mockLogger,
@@ -706,14 +729,10 @@ describe('Refactored Runner', () => {
               label: 'Broken',
               readinessError: 'Unavailable',
               defaultModel: 'model',
-              fallbackModels: [spec],
+              models: async function () {
+                return [spec];
+              },
               service: { generate: mock() },
-              listModels: async function () {
-                return ['model'];
-              },
-              getModelSpec: function () {
-                return spec;
-              },
             };
           },
         },
@@ -725,14 +744,10 @@ describe('Refactored Runner', () => {
               id: 'local',
               label: 'Local',
               defaultModel: 'model',
-              fallbackModels: [spec],
+              models: async function () {
+                return [spec];
+              },
               service: { generate: localGenerate },
-              listModels: async function () {
-                return ['model'];
-              },
-              getModelSpec: function () {
-                return spec;
-              },
             };
           },
         },
@@ -823,26 +838,16 @@ describe('Refactored Runner', () => {
       id: 'gemini',
       label: 'Gemini',
       defaultModel: 'gemini-3.7-flash',
-      fallbackModels: [
-        {
-          name: 'gemini-3.7-flash',
-          label: 'Gemini',
-          maxInputTokens: 8_192,
-          maxOutputTokens: 1_024,
-        },
-      ],
+      models: async function () {
+        return [
+          {
+            name: 'gemini-3.7-flash',
+            label: 'Gemini',
+            limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+          },
+        ];
+      },
       service: { generate: mock() },
-      listModels: async function () {
-        return ['gemini-3.7-flash'];
-      },
-      getModelSpec: function () {
-        return {
-          name: 'gemini-3.7-flash',
-          label: 'Gemini',
-          maxInputTokens: 8_192,
-          maxOutputTokens: 1_024,
-        };
-      },
     };
     await executeCommitMessageGeneration(['--model', 'gemini-3.7-flash', '--mode', 'commit-only'], {
       isInteractive: true,
@@ -882,21 +887,20 @@ describe('Refactored Runner', () => {
               id: 'different',
               label: 'Different',
               defaultModel: 'model',
-              fallbackModels: [
-                { name: 'model', label: 'Model', maxInputTokens: 8_192, maxOutputTokens: 1_024 },
-              ],
+              models: async function () {
+                return [
+                  {
+                    name: 'model',
+                    label: 'Model',
+                    limits: {
+                      kind: 'separate' as const,
+                      maxInputTokens: 8_192,
+                      maxOutputTokens: 1_024,
+                    },
+                  },
+                ];
+              },
               service: { generate: mock() },
-              listModels: async function () {
-                return ['model'];
-              },
-              getModelSpec: function () {
-                return {
-                  name: 'model',
-                  label: 'Model',
-                  maxInputTokens: 8_192,
-                  maxOutputTokens: 1_024,
-                };
-              },
             };
           },
         },
@@ -926,26 +930,21 @@ describe('Refactored Runner', () => {
         id: 'local',
         label: 'Local',
         defaultModel: 'default-model',
-        fallbackModels: [
-          {
-            name: 'default-model',
-            label: 'Default',
-            maxInputTokens: 8_192,
-            maxOutputTokens: 1_024,
-          },
-        ],
+        models: async function () {
+          return [
+            {
+              name: 'default-model',
+              label: 'Default',
+              limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+            },
+            {
+              name: 'live-model',
+              label: 'Live',
+              limits: { kind: 'separate' as const, maxInputTokens: 1_000, maxOutputTokens: 0 },
+            },
+          ];
+        },
         service: { generate },
-        listModels: async function () {
-          return ['live-model'];
-        },
-        getModelSpec: function (name) {
-          return {
-            name,
-            label: name,
-            maxInputTokens: name === 'live-model' ? 1_000 : 8_192,
-            maxOutputTokens: 1_024,
-          };
-        },
       },
     });
 
@@ -1031,24 +1030,19 @@ describe('Refactored Runner', () => {
         label: 'Local',
         readinessError: 'Invalid credential: AIzaSyExampleSecret1234567890',
         defaultModel: 'local-model',
-        fallbackModels: [
-          {
-            name: 'local-model',
-            label: 'Local model',
-            maxInputTokens: 8_192,
-            maxOutputTokens: 1_024,
-          },
-        ],
+        models: async function () {
+          return [
+            {
+              name: 'local-model',
+              label: 'Local model',
+              limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+            },
+          ];
+        },
         service: {
           generate: async function () {
             return null;
           },
-        },
-        listModels: async function () {
-          return [];
-        },
-        getModelSpec: function (name) {
-          return { name, label: name, maxInputTokens: 8_192, maxOutputTokens: 1_024 };
         },
       },
     });
@@ -1832,7 +1826,7 @@ describe('Refactored Runner', () => {
     );
   });
 
-  test('Should perform auto-retry on truncated response', async () => {
+  test('Should pass the selected model output limit', async () => {
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['a.ts'],
@@ -1861,11 +1855,11 @@ describe('Refactored Runner', () => {
       geminiModelLister: mockListModels,
     });
 
-    // Gemini should be called once with retryIfTruncated flag
+    // Generation delegates once with the selected model policy
     expect(mockGeminiService.generate).toHaveBeenCalledTimes(1);
     expect(mockGeminiService.generate).toHaveBeenCalledWith(
       expect.objectContaining({
-        opts: expect.objectContaining({ retryIfTruncated: true }) as unknown,
+        opts: expect.objectContaining({ maxOutputTokensLimit: 8192 }) as unknown,
       }),
     );
     expect(mockNote).toHaveBeenCalledWith(

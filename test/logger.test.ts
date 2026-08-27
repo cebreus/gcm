@@ -1,4 +1,4 @@
-import { test, expect, mock, afterAll, beforeAll } from 'bun:test';
+import { test, expect, mock, afterAll, beforeAll, beforeEach } from 'bun:test';
 import { createLogger } from '../src/logger';
 
 const originalStdoutWrite = process.stdout.write;
@@ -16,17 +16,27 @@ afterAll(() => {
   process.stderr.write = originalStderrWrite;
 });
 
+beforeEach(() => {
+  stdoutWriteMock.mockClear();
+  stderrWriteMock.mockClear();
+});
+
 test('logger: redacts secrets in console output', () => {
   const logger = createLogger({ LOG_LEVEL: 'info' });
-  logger.log('info', 'sensitive info', { token: 'sk-abcdef1234567890' });
+  logger.log('info', 'sensitive info', {
+    token: 'sk-abcdef1234567890',
+    apiKey: 'plain-api-credential',
+    password: 'plain-password',
+  });
 
   const output = stdoutWriteMock.mock.calls.map(call => String(call[0])).join('');
   expect(output).toContain('[REDACTED-KEY]');
   expect(output).not.toContain('sk-abcdef1234567890');
+  expect(output).not.toContain('plain-api-credential');
+  expect(output).not.toContain('plain-password');
 });
 
 test('logger: redacts secrets in log messages', () => {
-  stdoutWriteMock.mockClear();
   const logger = createLogger({ LOG_LEVEL: 'info' });
   logger.log('info', 'Model output: sk-abcdef1234567890');
 
@@ -65,6 +75,18 @@ test('logger: sanitises terminal controls and nested metadata secrets', () => {
   expect(output).toContain('[REDACTED-KEY]');
   expect(output).not.toContain(secret);
   expect(output).not.toContain('\x1B');
+});
+
+test('logger: preserves arrays while redacting their values', () => {
+  stdoutWriteMock.mockClear();
+  const logger = createLogger({ LOG_LEVEL: 'info' });
+
+  logger.log('info', 'array metadata', {
+    values: ['safe', { token: 'private' }],
+  });
+
+  const output = stdoutWriteMock.mock.calls.map(call => String(call[0])).join('');
+  expect(output).toContain('"values":["safe",{"token":"[REDACTED]"}]');
 });
 
 test('logger: keeps full redacted messages while truncating metadata', () => {
@@ -109,4 +131,19 @@ test('logger: empty log level uses the default', () => {
   createLogger({ LOG_LEVEL: '' }).log('info', 'default level');
   const output = stdoutWriteMock.mock.calls.map(call => String(call[0])).join('');
   expect(output).toContain('default level');
+});
+
+test('logger: serialises circular and bigint metadata without throwing', () => {
+  stdoutWriteMock.mockClear();
+  const circular: Record<string, unknown> = { count: 1n, token: 'private' };
+  circular.self = circular;
+
+  expect(() => {
+    createLogger({ LOG_LEVEL: 'info' }).log('info', 'safe', circular);
+  }).not.toThrow();
+
+  const output = stdoutWriteMock.mock.calls.map(call => String(call[0])).join('');
+  expect(output).toContain('"count":"1"');
+  expect(output).toContain('"token":"[REDACTED]"');
+  expect(output).toContain('"self":"[Circular]"');
 });

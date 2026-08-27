@@ -1,11 +1,12 @@
 import type { Logger } from '../logger.js';
 import type { GeminiResponse } from './index.js';
+import { redactSensitiveText } from '../utils.js';
 
 export function tryParseJSON(logger: Logger, text: string): unknown {
   try {
     return JSON.parse(text);
   } catch (err: unknown) {
-    const snippet = text.slice(0, 1024);
+    const snippet = redactSensitiveText(text.slice(0, 1024));
     try {
       logger?.log?.('error', 'Invalid JSON received from Gemini', {
         parseError: String(err),
@@ -55,7 +56,7 @@ function extractBetweenMarkers(
   const END_TRUNC = '<<END_TRUNCATED>>';
 
   const s = text.indexOf(START);
-  const e = text.indexOf(END);
+  const e = text.indexOf(END, s + START.length);
   if (s !== -1) {
     if (e > s) {
       // Found a normal END marker. Check if END_TRUNCATED exists instead
@@ -99,6 +100,7 @@ export function parseCandidates(
         // be conservative: fall back to original text on any failure
       }
       text = text.trim();
+      if (!text) continue;
 
       const usage =
         (json as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } })

@@ -22,16 +22,19 @@ async function readConfig(env: Record<string, string>): Promise<unknown> {
     cmd: [
       'bun',
       '-e',
-      "import { CONFIG } from './gcm.config.ts'; console.log(JSON.stringify({ model: CONFIG.MODEL, temp: CONFIG.TEMP, maxBuffer: CONFIG.CHILD_PROCESS_MAX_BUFFER, maxHunks: CONFIG.MAX_HUNKS, perFileBuffer: CONFIG.PER_FILE_BUFFER, tokenRatio: CONFIG.TOKEN_BYTES_RATIO, maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS, debugBytes: CONFIG.DEBUG_MAX_BODY_LOG_BYTES, retries: CONFIG.GEMINI_MAX_RETRIES, retryBase: CONFIG.GEMINI_RETRY_BASE_MS, retryMax: CONFIG.GEMINI_RETRY_MAX_MS, freeLlmApiUrl: CONFIG.FREELLMAPI_URL, freeLlmApiModel: CONFIG.FREELLMAPI_MODEL, freeLlmApiToken: CONFIG.FREELLMAPI_TOKEN ?? null }));",
+      "import { CONFIG } from './gcm.config.ts'; console.log(JSON.stringify({ model: CONFIG.MODEL, temp: CONFIG.TEMP, maxBuffer: CONFIG.CHILD_PROCESS_MAX_BUFFER, maxHunks: CONFIG.MAX_HUNKS, perFileBuffer: CONFIG.PER_FILE_BUFFER, tokenRatio: CONFIG.TOKEN_BYTES_RATIO, maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS, debugBytes: CONFIG.DEBUG_MAX_BODY_LOG_BYTES, retries: CONFIG.MAX_RETRIES, retryBase: CONFIG.RETRY_BASE_MS, retryMax: CONFIG.RETRY_MAX_MS, freeLlmApiUrl: CONFIG.FREELLMAPI_URL, freeLlmApiModel: CONFIG.FREELLMAPI_MODEL, freeLlmApiToken: CONFIG.FREELLMAPI_TOKEN ?? null }));",
     ],
     cwd: process.cwd(),
     env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', ...env },
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const stdout = await new Response(child.stdout).text();
-  const stderr = await new Response(child.stderr).text();
-  expect(await child.exited, stderr).toBe(0);
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  expect(exitCode, stderr).toBe(0);
   const config: unknown = JSON.parse(stdout);
   return config;
 }
@@ -41,6 +44,44 @@ test('config: reads the short GCM names', async () => {
     ...DEFAULT_CONFIG,
     model: 'test-model',
     temp: 0.25,
+  });
+});
+
+test('config: reads general retry names before legacy Gemini aliases', async () => {
+  await expect(
+    readConfig({
+      GCM_MAX_RETRIES: '2',
+      GCM_RETRY_BASE_MS: '20',
+      GCM_RETRY_MAX_MS: '200',
+      GCM_GEMINI_MAX_RETRIES: '4',
+      GCM_GEMINI_RETRY_BASE_MS: '40',
+      GCM_GEMINI_RETRY_MAX_MS: '400',
+    }),
+  ).resolves.toEqual({
+    ...DEFAULT_CONFIG,
+    retries: 2,
+    retryBase: 20,
+    retryMax: 200,
+  });
+
+  await expect(
+    readConfig({
+      GCM_GEMINI_MAX_RETRIES: '4',
+      GCM_GEMINI_RETRY_BASE_MS: '40',
+      GCM_GEMINI_RETRY_MAX_MS: '400',
+    }),
+  ).resolves.toEqual({
+    ...DEFAULT_CONFIG,
+    retries: 4,
+    retryBase: 40,
+    retryMax: 400,
+  });
+});
+
+test('config: allows disabling transport retries', async () => {
+  await expect(readConfig({ GCM_MAX_RETRIES: '0' })).resolves.toEqual({
+    ...DEFAULT_CONFIG,
+    retries: 0,
   });
 });
 
@@ -75,9 +116,9 @@ test('config: rejects unsafe numeric values by using safe defaults', async () =>
       GCM_TOKEN_BYTES_RATIO: '5e-324',
       GCM_MAX_OUTPUT_TOKENS: '1e100',
       GCM_DEBUG_MAX_BODY_LOG_BYTES: '9007199254740991',
-      GCM_GEMINI_MAX_RETRIES: '9007199254740991',
-      GCM_GEMINI_RETRY_BASE_MS: '9007199254740991',
-      GCM_GEMINI_RETRY_MAX_MS: '9007199254740991',
+      GCM_MAX_RETRIES: '9007199254740991',
+      GCM_RETRY_BASE_MS: '9007199254740991',
+      GCM_RETRY_MAX_MS: '9007199254740991',
     }),
   ).resolves.toEqual(DEFAULT_CONFIG);
   await expect(readConfig({ GCM_TEMP: '   ' })).resolves.toEqual(DEFAULT_CONFIG);

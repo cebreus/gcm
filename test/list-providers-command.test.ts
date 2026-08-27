@@ -5,8 +5,7 @@ import type { LanguageModelProvider } from '../src/language-model-service.js';
 const model = {
   name: 'model-a',
   label: 'Model A',
-  maxInputTokens: 8_192,
-  maxOutputTokens: 1_024,
+  limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
 };
 
 function createProvider(overrides: Partial<LanguageModelProvider> = {}): LanguageModelProvider {
@@ -14,17 +13,13 @@ function createProvider(overrides: Partial<LanguageModelProvider> = {}): Languag
     id: 'ready',
     label: 'Ready',
     defaultModel: model.name,
-    fallbackModels: [model],
+    models: async function () {
+      return [model];
+    },
     service: {
       generate: async function () {
         return null;
       },
-    },
-    listModels: async function () {
-      return [model.name];
-    },
-    getModelSpec: function () {
-      return model;
     },
     ...overrides,
   };
@@ -82,7 +77,7 @@ test('list providers rejects unusable providers and returns 2', async function (
           return createProvider({
             id: 'empty',
             label: 'Empty',
-            listModels: async function () {
+            models: async function () {
               return [];
             },
           });

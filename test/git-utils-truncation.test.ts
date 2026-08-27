@@ -9,7 +9,11 @@ async function gitUtilsTruncationTest(): Promise<void> {
     'for i in {1..500}; do echo "line-$i-with-some-padding-to-make-it-longer"; done',
   ];
   const maxBytes = 1024; // 1 KB cap
-  const res: SpawnGitStreamResult = await spawnGitStream(args, { maxBytes, execName: 'bash' });
+  const res: SpawnGitStreamResult = await spawnGitStream(args, {
+    maxBytes,
+    execName: 'bash',
+    allowTruncated: true,
+  });
   console.log('  got truncated:', res.truncated);
   console.log('  actual length:', res.text.length);
   expect(res.truncated).toBe(true);

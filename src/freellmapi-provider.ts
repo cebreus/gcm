@@ -3,6 +3,7 @@ import {
   isLanguageModelApiError,
   isLanguageModelName,
   type LanguageModelGenerateParams,
+  getModelSpecValidationError,
   type LanguageModelProvider,
 } from './language-model-service.js';
 import {
@@ -15,9 +16,6 @@ import type { ModelSpec } from './model-registry.js';
 
 const DEFAULT_FREELLMAPI_MODEL = 'auto';
 
-const DEFAULT_FREELLMAPI_INPUT_TOKENS = 32_768;
-const DEFAULT_FREELLMAPI_OUTPUT_TOKENS = 8_192;
-
 function parseModelId(entry: unknown): string | null {
   if (typeof entry === 'string' && isLanguageModelName(entry)) return entry;
   if (!isRecord(entry)) return null;
@@ -26,23 +24,35 @@ function parseModelId(entry: unknown): string | null {
   return null;
 }
 
+function readPositiveSafeInteger(value: unknown): number | null {
+  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
+}
+
 function parseModel(entry: unknown): ModelSpec | null {
   const name = parseModelId(entry);
   if (!name) return null;
-  const type = isRecord(entry) && typeof entry.type === 'string' ? entry.type.toLowerCase() : '';
+  const record = isRecord(entry) ? entry : {};
+  const type = typeof record.type === 'string' ? record.type.toLowerCase() : '';
+  if (record.available === false) return null;
   if (['audio', 'embedding', 'image', 'moderation', 'rerank'].includes(type)) return null;
-  // ponytail: name filter covers catalogues without capabilities; prefer server capability metadata when standardised.
   if (/(^|[/._-])(dall-e|embed(?:ding)?|moderation|tts|whisper)([/._-]|$)/i.test(name)) return null;
-  const label = isRecord(entry) && typeof entry.label === 'string' ? entry.label : name;
+  const label =
+    typeof record.display_name === 'string'
+      ? record.display_name
+      : typeof record.label === 'string'
+        ? record.label
+        : name;
   if (!isLanguageModelName(label)) return null;
-  const maxInputTokens = DEFAULT_FREELLMAPI_INPUT_TOKENS;
-  const maxOutputTokens = DEFAULT_FREELLMAPI_OUTPUT_TOKENS;
-  return {
+  const contextWindowTokens =
+    readPositiveSafeInteger(record.context_window) ??
+    readPositiveSafeInteger(record.context_length);
+  if (contextWindowTokens === null) return null;
+  const model: ModelSpec = {
     name,
     label,
-    maxInputTokens,
-    maxOutputTokens,
+    limits: { kind: 'shared-context', contextWindowTokens },
   };
+  return getModelSpecValidationError(model) === null ? model : null;
 }
 
 function parseBaseUrl(baseUrl: string): URL {
@@ -117,7 +127,18 @@ function resolveModelCandidates(url: URL): URL[] {
     candidates.push(new URL('/models', url));
   }
 
-  return candidates;
+  const seen = new Set<string>();
+  return candidates.filter(function (candidate) {
+    if (seen.has(candidate.href)) return false;
+    seen.add(candidate.href);
+    return true;
+  });
+}
+
+function candidateCatalogueError(message: string) {
+  return createLanguageModelApiError(message, {
+    candidateFailure: true,
+  });
 }
 
 async function discoverModels(url: URL, token?: string): Promise<{ models: ModelSpec[] }> {
@@ -147,7 +168,7 @@ async function discoverModels(url: URL, token?: string): Promise<{ models: Model
 
       for (const entry of rawList) {
         if (!isRecord(entry)) continue;
-        for (const metadata of [entry.id, entry.name, entry.key, entry.label]) {
+        for (const metadata of [entry.id, entry.name, entry.key, entry.label, entry.display_name]) {
           if (
             typeof metadata === 'string' &&
             sanitizeLanguageModelErrorText(metadata, token) !== metadata
@@ -166,25 +187,24 @@ async function discoverModels(url: URL, token?: string): Promise<{ models: Model
           return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
         });
 
+      if (models.length === 0) {
+        throw candidateCatalogueError('FreeLLMAPI returned no compatible text models');
+      }
       const modelIds = new Set<string>();
-      const uniqueModels: ModelSpec[] = [];
       for (const model of models) {
-        if (!modelIds.has(model.name)) {
-          modelIds.add(model.name);
-          uniqueModels.push(model);
+        if (modelIds.has(model.name)) {
+          throw candidateCatalogueError('Duplicate FreeLLMAPI model identifier');
         }
+        modelIds.add(model.name);
       }
-
-      if (uniqueModels.length > 0) {
-        return { models: uniqueModels };
-      }
+      return { models };
     } catch (error) {
-      if (
-        isLanguageModelApiError(error) &&
-        error.metadata.status !== 404 &&
-        error.metadata.status !== 405
-      ) {
-        throw error;
+      if (isLanguageModelApiError(error)) {
+        const candidateFailure =
+          error.metadata.candidateFailure === true ||
+          error.metadata.status === 404 ||
+          error.metadata.status === 405;
+        if (!candidateFailure) throw error;
       }
       lastError = error;
     }
@@ -206,18 +226,7 @@ export async function createFreeLlmApiProvider(options: {
     throw createLanguageModelApiError('Invalid FreeLLMAPI API token');
   }
 
-  const discovered = await discoverModels(url, options.token);
-  const models = discovered.models.some(model => model.name === DEFAULT_FREELLMAPI_MODEL)
-    ? discovered.models
-    : [
-        {
-          name: DEFAULT_FREELLMAPI_MODEL,
-          label: DEFAULT_FREELLMAPI_MODEL,
-          maxInputTokens: DEFAULT_FREELLMAPI_INPUT_TOKENS,
-          maxOutputTokens: DEFAULT_FREELLMAPI_OUTPUT_TOKENS,
-        },
-        ...discovered.models,
-      ];
+  const { models } = await discoverModels(url, options.token);
 
   if (
     options.model &&
@@ -235,6 +244,15 @@ export async function createFreeLlmApiProvider(options: {
   );
 
   const defaultModel = options.model ?? DEFAULT_FREELLMAPI_MODEL;
+  if (
+    !models.some(function (model) {
+      return model.name === defaultModel;
+    })
+  ) {
+    throw createLanguageModelApiError(
+      'FreeLLMAPI auto model is unavailable or lacks context metadata',
+    );
+  }
 
   async function generate(params: LanguageModelGenerateParams) {
     const modelName = params.opts?.modelOverride ?? defaultModel;
@@ -257,19 +275,12 @@ export async function createFreeLlmApiProvider(options: {
     id: 'freellmapi',
     label: 'FreeLLMAPI',
     defaultModel,
-    fallbackModels: models,
+
     service: {
       generate,
     },
-    listModels: async function () {
-      return models.map(function (model) {
-        return model.name;
-      });
-    },
-    getModelSpec: function (modelName) {
-      const model = byName.get(modelName);
-      if (!model) throw new Error('Unknown FreeLLMAPI model');
-      return model;
+    models: async function () {
+      return models;
     },
   };
 }

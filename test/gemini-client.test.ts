@@ -2,13 +2,32 @@ import { test, expect } from 'bun:test';
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createGeminiClient } from '../src/gemini-client';
+import { createGeminiClient, getDebugOpenFlags } from '../src/gemini-client';
 import type { GeminiClient, GeminiResponse } from '../src/gemini-client';
 import { parseCandidates } from '../src/gemini-client/parsers';
 import type { Logger } from '../src/logger';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+async function waitForText(
+  read: () => string | Promise<string>,
+  predicate: (text: string) => boolean,
+): Promise<string> {
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    const text = await read();
+    if (predicate(text)) return text;
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for debug output');
+    await Bun.sleep(10);
+  }
+}
+
+function waitForLog(path: string, predicate: (text: string) => boolean): Promise<string> {
+  return waitForText(function () {
+    return readFile(path, 'utf8').catch(() => '');
+  }, predicate);
 }
 
 async function geminiClientSuccessTest(): Promise<void> {
@@ -39,7 +58,7 @@ async function geminiClientSuccessTest(): Promise<void> {
   try {
     const client: GeminiClient = createGeminiClient({
       fetchImpl: fetchStub as typeof fetch,
-      config: { GEMINI_MAX_RETRIES: 3, GEMINI_RETRY_BASE_MS: 5, GEMINI_RETRY_MAX_MS: 100 },
+      config: { MAX_RETRIES: 3, RETRY_BASE_MS: 5, RETRY_MAX_MS: 100 },
     });
     const res: GeminiResponse | null = await client.callGemini({
       apiKey: 'fake-key',
@@ -58,6 +77,11 @@ async function geminiClientSuccessTest(): Promise<void> {
 }
 test('gemini-client: successTest', geminiClientSuccessTest);
 
+test('gemini-client: uses native debug file creation and append flags', () => {
+  expect(getDebugOpenFlags('darwin')).toEqual({ create: 0x200, append: 0x8 });
+  expect(getDebugOpenFlags('linux')).toEqual({ create: 0x40, append: 0x400 });
+});
+
 test('gemini-client: refuses a symlinked debug log without touching its target', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'gcm-debug-log-'));
   const victim = join(directory, 'victim');
@@ -74,7 +98,12 @@ test('gemini-client: refuses a symlinked debug log without touching its target',
 
     createGeminiClient({ config: { DEBUG_API: true, DEBUG_FILE: debugPath } });
 
-    await Bun.sleep(10);
+    await waitForText(
+      function () {
+        return stderr;
+      },
+      text => text.includes('Refusing to write debug log'),
+    );
     expect(await readFile(victim, 'utf8')).toBe('keep this content intact\n');
     expect(stderr).toContain(
       `Refusing to write debug log ${JSON.stringify(debugPath)}: it is a symbolic link.`,
@@ -123,8 +152,11 @@ test('gemini-client: caps every debug body payload', async () => {
       callOptions: {},
     });
 
-    await Bun.sleep(10);
-    const debugLog = await readFile(debugPath, 'utf8');
+    const debugLog = await waitForLog(
+      debugPath,
+      text =>
+        text.includes('API RESPONSE BODY') && (text.match(/\[TRUNCATED\]/g)?.length ?? 0) >= 2,
+    );
     expect(debugLog).toContain('[TRUNCATED]');
     expect(debugLog).not.toContain(requestTail);
     expect(debugLog).not.toContain(responseTail);
@@ -160,8 +192,10 @@ test('gemini-client: redacts secrets from every debug response body', async () =
       telemetryMeta: {},
       callOptions: {},
     });
-    await Bun.sleep(10);
-    const debugLog = await readFile(debugPath, 'utf8');
+    const debugLog = await waitForLog(
+      debugPath,
+      text => (text.match(/\[REDACTED-KEY\]/g)?.length ?? 0) >= 4,
+    );
     expect(debugLog).toContain('API RESPONSE:');
     expect(debugLog).toContain('API RESPONSE BODY (pretty-printed):');
     expect(debugLog.match(new RegExp(ordinaryText, 'g'))).toHaveLength(2);
@@ -200,8 +234,9 @@ test('gemini-client: redacts debug response secrets before applying the byte cap
       telemetryMeta: {},
       callOptions: {},
     });
-    await Bun.sleep(10);
-    const debugLog = await readFile(debugPath, 'utf8');
+    const debugLog = await waitForLog(debugPath, text =>
+      /API RESPONSE BODY \(pretty-printed\):\n[\s\S]*?\.\.\.\[TRUNCATED\]\n\n/.test(text),
+    );
     const cappedBody =
       /API RESPONSE BODY \(pretty-printed\):\n([\s\S]*?\.\.\.\[TRUNCATED\])\n\n/.exec(
         debugLog,
@@ -243,8 +278,7 @@ test('gemini-client: caps debug bodies at UTF-8 character boundaries', async () 
       callOptions: {},
     });
 
-    await Bun.sleep(10);
-    const debugLog = await readFile(debugPath, 'utf8');
+    const debugLog = await waitForLog(debugPath, text => text.includes('[TRUNCATED]'));
     expect(debugLog).toContain(`API REQUEST USER CONTENT (text):\n<<START>>\né漢...[TRUNCATED]`);
     expect(debugLog).not.toContain('\uFFFD');
 
@@ -263,8 +297,9 @@ test('gemini-client: caps debug bodies at UTF-8 character boundaries', async () 
       telemetryMeta: {},
       callOptions: {},
     });
-    await Bun.sleep(10);
-    const surrogateDebugLog = await readFile(surrogateDebugPath, 'utf8');
+    const surrogateDebugLog = await waitForLog(surrogateDebugPath, text =>
+      text.includes('[TRUNCATED]'),
+    );
     expect(surrogateDebugLog).toContain(
       `API REQUEST USER CONTENT (text):\n<<START>>\né...[TRUNCATED]`,
     );
@@ -309,7 +344,7 @@ async function geminiClientRetryTest(): Promise<void> {
   try {
     const client: GeminiClient = createGeminiClient({
       fetchImpl: fetchStub as typeof fetch,
-      config: { GEMINI_MAX_RETRIES: 3, GEMINI_RETRY_BASE_MS: 5, GEMINI_RETRY_MAX_MS: 100 },
+      config: { MAX_RETRIES: 3, RETRY_BASE_MS: 5, RETRY_MAX_MS: 100 },
     });
     const res: GeminiResponse | null = await client.callGemini({
       apiKey: 'fake-key',
@@ -319,57 +354,48 @@ async function geminiClientRetryTest(): Promise<void> {
     });
     expect(callCount).toBeGreaterThanOrEqual(2);
     expect(res?.text).toContain('BRANCH');
-    console.log('  retryTest -> passed');
   } finally {
     globalThis.fetch = origFetch;
   }
 }
 test('gemini-client: retryTest', geminiClientRetryTest);
 
-async function geminiClientNetworkErrorTest(): Promise<void> {
+async function geminiClientNormalizesAmbiguousPostFailureTest(): Promise<void> {
   let callCount = 0;
   const origFetch = globalThis.fetch;
   async function fetchStub(input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
     void input;
     void _init;
     callCount = callCount + 1;
-    if (callCount <= 3) throw new Error('network fail');
-    return {
-      ok: true,
-      status: 200,
-      text: async function (): Promise<string> {
-        return JSON.stringify({
-          candidates: [
-            {
-              content: {
-                parts: [{ text: 'BRANCH: feat/recovered\nCOMMIT_MESSAGE: feat: recovered' }],
-              },
-            },
-          ],
-          usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 4 },
-        });
-      },
-    } as unknown as Response;
+    throw new Error('network fail');
   }
   globalThis.fetch = fetchStub as typeof fetch;
   try {
     const client: GeminiClient = createGeminiClient({
       fetchImpl: fetchStub as typeof fetch,
-      config: { GEMINI_MAX_RETRIES: 3, GEMINI_RETRY_BASE_MS: 5, GEMINI_RETRY_MAX_MS: 100 },
+      config: { MAX_RETRIES: 3, RETRY_BASE_MS: 5, RETRY_MAX_MS: 100 },
     });
-    const res: GeminiResponse | null = await client.callGemini({
-      apiKey: 'fake-key',
-      userContent: 'hello',
-      telemetryMeta: {},
-      callOptions: { maxOutputTokens: 256 },
+    await expect(
+      client.callGemini({
+        apiKey: 'fake-key',
+        userContent: 'hello',
+        telemetryMeta: {},
+        callOptions: { maxOutputTokens: 256 },
+      }),
+    ).rejects.toMatchObject({
+      name: 'GeminiApiError',
+      message: 'Gemini request failed',
+      metadata: { category: 'network' },
     });
-    expect(res?.text).toContain('BRANCH');
-    console.log('  networkErrorTest -> passed');
+    expect(callCount).toBe(1);
   } finally {
     globalThis.fetch = origFetch;
   }
 }
-test('gemini-client: networkErrorTest', geminiClientNetworkErrorTest);
+test(
+  'gemini-client: normalizes an ambiguous generation network failure without retrying',
+  geminiClientNormalizesAmbiguousPostFailureTest,
+);
 
 async function geminiClientInvalidJsonTest(): Promise<void> {
   const origFetch = globalThis.fetch;
@@ -390,7 +416,7 @@ async function geminiClientInvalidJsonTest(): Promise<void> {
   try {
     const client: GeminiClient = createGeminiClient({
       fetchImpl: fetchStub as typeof fetch,
-      config: { GEMINI_MAX_RETRIES: 3, GEMINI_RETRY_BASE_MS: 5, GEMINI_RETRY_MAX_MS: 100 },
+      config: { MAX_RETRIES: 3, RETRY_BASE_MS: 5, RETRY_MAX_MS: 100 },
     });
     await expect(
       client.callGemini({
@@ -424,7 +450,7 @@ async function geminiClientTimeoutTest(): Promise<void> {
   try {
     const client: GeminiClient = createGeminiClient({
       fetchImpl: fetchStub as typeof fetch,
-      config: { GEMINI_MAX_RETRIES: 3, GEMINI_RETRY_BASE_MS: 5, GEMINI_RETRY_MAX_MS: 100 },
+      config: { MAX_RETRIES: 3, RETRY_BASE_MS: 5, RETRY_MAX_MS: 100 },
     });
     await expect(
       client.callGemini({
@@ -433,7 +459,11 @@ async function geminiClientTimeoutTest(): Promise<void> {
         telemetryMeta: {},
         callOptions: { maxOutputTokens: 256, timeoutMs: 5 },
       }),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({
+      name: 'GeminiApiError',
+      message: 'Gemini request timed out',
+      metadata: { category: 'timeout' },
+    });
   } finally {
     globalThis.fetch = origFetch;
   }
@@ -505,131 +535,7 @@ test(
   geminiClientTruncatedFlagEndTruncatedTest,
 );
 
-async function geminiClientRetryOnTruncatedTest(): Promise<void> {
-  let callCount = 0;
-  const seenMaxOutput: number[] = [];
-  const origFetch = globalThis.fetch;
-  async function fetchStub(_input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    void _input;
-    callCount += 1;
-    try {
-      const body: unknown = init?.body ? JSON.parse(String(init.body)) : {};
-      const generationConfig = isRecord(body) ? body.generationConfig : undefined;
-      const maxOut = isRecord(generationConfig) ? generationConfig.maxOutputTokens : undefined;
-      if (typeof maxOut === 'number') seenMaxOutput.push(maxOut);
-    } catch {
-      // ignore
-    }
-
-    if (callCount === 1) {
-      return {
-        ok: true,
-        status: 200,
-        text: async function (): Promise<string> {
-          return JSON.stringify({
-            candidates: [{ content: { parts: [{ text: 'prefix <<START>>partial result...' }] } }],
-          });
-        },
-      } as unknown as Response;
-    }
-    return {
-      ok: true,
-      status: 200,
-      text: async function (): Promise<string> {
-        return JSON.stringify({
-          candidates: [{ content: { parts: [{ text: 'prefix <<START>>full result<<END>>' }] } }],
-        });
-      },
-    } as unknown as Response;
-  }
-  globalThis.fetch = fetchStub as typeof fetch;
-  try {
-    const client: GeminiClient = createGeminiClient({
-      fetchImpl: fetchStub as typeof fetch,
-      config: { MAX_OUTPUT_TOKENS: 256 },
-    });
-    const res = await client.callGemini({
-      apiKey: 'fake-key',
-      userContent: 'hello',
-      telemetryMeta: {},
-      callOptions: {
-        maxOutputTokens: 256,
-        retryIfTruncated: true,
-        retryIfTruncatedMaxRetries: 2,
-        retryIfTruncatedIncreaseTokens: 100,
-      },
-    });
-    expect(callCount).toBe(2);
-    expect(res?.truncated).toBe(false);
-    expect(seenMaxOutput).toEqual([256, 356]);
-  } finally {
-    globalThis.fetch = origFetch;
-  }
-}
-test(
-  'gemini-client: preserves direct truncated response retries',
-  geminiClientRetryOnTruncatedTest,
-);
-
-async function geminiClientTruncationRetryRespectsModelOutputLimitTest(): Promise<void> {
-  let callCount = 0;
-  const seenMaxOutput: number[] = [];
-  const warnings: string[] = [];
-  async function fetchStub(_input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    void _input;
-    callCount += 1;
-    const requestBody: unknown = init?.body ? JSON.parse(String(init.body)) : null;
-    if (
-      typeof requestBody === 'object' &&
-      requestBody !== null &&
-      'generationConfig' in requestBody
-    ) {
-      const generationConfig = requestBody.generationConfig;
-      if (
-        typeof generationConfig === 'object' &&
-        generationConfig !== null &&
-        'maxOutputTokens' in generationConfig &&
-        typeof generationConfig.maxOutputTokens === 'number'
-      ) {
-        seenMaxOutput.push(generationConfig.maxOutputTokens);
-      }
-    }
-    const responseText =
-      callCount === 1 ? 'prefix <<START>>partial result...' : 'prefix <<START>>full result<<END>>';
-    return new Response(
-      JSON.stringify({ candidates: [{ content: { parts: [{ text: responseText }] } }] }),
-    );
-  }
-
-  const client = createGeminiClient({
-    fetchImpl: fetchStub as typeof fetch,
-    config: { MAX_OUTPUT_TOKENS: 65_536 },
-    logger: {
-      log: function (level, message): void {
-        if (level === 'warn') warnings.push(message);
-      },
-    },
-  });
-  const result = await client.callGemini({
-    apiKey: 'fake-key',
-    userContent: 'hello',
-    telemetryMeta: {},
-    callOptions: { retryIfTruncated: true },
-    modelOverride: 'gemini-3.7-flash',
-  });
-
-  expect(result?.truncated).toBe(true);
-  expect(seenMaxOutput).toEqual([8192]);
-  expect(warnings).toContain(
-    "Gemini response was truncated because the model's output limit was reached.",
-  );
-}
-test(
-  'gemini-client: stops direct truncation retries at the selected model output limit',
-  geminiClientTruncationRetryRespectsModelOutputLimitTest,
-);
-
-test('gemini-client: rejects invalid direct output-token overrides', async () => {
+test('gemini-client: normalises invalid direct output-token overrides', async () => {
   const seen: number[] = [];
   async function fetchStub(_input: string | URL | Request, init?: RequestInit): Promise<Response> {
     const body: unknown = JSON.parse(String(init?.body));
@@ -666,77 +572,7 @@ test('gemini-client: rejects invalid direct output-token overrides', async () =>
   expect(seen).toEqual([8192, 8192]);
 });
 
-test('gemini-client: rejects invalid truncation-retry token increments', async () => {
-  const seen: number[] = [];
-  let callCount = 0;
-  async function fetchStub(_input: string | URL | Request, init?: RequestInit): Promise<Response> {
-    const body = JSON.parse(String(init?.body)) as {
-      generationConfig: { maxOutputTokens: number };
-    };
-    seen.push(body.generationConfig.maxOutputTokens);
-    callCount += 1;
-    const text = callCount % 2 === 1 ? '<<START>>partial' : '<<START>>ok<<END>>';
-    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }));
-  }
-  const client = createGeminiClient({
-    config: { MAX_OUTPUT_TOKENS: 8192 },
-    fetchImpl: fetchStub as typeof fetch,
-  });
-
-  for (const retryIfTruncatedIncreaseTokens of [-1, 1.5]) {
-    await client.callGemini({
-      apiKey: 'fake-key',
-      userContent: 'hello',
-      telemetryMeta: {},
-      callOptions: {
-        maxOutputTokens: 256,
-        retryIfTruncated: true,
-        retryIfTruncatedMaxRetries: 1,
-        retryIfTruncatedIncreaseTokens,
-      },
-      modelOverride: 'gemini-3.7-flash',
-    });
-  }
-
-  expect(seen).toEqual([256, 8192, 256, 8192]);
-});
-
-test('gemini-client: bounds invalid direct truncation-retry counts', async () => {
-  const calls: number[] = [];
-
-  for (const retryIfTruncatedMaxRetries of [-1, 1.5, Number.MAX_SAFE_INTEGER]) {
-    let callCount = 0;
-    async function fetchStub(
-      _input: string | URL | Request,
-      _init?: RequestInit,
-    ): Promise<Response> {
-      callCount += 1;
-      const text = callCount === 1 ? '<<START>>partial' : '<<START>>ok<<END>>';
-      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }));
-    }
-    const client = createGeminiClient({
-      config: { MAX_OUTPUT_TOKENS: 8192 },
-      fetchImpl: fetchStub as typeof fetch,
-    });
-    await client.callGemini({
-      apiKey: 'fake-key',
-      userContent: 'hello',
-      telemetryMeta: {},
-      callOptions: {
-        maxOutputTokens: 256,
-        retryIfTruncated: true,
-        retryIfTruncatedMaxRetries,
-        retryIfTruncatedIncreaseTokens: 256,
-      },
-      modelOverride: 'gemini-3.7-flash',
-    });
-    calls.push(callCount);
-  }
-
-  expect(calls).toEqual([2, 2, 2]);
-});
-
-test('gemini-client: rejects invalid direct timeout values', async () => {
+test('gemini-client: normalises invalid direct timeout values', async () => {
   const aborted: boolean[] = [];
   async function fetchStub(_input: string | URL | Request, init?: RequestInit): Promise<Response> {
     await Bun.sleep(5);
@@ -766,16 +602,13 @@ test('gemini-client: bounds retry config injected through its public factory', a
   let calls = 0;
   async function fetchStub(): Promise<Response> {
     calls += 1;
-    if (calls <= 5) throw new Error('network fail');
-    return new Response(
-      JSON.stringify({ candidates: [{ content: { parts: [{ text: '<<START>>ok<<END>>' }] } }] }),
-    );
+    return new Response('{}', { status: 503 });
   }
   const client = createGeminiClient({
     config: {
-      GEMINI_MAX_RETRIES: Number.POSITIVE_INFINITY,
-      GEMINI_RETRY_BASE_MS: 1,
-      GEMINI_RETRY_MAX_MS: 1,
+      MAX_RETRIES: Number.POSITIVE_INFINITY,
+      RETRY_BASE_MS: 1,
+      RETRY_MAX_MS: 1,
     },
     fetchImpl: fetchStub as unknown as typeof fetch,
   });
@@ -787,7 +620,7 @@ test('gemini-client: bounds retry config injected through its public factory', a
       telemetryMeta: {},
       callOptions: {},
     }),
-  ).rejects.toThrow('network fail');
+  ).rejects.toThrow('Gemini API failed: 503');
   expect(calls).toBe(4);
 });
 
@@ -835,8 +668,7 @@ test('gemini-client: normalizes an unsafe injected debug-body limit', async () =
       telemetryMeta: {},
       callOptions: {},
     });
-    await Bun.sleep(10);
-    const debugLog = await readFile(debugPath, 'utf8');
+    const debugLog = await waitForLog(debugPath, text => text.includes('[TRUNCATED]'));
     expect(debugLog).toContain('[TRUNCATED]');
     expect(debugLog).not.toContain(tail);
   } finally {
@@ -864,57 +696,13 @@ test('gemini-client: preserves a valid debug-body limit above its default', asyn
       telemetryMeta: {},
       callOptions: {},
     });
-    await Bun.sleep(10);
-    const debugLog = await readFile(debugPath, 'utf8');
+    const debugLog = await waitForLog(debugPath, text => text.includes(tail));
     expect(debugLog).not.toContain('[TRUNCATED]');
     expect(debugLog).toContain(tail);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
-
-async function geminiClientRetriesMaxTokensWithoutMarkersTest(): Promise<void> {
-  let callCount = 0;
-  async function fetchStub(_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
-    void _input;
-    void _init;
-    callCount += 1;
-    return {
-      ok: true,
-      status: 200,
-      text: async function (): Promise<string> {
-        return JSON.stringify({
-          candidates: [
-            {
-              finishReason: callCount === 1 ? 'MAX_TOKENS' : 'STOP',
-              content: { parts: [{ text: callCount === 1 ? 'partial result' : 'full result' }] },
-            },
-          ],
-        });
-      },
-    } as unknown as Response;
-  }
-
-  const client = createGeminiClient({ fetchImpl: fetchStub as typeof fetch });
-  const result = await client.callGemini({
-    apiKey: 'fake-key',
-    userContent: 'hello',
-    telemetryMeta: {},
-    callOptions: {
-      maxOutputTokens: 256,
-      retryIfTruncated: true,
-      retryIfTruncatedMaxRetries: 1,
-    },
-  });
-
-  expect(callCount).toBe(2);
-  expect(result?.text).toBe('full result');
-  expect(result?.truncated).toBe(false);
-}
-test(
-  'gemini-client: preserves direct MAX_TOKENS retries without response markers',
-  geminiClientRetriesMaxTokensWithoutMarkersTest,
-);
 
 test('gemini-client: preserves MAX_TOKENS when marker parsing fails', () => {
   const logger: Logger = {
@@ -936,4 +724,12 @@ test('gemini-client: preserves MAX_TOKENS when marker parsing fails', () => {
   );
 
   expect(result?.truncated).toBe(true);
+});
+
+test('gemini-client: ignores END markers before START', () => {
+  const result = parseCandidates({
+    candidates: [{ content: { parts: [{ text: '<<END>>prefix<<START>>message<<END>>' }] } }],
+  });
+
+  expect(result).toMatchObject({ text: 'message', truncated: false });
 });

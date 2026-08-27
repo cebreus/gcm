@@ -4,6 +4,22 @@ import { MAX_CHILD_OUTPUT_BYTES } from './constants.js';
 interface SpawnGitOptions {
   maxBytes?: number;
   execName?: string;
+  timeoutMs?: number;
+  allowTruncated?: boolean;
+}
+
+const PROVIDER_CREDENTIAL_NAMES = new Set([
+  'GOOGLE_GEMINI_API_KEY',
+  'GCM_FREELLMAPI_TOKEN',
+  'LM_API_TOKEN',
+]);
+
+function gitEnvironment(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(function (entry): entry is [string, string] {
+      return entry[1] !== undefined && !PROVIDER_CREDENTIAL_NAMES.has(entry[0]);
+    }),
+  );
 }
 
 export interface SpawnGitLinesResult {
@@ -32,13 +48,16 @@ async function killSpawnedChild(
   } catch {
     /* ignore */
   }
-  setTimeout(() => {
+  const forceKillTimer = setTimeout(() => {
     try {
       child.kill('SIGKILL');
     } catch {
       /* ignore */
     }
   }, 2000);
+  void child.exited.then(function () {
+    clearTimeout(forceKillTimer);
+  });
 }
 
 async function spawnCore(
@@ -48,11 +67,22 @@ async function spawnCore(
   defaultMaxBytes = 1024 * 1024,
 ): Promise<{ truncated: boolean }> {
   const maxBytes = integerInRange(options.maxBytes, 1, MAX_CHILD_OUTPUT_BYTES, defaultMaxBytes);
+  const timeoutMs = integerInRange(options.timeoutMs, 1, 10 * 60 * 1000, 120_000);
   const execName = options.execName ?? 'git';
-  const child = Bun.spawn({ cmd: [execName, ...args], stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn({
+    cmd: [execName, ...args],
+    env: gitEnvironment(),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   let bytes = 0;
   let truncated = false;
+  let timedOut = false;
   const killState = { killed: false };
+  const timeout = setTimeout(function () {
+    timedOut = true;
+    void killSpawnedChild(child, killState);
+  }, timeoutMs);
 
   const stdoutTask = (async (): Promise<void> => {
     const reader = child.stdout?.getReader();
@@ -96,8 +126,16 @@ async function spawnCore(
 
   await stdoutTask;
   const [code, stderr] = await Promise.all([child.exited, stderrTask]);
+  clearTimeout(timeout);
+  if (truncated && !options.allowTruncated) {
+    throw new Error(execName + ' ' + args.join(' ') + ' output was truncated');
+  }
+  if (timedOut) throw new Error('git ' + args.join(' ') + ' timed out');
+  if (truncated && args[0] === 'commit') {
+    throw new Error('git commit output was truncated; the commit result could not be verified');
+  }
   if (code !== 0 && !killState.killed) {
-    throw new Error('git ' + args.join(' ') + ' failed: ' + stderr);
+    throw new Error(execName + ' ' + args.join(' ') + ' failed: ' + stderr);
   }
   return { truncated };
 }

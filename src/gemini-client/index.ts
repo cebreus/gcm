@@ -3,17 +3,14 @@ import { CONFIG } from '../../gcm.config.js';
 import { createLogger } from '../logger.js';
 import type { Logger, LogMetadata } from '../logger.js';
 import { tryParseJSON, parseCandidates } from './parsers.js';
-import { addJitterWithinCap, getRetryMsFromResponse } from './backoff.js';
+import { retryDelayMs } from '../retry-backoff.js';
 import { buildRequestBody } from './requestBuilder.js';
 import { createGeminiApiError, isGeminiApiError } from './errors.js';
 import { redactSensitiveText, unescapeNewlinesInText } from '../utils.js';
 import { DEFAULT_MAX_DEBUG_LOG_BYTES, MAX_DEBUG_LOG_BYTES } from '../constants.js';
 import { normalizeRetryConfig, stringOrDefault } from '../config-values.js';
-import {
-  DEFAULT_MAX_OUTPUT_TOKENS,
-  getEffectiveMaxOutputTokens,
-  getModelSpec,
-} from '../model-registry.js';
+import { requestProviderText } from '../provider-http.js';
+import { DEFAULT_MAX_OUTPUT_TOKENS, getEffectiveMaxOutputTokens } from '../model-registry.js';
 
 export interface GeminiUsage {
   promptTokens: number;
@@ -32,12 +29,6 @@ export interface GeminiCallOpts {
   timeoutMs?: number;
   systemInstructions?: string;
   maxOutputTokens?: number;
-  /** @deprecated Semantic retries should normally be owned by GeminiService. */
-  retryIfTruncated?: boolean;
-  /** @deprecated Semantic retries should normally be owned by GeminiService. */
-  retryIfTruncatedMaxRetries?: number;
-  /** @deprecated Semantic retries should normally be owned by GeminiService. */
-  retryIfTruncatedIncreaseTokens?: number;
 }
 
 export interface GeminiClient {
@@ -58,7 +49,6 @@ interface GeminiClientOptions {
 
 interface CallState {
   attempt: number;
-  truncRetries: number;
   currentMaxOutputTokens: number;
 }
 
@@ -67,9 +57,6 @@ interface CallSetup {
   activeModel: string;
   start: number;
   urlBase: string;
-  truncMaxRetries: number;
-  truncIncrease: number;
-  maxOutputTokensLimit: number;
 }
 
 interface GeminiClientDeps {
@@ -91,6 +78,13 @@ interface DebugFileApi {
 }
 
 const DEBUG_FILE_MODE = 0o600;
+
+export function getDebugOpenFlags(platform: typeof process.platform): {
+  create: number;
+  append: number;
+} {
+  return platform === 'darwin' ? { create: 0x200, append: 0x8 } : { create: 0x40, append: 0x400 };
+}
 
 function createDebugFileApi(): {
   api: DebugFileApi;
@@ -132,9 +126,10 @@ async function openDebugWriter(
   path: string,
 ): Promise<ReturnType<ReturnType<typeof Bun.file>['writer']>> {
   const { api, noFollowFlag, nonBlockFlag, loopError } = createDebugFileApi();
+  const flags = getDebugOpenFlags(process.platform);
   const fileDescriptor = api.open(
     path,
-    0x1 | 0x200 | 0x8 | noFollowFlag | nonBlockFlag,
+    0x1 | flags.create | flags.append | noFollowFlag | nonBlockFlag,
     DEBUG_FILE_MODE,
   );
   if (fileDescriptor < 0) {
@@ -161,13 +156,6 @@ async function openDebugWriter(
   }
 }
 
-function shouldRetryClientError(error: unknown): boolean {
-  if (isGeminiApiError(error)) return false;
-  const errStr = String(error);
-  if (/invalid json|returned no text/i.test(errStr)) return false;
-  return /aborted|network|fetch|timed?\s*out|econnreset|enotfound|eai_again/i.test(errStr);
-}
-
 function reportDebugFlushError(error: unknown): void {
   process.stderr.write('Failed to flush debug log: ' + String(error) + '\n');
 }
@@ -183,6 +171,7 @@ function flushDebugWriter(writer: ReturnType<ReturnType<typeof Bun.file>['writer
 function createDebugLogger(config: Partial<typeof CONFIG>): (label: string, data: unknown) => void {
   let writer: ReturnType<ReturnType<typeof Bun.file>['writer']> | null = null;
   const pending: string[] = [];
+  let disabled = false;
 
   if (config.DEBUG_API && config.DEBUG_FILE) {
     pending.push(`\n\n=== Debug session started: ${new Date().toISOString()} ===\n\n`);
@@ -196,10 +185,12 @@ function createDebugLogger(config: Partial<typeof CONFIG>): (label: string, data
       .catch(function (error: unknown) {
         pending.length = 0;
         process.stderr.write('Failed to create debug logger: ' + String(error) + '\n');
+        disabled = true;
       });
   }
 
   return function writeDebug(label: string, data: unknown): void {
+    if (disabled) return;
     const timestamp = new Date().toISOString();
     const serialized =
       typeof data === 'string' ? data : (JSON.stringify(data, null, 2) ?? String(data));
@@ -289,112 +280,16 @@ function logDebugResponse(
   }
 }
 
-async function fetchWithTimeout(
-  deps: GeminiClientDeps,
-  params: { reqUrl: string; apiKey: string; bodyStr: string; timeoutMs: number },
-): Promise<{ res: Response; textRes: string }> {
-  const { reqUrl, apiKey, bodyStr, timeoutMs } = params;
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
-  try {
-    const res = await deps.fetchImpl(reqUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: bodyStr,
-      signal: controller.signal,
-    });
-    const textRes = await res.text();
-    return { res, textRes };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function handleHttpFailure(
-  deps: GeminiClientDeps,
-  attempt: number,
-  res: Response,
-  textRes: string,
-): Promise<'retry' | 'throw'> {
-  const isRetryableStatus =
-    res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504;
-  if (isRetryableStatus && attempt <= deps.maxRetries) {
-    const retryMs = getRetryMsFromResponse(textRes, deps.retryBaseMs, deps.retryMaxMs, attempt);
-    deps.logger.log(
-      'warn',
-      'Gemini API returned ' +
-        String(res.status) +
-        '; retrying after ' +
-        String(retryMs) +
-        ' ms (attempt ' +
-        String(attempt) +
-        ')',
-    );
-    await Bun.sleep(retryMs);
-    return 'retry';
-  }
-  deps.logger.log('error', 'Gemini API failed: ' + String(res.status), { text: textRes, attempt });
-  throw createGeminiApiError('Gemini API failed: ' + String(res.status), {
-    status: res.status,
-    snippet: textRes.slice(0, 256),
-  });
-}
-
-async function handleNetworkFailure(
-  deps: GeminiClientDeps,
-  attempt: number,
-  err: unknown,
-): Promise<boolean> {
-  if (!(attempt <= deps.maxRetries && shouldRetryClientError(err))) return false;
-  const backoff = Math.min(deps.retryMaxMs, deps.retryBaseMs * 2 ** (attempt - 1));
-  deps.logger.log(
-    'warn',
-    'Network error calling Gemini; retrying (' +
-      String(attempt) +
-      '/' +
-      String(deps.maxRetries) +
-      ') after ' +
-      String(backoff) +
-      'ms',
-    { error: String(err) },
-  );
-  await Bun.sleep(addJitterWithinCap(backoff, deps.retryMaxMs, 300));
-  return true;
-}
-
-async function handleSuccessfulResponse(
+function handleSuccessfulResponse(
   deps: GeminiClientDeps,
   params: {
     textRes: string;
     attempt: number;
     start: number;
     telemetryMeta: LogMetadata;
-    opts: GeminiCallOpts;
-    truncRetries: number;
-    truncMaxRetries: number;
-    truncIncrease: number;
-    currentMaxOutputTokens: number;
-    maxOutputTokensLimit: number;
   },
-): Promise<{
-  retry: boolean;
-  response: GeminiResponse | null;
-  truncRetries: number;
-  currentMaxOutputTokens: number;
-}> {
-  const {
-    textRes,
-    attempt,
-    start,
-    telemetryMeta,
-    opts,
-    truncRetries,
-    truncMaxRetries,
-    truncIncrease,
-    currentMaxOutputTokens,
-  } = params;
+): GeminiResponse {
+  const { textRes, attempt, start, telemetryMeta } = params;
   const json = tryParseJSON(deps.logger, textRes) as {
     promptFeedback?: { blockReason?: string };
     candidates?: unknown[];
@@ -414,47 +309,9 @@ async function handleSuccessfulResponse(
       json,
     });
   }
-  const parsed = parseCandidates(json, deps.logger) as
-    (GeminiResponse & { truncated?: boolean }) | null;
+  const parsed = parseCandidates(json, deps.logger) as GeminiResponse | null;
   if (!parsed) throw createGeminiApiError('Gemini returned no text', { json });
-  if (!(parsed.truncated && opts.retryIfTruncated && truncRetries < truncMaxRetries)) {
-    return { retry: false, response: parsed, truncRetries, currentMaxOutputTokens };
-  }
-  const nextMaxOutputTokens = Math.min(
-    currentMaxOutputTokens + truncIncrease,
-    params.maxOutputTokensLimit,
-  );
-  if (nextMaxOutputTokens === currentMaxOutputTokens) {
-    deps.logger.log(
-      'warn',
-      "Gemini response was truncated because the model's output limit was reached.",
-    );
-    return { retry: false, response: parsed, truncRetries, currentMaxOutputTokens };
-  }
-  const nextTruncRetries = truncRetries + 1;
-  deps.logger.log(
-    'warn',
-    `Gemini response appeared truncated; retrying with higher maxOutputTokens (attempt ${nextTruncRetries}/${truncMaxRetries})`,
-    { previousTextSnippet: parsed.text.slice(0, 256) },
-  );
-  await Bun.sleep(50);
-  return {
-    retry: true,
-    response: null,
-    truncRetries: nextTruncRetries,
-    currentMaxOutputTokens: nextMaxOutputTokens,
-  };
-}
-
-function getTruncationIncrease(value: number | undefined, fallback: number): number {
-  if (value === undefined || !Number.isSafeInteger(value) || value <= 0) return fallback;
-  return value;
-}
-
-function getTruncationMaxRetries(value: number | undefined): number {
-  if (value === undefined) return 1;
-  if (!Number.isSafeInteger(value) || value < 0 || value > 10) return 1;
-  return value;
+  return parsed;
 }
 
 function getTimeoutMs(value: number | undefined): number {
@@ -482,18 +339,18 @@ function normalizeClientConfig(config: typeof CONFIG): typeof CONFIG {
   }
 
   const retry = normalizeRetryConfig({
-    maxRetries: config.GEMINI_MAX_RETRIES,
-    retryBaseMs: config.GEMINI_RETRY_BASE_MS,
-    retryMaxMs: config.GEMINI_RETRY_MAX_MS,
+    maxRetries: config.MAX_RETRIES,
+    retryBaseMs: config.RETRY_BASE_MS,
+    retryMaxMs: config.RETRY_MAX_MS,
   });
   return {
     ...config,
     TEMP: temperature,
     MAX_OUTPUT_TOKENS: maxOutputTokens,
     DEBUG_MAX_BODY_LOG_BYTES: maxDebugBodyLogBytes,
-    GEMINI_MAX_RETRIES: retry.maxRetries,
-    GEMINI_RETRY_BASE_MS: retry.retryBaseMs,
-    GEMINI_RETRY_MAX_MS: retry.retryMaxMs,
+    MAX_RETRIES: retry.maxRetries,
+    RETRY_BASE_MS: retry.retryBaseMs,
+    RETRY_MAX_MS: retry.retryMaxMs,
   };
 }
 
@@ -506,19 +363,11 @@ function buildCallSetup(
   const activeModel = stringOrDefault(modelOverride, config.MODEL);
   const urlBase =
     'https://generativelanguage.googleapis.com/v1beta/models/' + activeModel + ':generateContent';
-  const truncMaxRetries = getTruncationMaxRetries(opts.retryIfTruncatedMaxRetries);
-  const truncIncrease = getTruncationIncrease(
-    opts.retryIfTruncatedIncreaseTokens,
-    getEffectiveMaxOutputTokens(activeModel, config.MAX_OUTPUT_TOKENS),
-  );
   return {
     opts,
     activeModel,
     start: Date.now(),
     urlBase,
-    truncMaxRetries,
-    truncIncrease,
-    maxOutputTokensLimit: getModelSpec(activeModel).maxOutputTokens,
   };
 }
 
@@ -528,24 +377,14 @@ async function applySuccessfulOutcome(params: {
   telemetryMeta: LogMetadata;
   setup: CallSetup;
   state: CallState;
-}): Promise<'retry' | GeminiResponse | null> {
+}): Promise<GeminiResponse | null> {
   const { deps, textRes, telemetryMeta, setup, state } = params;
-  const success = await handleSuccessfulResponse(deps, {
+  return handleSuccessfulResponse(deps, {
     textRes,
     attempt: state.attempt,
     start: setup.start,
     telemetryMeta,
-    opts: setup.opts,
-    truncRetries: state.truncRetries,
-    truncMaxRetries: setup.truncMaxRetries,
-    truncIncrease: setup.truncIncrease,
-    currentMaxOutputTokens: state.currentMaxOutputTokens,
-    maxOutputTokensLimit: setup.maxOutputTokensLimit,
   });
-  state.truncRetries = success.truncRetries;
-  state.currentMaxOutputTokens = success.currentMaxOutputTokens;
-  if (success.retry) return 'retry';
-  return success.response;
 }
 
 async function runCallAttempt(params: {
@@ -555,32 +394,67 @@ async function runCallAttempt(params: {
   telemetryMeta: LogMetadata;
   setup: CallSetup;
   state: CallState;
-}): Promise<'retry' | GeminiResponse | null> {
+}): Promise<GeminiResponse | null> {
   const { deps, apiKey, userContent, telemetryMeta, setup, state } = params;
-  state.attempt += 1;
   const body = buildRequestBody(userContent, deps.config, {
     ...setup.opts,
     maxOutputTokens: state.currentMaxOutputTokens,
   });
+  const bodyStr = JSON.stringify(body);
+  let result;
   try {
-    const timeoutMs = getTimeoutMs(setup.opts.timeoutMs);
-    const bodyStr = JSON.stringify(body);
-    logDebugRequest({ deps, attempt: state.attempt, reqUrl: setup.urlBase, body, bodyStr });
-    const { res, textRes } = await fetchWithTimeout(deps, {
-      reqUrl: setup.urlBase,
-      apiKey,
-      bodyStr,
-      timeoutMs,
+    result = await requestProviderText({
+      url: new URL(setup.urlBase),
+      init: {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: bodyStr,
+      },
+      timeoutMs: getTimeoutMs(setup.opts.timeoutMs),
+      retry: {
+        maxRetries: deps.maxRetries,
+        retryBaseMs: deps.retryBaseMs,
+        retryMaxMs: deps.retryMaxMs,
+      },
+      retryNetworkErrors: false,
+      fetchImpl: deps.fetchImpl,
+      onAttempt: function (attempt) {
+        state.attempt = attempt;
+        logDebugRequest({ deps, attempt, reqUrl: setup.urlBase, body, bodyStr });
+      },
+      onResponse: function ({ response, body: responseBody, attempt }) {
+        logDebugResponse(deps, attempt, response, responseBody);
+      },
+      onRetry: function (status, attempt, delayMs) {
+        deps.logger.log(
+          'warn',
+          `Gemini API returned ${String(status)}; retrying after ${String(delayMs)} ms (attempt ${String(attempt)})`,
+        );
+      },
     });
-    logDebugResponse(deps, state.attempt, res, textRes);
-    if (res.ok) return applySuccessfulOutcome({ deps, textRes, telemetryMeta, setup, state });
-    const httpOutcome = await handleHttpFailure(deps, state.attempt, res, textRes);
-    if (httpOutcome === 'retry') return 'retry';
-    return null;
-  } catch (err) {
-    if (await handleNetworkFailure(deps, state.attempt, err)) return 'retry';
-    throw err;
+  } catch (error) {
+    const timedOut =
+      error instanceof Error && /abort|timeout/i.test(error.name + ' ' + error.message);
+    const bodyTooLarge = error instanceof Error && error.message === 'response body too large';
+    if (bodyTooLarge) {
+      throw createGeminiApiError('Gemini response body is too large', { category: 'data' });
+    }
+    if (timedOut) {
+      throw createGeminiApiError('Gemini request timed out', { category: 'timeout' });
+    }
+    throw createGeminiApiError('Gemini request failed', { category: 'network' });
   }
+  if (!result.response.ok) {
+    deps.logger.log('error', 'Gemini API failed: ' + String(result.response.status), {
+      text: result.body,
+      attempt: result.attempt,
+    });
+    throw createGeminiApiError('Gemini API failed: ' + String(result.response.status), {
+      status: result.response.status,
+      snippet: result.body.slice(0, 256),
+    });
+  }
+  return applySuccessfulOutcome({ deps, textRes: result.body, telemetryMeta, setup, state });
 }
 
 export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiClient {
@@ -594,9 +468,9 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
     logger,
     writeDebug,
     fetchImpl,
-    maxRetries: config.GEMINI_MAX_RETRIES,
-    retryBaseMs: config.GEMINI_RETRY_BASE_MS,
-    retryMaxMs: config.GEMINI_RETRY_MAX_MS,
+    maxRetries: config.MAX_RETRIES,
+    retryBaseMs: config.RETRY_BASE_MS,
+    retryMaxMs: config.RETRY_MAX_MS,
   };
 
   const callGemini = async ({
@@ -616,27 +490,15 @@ export function createGeminiClient(userOptions?: GeminiClientOptions): GeminiCli
     const setup = buildCallSetup(config, callOptions, modelOverride);
     const state: CallState = {
       attempt: 0,
-      truncRetries: 0,
       currentMaxOutputTokens: getEffectiveMaxOutputTokens(
-        setup.activeModel,
         setup.opts.maxOutputTokens ?? config.MAX_OUTPUT_TOKENS,
+        Number.MAX_SAFE_INTEGER,
       ),
     };
 
-    for (;;) {
-      const outcome = await runCallAttempt({
-        deps,
-        apiKey,
-        userContent,
-        telemetryMeta,
-        setup,
-        state,
-      });
-      if (outcome === 'retry') continue;
-      return outcome;
-    }
+    return runCallAttempt({ deps, apiKey, userContent, telemetryMeta, setup, state });
   };
   return { callGemini };
 }
 
-export { tryParseJSON, parseCandidates, getRetryMsFromResponse };
+export { tryParseJSON, parseCandidates, retryDelayMs as getRetryMsFromResponse };

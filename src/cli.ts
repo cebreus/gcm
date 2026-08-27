@@ -57,7 +57,7 @@ function validateOutputMode(value: string): void {
   }
 }
 
-export interface CliOptionDefinition {
+interface CliOptionDefinition {
   name: string;
   aliases: string[];
   usage: string;
@@ -232,10 +232,17 @@ function validateValueDefinition(
 
 function validateArgs(argv: string[]): void {
   const seenValueFlags = new Set<string>();
+  let positionalCount = 0;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === '--') return;
-    if (argument === '-' || !argument.startsWith('-')) continue;
+    if (argument === '--') {
+      positionalCount += argv.length - index - 1;
+      break;
+    }
+    if (argument === '-' || !argument.startsWith('-')) {
+      positionalCount += 1;
+      continue;
+    }
     const equalsIndex = argument.indexOf('=');
     const flag = equalsIndex === -1 ? argument : argument.slice(0, equalsIndex);
     if (flag === '-') throw createArgumentValidationError('Unknown flag: -');
@@ -249,6 +256,7 @@ function validateArgs(argv: string[]): void {
     validateValueDefinition(valueFlag, value, seenValueFlags);
     index += Number(equalsIndex === -1);
   }
+  if (positionalCount > 0) throw createArgumentValidationError('Unexpected positional argument');
 }
 
 function normaliseExcludeValues(argv: string[]): string[] {

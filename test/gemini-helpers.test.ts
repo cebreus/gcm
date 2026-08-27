@@ -55,7 +55,7 @@ function geminiHelpersGetRetryMsFromResponseTest(): void {
     60000,
     1,
   );
-  expect(negativeMs).toBe(0);
+  expect(negativeMs).toBe(1000);
   // fallback path (no details): returns exponential backoff
   const ms2 = getRetryMsFromResponse('{}', 1000, 60000, 2);
   // attempt=2 => base <= ms2 <= retryMax + jitter
@@ -106,6 +106,7 @@ function geminiHelpersParseCandidatesMarkersTest(): void {
   };
   const parsedComplete = parseCandidates(jsonComplete, logger);
   expect(parsedComplete?.text).toBe('the important part');
+  expect(warned).toBe(false);
 
   const jsonMissingEnd = {
     candidates: [
@@ -122,3 +123,14 @@ test(
   'gemini-helpers: parseCandidates markers and missing end warning',
   geminiHelpersParseCandidatesMarkersTest,
 );
+
+test('gemini-helpers: skips candidates empty after normalisation', () => {
+  const parsed = parseCandidates({
+    candidates: [
+      { content: { parts: [{ text: '<<START>>   <<END>>' }] } },
+      { content: { parts: [{ text: 'feat: usable candidate' }] } },
+    ],
+  });
+
+  expect(parsed?.text).toBe('feat: usable candidate');
+});

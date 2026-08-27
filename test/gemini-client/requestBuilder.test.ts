@@ -39,11 +39,9 @@ test('requestBuilder: should include system instructions when provided', () => {
 });
 
 test('requestBuilder: should use temp from config', () => {
-  testConfig.TEMP = 0.5;
-  const body = buildRequestBody('test content', testConfig, {});
+  const config = { ...testConfig, TEMP: 0.5 };
+  const body = buildRequestBody('test content', config, {});
   expect(body.generationConfig.temperature).toBe(0.5);
-  // Reset for other tests
-  testConfig.TEMP = CONFIG.TEMP;
 });
 
 test('requestBuilder: should build a valid request body with all options', () => {

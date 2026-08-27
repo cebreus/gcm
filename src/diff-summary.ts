@@ -20,6 +20,7 @@ export interface DiffSummaryPolicy {
 export interface SummarizeDiffResult {
   text: string;
   numHunks: number;
+  numSkippedFiles: number;
   totalTruncated: number;
 }
 
@@ -112,6 +113,13 @@ function buildSummaryOutput(
     }
     output += hunkText;
   }
+  if (totalTruncated > 0) {
+    output = appendWithinLimit(
+      output,
+      `\n... (${totalTruncated} files truncated by per-file buffer) ...`,
+      limitBytes,
+    );
+  }
   return truncateUtf8(output, limitBytes);
 }
 
@@ -135,6 +143,7 @@ export function summarizeDiff(
   return {
     text: buildSummaryOutput(stats, topHunks, skippedFiles, totalTruncated, policy.maxOutputBytes),
     numHunks: topHunks.length,
+    numSkippedFiles: skippedFiles.length,
     totalTruncated,
   };
 }

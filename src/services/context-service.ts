@@ -7,6 +7,7 @@ export interface ContextService {
     promptParts: PromptContextParts;
     stagedFiles?: string[];
     summaryAttempted: boolean;
+    targetCommit?: string;
   }): Promise<RetryReductionResult>;
 }
 
@@ -30,11 +31,15 @@ export type RetryReductionResult =
 interface DiffSummary {
   text: string;
   numHunks: number;
+  numSkippedFiles?: number;
   totalTruncated: number;
 }
 
 interface ContextServiceDeps {
-  summarizeLargeDiff(stagedFiles: string[]): Promise<DiffSummary>;
+  summarizeLargeDiff(
+    stagedFiles: string[],
+    options?: { targetCommit?: string },
+  ): Promise<DiffSummary>;
 }
 
 interface ContextParams {
@@ -48,6 +53,7 @@ interface ContextParams {
   logger: Logger | null;
   customHeader?: string;
   userHint?: string;
+  targetCommit?: string;
 }
 
 export interface ContextResult {
@@ -126,7 +132,19 @@ function truncateToTokenBudget(
   maxTokens: number,
   tokenBytesRatio: number,
 ): string {
-  return content.slice(0, Math.max(0, Math.floor(maxTokens * tokenBytesRatio)));
+  const maxBytes = Math.max(0, Math.floor(maxTokens * tokenBytesRatio));
+  const encoded = new TextEncoder().encode(content);
+  if (encoded.byteLength <= maxBytes) return content;
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let end = maxBytes;
+  while (end > 0) {
+    try {
+      return decoder.decode(encoded.slice(0, end));
+    } catch {
+      end -= 1;
+    }
+  }
+  return '';
 }
 
 function buildHardTruncatedContext(params: {
@@ -181,6 +199,7 @@ async function constructLLMPromptContext(
     logger,
     customHeader,
     userHint,
+    targetCommit,
   }: ContextParams,
   summarize: ContextServiceDeps['summarizeLargeDiff'],
 ): Promise<ContextResult> {
@@ -206,7 +225,11 @@ async function constructLLMPromptContext(
     'info',
     `Input token count (${estimatedTokens}) exceeds limit (${maxAvailableTokens}). Summarizing diff...`,
   );
-  const summaryText = (await summarize(stagedFiles)).text;
+  const summary = await summarize(stagedFiles, { targetCommit });
+  const summaryText = summary.text;
+  if (diffContent.trim() && !hasSummaryEvidence(summary)) {
+    throw new Error('Diff summary contains no evidence for a non-empty diff');
+  }
   const summaryParts = {
     prefix: header + changedFilesSection + contextHeader,
     diffHeading: 'Diff summary:\n',
@@ -226,6 +249,10 @@ async function constructLLMPromptContext(
     maxAvailableTokens,
     tokenBytesRatio,
   });
+}
+
+function hasSummaryEvidence(summary: DiffSummary): boolean {
+  return summary.numHunks > 0 || (summary.numSkippedFiles ?? 0) > 0;
 }
 
 function buildRetrySummaryBody(summary: DiffSummary): string {
@@ -283,16 +310,21 @@ async function reduceForRetry(
     promptParts,
     stagedFiles,
     summaryAttempted,
+    targetCommit,
   }: {
     promptParts: PromptContextParts;
     stagedFiles?: string[];
     summaryAttempted: boolean;
+    targetCommit?: string;
   },
   summarize: ContextServiceDeps['summarizeLargeDiff'],
 ): Promise<RetryReductionResult> {
   const currentPrompt = renderPromptContext(promptParts);
   if (!summaryAttempted && Array.isArray(stagedFiles) && stagedFiles.length > 0) {
-    const summary = await summarize(stagedFiles);
+    const summary = await summarize(stagedFiles, { targetCommit });
+    if (!hasSummaryEvidence(summary)) {
+      throw new Error('Diff summary contains no evidence for a non-empty diff');
+    }
     const summaryParts = {
       prefix: promptParts.prefix,
       diffHeading: 'Diff summary:\n',

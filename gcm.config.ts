@@ -12,9 +12,9 @@ import {
 import { DEFAULT_MAX_OUTPUT_TOKENS } from './src/model-registry.js';
 
 const retry = normalizeRetryConfig({
-  maxRetries: process.env.GCM_GEMINI_MAX_RETRIES,
-  retryBaseMs: process.env.GCM_GEMINI_RETRY_BASE_MS,
-  retryMaxMs: process.env.GCM_GEMINI_RETRY_MAX_MS,
+  maxRetries: process.env.GCM_MAX_RETRIES ?? process.env.GCM_GEMINI_MAX_RETRIES,
+  retryBaseMs: process.env.GCM_RETRY_BASE_MS ?? process.env.GCM_GEMINI_RETRY_BASE_MS,
+  retryMaxMs: process.env.GCM_RETRY_MAX_MS ?? process.env.GCM_GEMINI_RETRY_MAX_MS,
 });
 
 export const CONFIG = {
@@ -50,9 +50,9 @@ export const CONFIG = {
     MAX_DEBUG_LOG_BYTES,
     DEFAULT_MAX_DEBUG_LOG_BYTES,
   ),
-  GEMINI_MAX_RETRIES: retry.maxRetries,
-  GEMINI_RETRY_BASE_MS: retry.retryBaseMs,
-  GEMINI_RETRY_MAX_MS: retry.retryMaxMs,
+  MAX_RETRIES: retry.maxRetries,
+  RETRY_BASE_MS: retry.retryBaseMs,
+  RETRY_MAX_MS: retry.retryMaxMs,
   FREELLMAPI_URL: stringOrDefault(process.env.GCM_FREELLMAPI_URL, 'http://127.0.0.1:3001'),
   FREELLMAPI_MODEL: process.env.GCM_FREELLMAPI_MODEL ?? 'auto',
   FREELLMAPI_TOKEN: process.env.GCM_FREELLMAPI_TOKEN,
