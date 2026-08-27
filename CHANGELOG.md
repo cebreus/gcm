@@ -1,5 +1,17 @@
 # gcm
 
+## 0.11.0
+
+> Providers now discover and validate their model catalogue at runtime, eliminating the hard-coded model list and the edge-case failures that came with it. A GitHub Actions pipeline was added to catch regressions before they reach the main branch.
+
+### Minor Changes
+
+- **core:** Providers now fetch their model catalogue at runtime with validated token limits, so the model picker is always current; Gemini paginates the full API catalogue and filters non-text models, FreeLLMAPI and LM Studio require a published context window, generation fails fast on no response instead of silently producing a placeholder, amend! commits rejected by hooks are rolled back automatically, git status is parsed in NUL-delimited format to handle paths with special characters, branch names are sanitised against edge cases, dist/ is excluded from analysis by default, and retry variables were renamed to GCM_MAX_RETRIES / GCM_RETRY_BASE_MS / GCM_RETRY_MAX_MS (old GCM_GEMINI_* names remain as aliases).
+
+### Patch Changes
+
+- **workflow:** Added a GitHub Actions pipeline that runs type-checking, linting, the full test suite and a binary build on every push and pull request, so regressions are caught before they reach the main branch.
+
 ## 0.10.0
 
 > CLI automation and provider selection are expanded: GCM introduces non-interactive execution,
