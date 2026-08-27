@@ -159,7 +159,10 @@ beforeAll(async () => {
 
   await Bun.write(
     providerPreload,
-    `globalThis.fetch = async function () {
+    `globalThis.fetch = async function (input) {
+      if (!String(input).includes('generateContent')) {
+        return Response.json({ models: [{ name: 'models/gemini-3.7-flash', displayName: 'Gemini 3.7 Flash', supportedGenerationMethods: ['generateContent'], inputTokenLimit: 1048576, outputTokenLimit: 65536 }] });
+      }
       return new Response(JSON.stringify({
         candidates: [{ content: { parts: [{ text: '<<START>>fix: corrected message<<END>>' }] } }],
         usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 4 }
@@ -209,7 +212,6 @@ beforeAll(async () => {
   await Bun.write(`${whitespaceRepository}/document.txt`, 'first line \n');
   await runCommand(['git', 'add', 'document.txt'], whitespaceRepository);
 
-  await runCommand(['mkdir', '-p', './-generated'], excludeRepository);
   await Bun.write(`${excludeRepository}/-generated/sentinel.txt`, 'do not send\n');
   await Bun.write(`${excludeRepository}/included.txt`, 'send this\n');
   await runCommand(
@@ -271,7 +273,7 @@ test.skipIf(expectPath === null)(
 );
 
 test('binary contract: reports its bundled package version outside the repository', async () => {
-  const result = await runBinary(['--version']);
+  const result = await runBinary(['--version'], nonRepository);
 
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toBe(`gcm ${packageVersion}\n`);
@@ -392,20 +394,18 @@ test('binary contract: accepts clustered boolean flags', async () => {
   expect(result.stdout).not.toContain('Unknown flag');
 });
 
-test('binary contract: treats a lone dash as positional', async () => {
+test('binary contract: rejects a lone positional argument', async () => {
   const result = await runBinary(['-']);
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain('No staged changes found');
-  expect(result.stdout).not.toContain('Unknown flag');
+  expect(result.stdout).toContain('Unexpected positional argument');
 });
 
-test('binary contract: stops parsing options after --', async () => {
+test('binary contract: rejects positional arguments after --', async () => {
   const result = await runBinary(['--', '--', '--commmit']);
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain('No staged changes found');
-  expect(result.stdout).not.toContain('Unknown flag');
+  expect(result.stdout).toContain('Unexpected positional argument');
 });
 
 test('binary contract: excludes a dash-prefixed sentinel from the changed-file set', async () => {

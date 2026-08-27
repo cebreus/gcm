@@ -7,7 +7,11 @@ async function gitUtilsKillSignalTest(): Promise<void> {
   const script = `process.on('SIGTERM', ()=>{ console.log('GOT_SIGTERM'); process.exit(0); }); let i=0; setInterval(()=>{ console.log('line'+(i++)); }, 1);`;
   const args = ['-e', script];
   const maxBytes = 1024; // 1 KB cap
-  const res: SpawnGitStreamResult = await spawnGitStream(args, { maxBytes, execName: 'bun' });
+  const res: SpawnGitStreamResult = await spawnGitStream(args, {
+    maxBytes,
+    execName: 'bun',
+    allowTruncated: true,
+  });
   expect(res.truncated).toBe(true);
   expect(typeof res.text === 'string' && res.text.length > 0).toBe(true);
   // On some runtimes (like Bun) the child may not always print the SIGTERM handler output
@@ -18,15 +22,25 @@ test('git-utils: killSignalTest', gitUtilsKillSignalTest);
 
 test('git-utils: accepts a non-zero exit caused by its truncation kill', async function () {
   const script = `process.on('SIGTERM', () => process.exit(1)); console.log('x'.repeat(2048)); setInterval(() => {}, 1000);`;
-  const result = await spawnGitStream(['-e', script], { maxBytes: 1024, execName: 'bun' });
+  const result = await spawnGitStream(['-e', script], {
+    maxBytes: 1024,
+    execName: 'bun',
+    allowTruncated: true,
+  });
 
   expect(result.truncated).toBe(true);
+});
+
+test('git-utils: times out a Git process that does not produce output', async function () {
+  await expect(
+    spawnGitStream(['-e', 'setInterval(() => {}, 1_000)'], { execName: 'bun', timeoutMs: 20 }),
+  ).rejects.toThrow('timed out');
 });
 
 test('git-utils: throws when a command fails after producing truncated output', async function () {
   const script = `console.log('x'.repeat(2048)); process.exit(1);`;
 
   await expect(spawnGitStream(['-e', script], { maxBytes: 1024, execName: 'bun' })).rejects.toThrow(
-    'failed:',
+    'output was truncated',
   );
 });

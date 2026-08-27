@@ -3,8 +3,6 @@ import type { ParsedOptions } from './cli.js';
 import { CONFIG } from '../gcm.config.js';
 import { createLogger } from './logger.js';
 import type { Logger, LoggerConfig } from './logger.js';
-import { createGeminiClient } from './gemini-client.js';
-import { listGeminiModels } from './gemini-client/listModels.js';
 import { runListModelsCommand } from './list-models-command.js';
 import { runListProvidersCommand } from './list-providers-command.js';
 import { createGitService } from './services/git-service.js';
@@ -15,20 +13,16 @@ import { readCommitContextFacts } from './services/repository-context.js';
 import { summarizeRepositoryDiff } from './services/repository-summary.js';
 import { createContextService } from './services/context-service.js';
 import type { ContextService } from './services/context-service.js';
-import { createGeminiService } from './services/gemini-service.js';
-import { createLmStudioProvider } from './lm-studio-provider.js';
-import { createFreeLlmApiProvider } from './freellmapi-provider.js';
-import type {
-  LanguageModelProvider,
-  LanguageModelProviderFactory,
-  LanguageModelService,
-} from './language-model-service.js';
+import type { LanguageModelProvider } from './language-model-service.js';
 import {
   getLanguageModelProviderValidationError,
-  isLanguageModelProviderId,
   isLanguageModelName,
 } from './language-model-service.js';
-import { getModelSpec, KNOWN_MODELS } from './model-registry.js';
+import {
+  createProviderFactories,
+  getProviderFactoriesValidationError,
+  type ProviderFactoryOptions,
+} from './provider-factories.js';
 import { loadSession, saveSession } from './session.js';
 import {
   intro,
@@ -121,15 +115,11 @@ ${options}
   process.stdout.write(helpText.trim() + '\n');
 }
 
-export interface RunnerOptions {
+export interface RunnerOptions extends ProviderFactoryOptions {
   isInteractive?: boolean;
   logger?: Logger;
   gitService?: GitService;
   contextService?: ContextService;
-  geminiService?: LanguageModelService;
-  languageModelProvider?: LanguageModelProvider;
-  languageModelProviderFactories?: LanguageModelProviderFactory[];
-  geminiModelLister?: (credential: string) => Promise<string[]>;
 }
 
 function createRunnerDialogue(
@@ -158,10 +148,9 @@ function createRunnerDialogue(
         await clipboardy.write(message);
       },
     },
-    listModels: async function () {
-      return provider.listModels();
+    models: function () {
+      return provider.models();
     },
-    fallbackModels: provider.fallbackModels,
     providers,
     logger,
   });
@@ -188,121 +177,14 @@ function createRunnerServices(
     languageModelService: provider.service,
     providerId: provider.id,
     providerLabel: provider.label,
-    getModelSpec: provider.getModelSpec,
+    models: function () {
+      return provider.models();
+    },
     dialogue,
     commitActions,
     getCommitContextHints: resolveCommitContextHints,
     saveSession,
   };
-}
-
-function createGeminiProvider(
-  opts: RunnerOptions,
-  logger: Logger,
-  debugApi = false,
-): LanguageModelProvider {
-  const apiKey = process.env.GOOGLE_GEMINI_API_KEY ?? '';
-  const service: LanguageModelService =
-    opts.geminiService ??
-    createGeminiService({
-      client: createGeminiClient({
-        config: { ...CONFIG, DEBUG_API: debugApi || CONFIG.DEBUG_API },
-        logger,
-      }),
-      logger,
-      apiKey,
-    });
-  const listModels = opts.geminiModelLister ?? listGeminiModels;
-  return {
-    id: 'gemini',
-    label: 'Gemini',
-    readinessError: apiKey ? undefined : 'Environment variable GOOGLE_GEMINI_API_KEY not set.',
-    defaultModel: CONFIG.MODEL,
-    fallbackModels: KNOWN_MODELS,
-    service,
-    listModels: function () {
-      if (!apiKey) throw new Error('GOOGLE_GEMINI_API_KEY is not set.');
-      return listModels(apiKey).then(function (models) {
-        return models
-          .map(model => model.replace(/^models\//, ''))
-          .filter(model => model.startsWith('gemini-'))
-          .filter(
-            model =>
-              !/(embedding|image|tts|audio|live|robotics|computer-use|veo|imagen)/i.test(model),
-          );
-      });
-    },
-    getModelSpec,
-  };
-}
-
-function getProviderFactories(opts: RunnerOptions, logger: Logger, debugApi = false) {
-  if (opts.languageModelProvider) {
-    const provider = opts.languageModelProvider;
-    return [
-      {
-        id: provider.id,
-        label: provider.label,
-        create: async function () {
-          return provider;
-        },
-      },
-    ];
-  }
-  return (
-    opts.languageModelProviderFactories ?? [
-      {
-        id: 'gemini',
-        label: 'Gemini',
-        create: async function () {
-          return createGeminiProvider(opts, logger, debugApi);
-        },
-      },
-      {
-        id: 'freellmapi',
-        label: 'FreeLLMAPI',
-        create: async function () {
-          return createFreeLlmApiProvider({
-            baseUrl: CONFIG.FREELLMAPI_URL,
-            model: CONFIG.FREELLMAPI_MODEL,
-            token: CONFIG.FREELLMAPI_TOKEN,
-            temperature: CONFIG.TEMP,
-            maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS,
-          });
-        },
-      },
-      {
-        id: 'lm-studio',
-        label: 'LM Studio',
-        create: async function (factoryOptions) {
-          return createLmStudioProvider({
-            baseUrl: process.env.GCM_LM_STUDIO_URL ?? 'http://127.0.0.1:1234',
-            model: process.env.GCM_LM_STUDIO_MODEL,
-            token: process.env.LM_API_TOKEN,
-            temperature: CONFIG.TEMP,
-            maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS,
-            probeOnly: factoryOptions?.probeOnly,
-          });
-        },
-      },
-    ]
-  );
-}
-
-function getProviderFactoriesValidationError(
-  factories: ReturnType<typeof getProviderFactories>,
-): string | null {
-  if (factories.length === 0) return 'No language model provider available';
-  const ids = new Set<string>();
-  for (const factory of factories) {
-    if (!isLanguageModelProviderId(factory.id)) return 'Invalid language model provider id';
-    if (!/^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$/u.test(factory.label)) {
-      return 'Invalid language model provider label';
-    }
-    if (ids.has(factory.id)) return 'Duplicate language model provider id';
-    ids.add(factory.id);
-  }
-  return null;
 }
 
 function createRunnerOutput(
@@ -355,8 +237,8 @@ async function maybeHandleListModels(
   return runListModelsCommand({
     providerLabel: provider.label,
     readinessError: provider.readinessError,
-    listModels: function () {
-      return provider.listModels();
+    models: function () {
+      return provider.models();
     },
     output: { cancel, note, outro },
   });
@@ -491,7 +373,7 @@ export async function executeCommitMessageGeneration(
       process.exitCode = 0;
       return;
     }
-    const factories = getProviderFactories(opts, logger, parsedArgs.debug);
+    const factories = createProviderFactories(opts, logger, parsedArgs.debug);
     const factoriesError = getProviderFactoriesValidationError(factories);
     if (factoriesError) {
       cancel(`Error: ${factoriesError}.`);

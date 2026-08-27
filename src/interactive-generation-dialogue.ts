@@ -50,8 +50,7 @@ interface PromptOption {
 export interface DialogueDependencies {
   prompts: PromptAdapter;
   clipboard: { write(message: string): Promise<void> };
-  listModels(): Promise<string[]>;
-  fallbackModels: ModelSpec[];
+  models(): Promise<ModelSpec[]>;
   providers: Array<{ id: string; label: string }>;
   logger: Pick<Logger, 'log'>;
 }
@@ -79,56 +78,20 @@ export interface InteractiveGenerationDialogue {
 type ActionChoice =
   'commit' | 'copy' | 'edit' | 'regenerate' | 'regenerate-hint' | 'switch' | 'cancel';
 
-function toModelOption(name: string, knownModels: ModelSpec[]): PromptOption {
-  const knownModel = knownModels.find(function (model) {
-    return model.name === name;
-  });
-
-  if (knownModel) {
-    return {
-      value: knownModel.name,
-      label: stripTerminalControlSequences(knownModel.label).replace(/[\r\n\t]/g, ' '),
-      hint: stripTerminalControlSequences(knownModel.description ?? '').replace(/[\r\n\t]/g, ' '),
-    };
-  }
-
+function toModelOption(model: ModelSpec): PromptOption {
   return {
-    value: name,
-    label: name,
-    hint: 'Available from provider',
+    value: model.name,
+    label: stripTerminalControlSequences(model.label).replace(/[\r\n\t]/g, ' '),
+    hint: stripTerminalControlSequences(model.description ?? '').replace(/[\r\n\t]/g, ' '),
   };
 }
 
 async function getModelSelectionOptions(
   dependencies: DialogueDependencies,
 ): Promise<PromptOption[]> {
-  const knownModels = dependencies.fallbackModels;
-  try {
-    const apiModels = await dependencies.listModels();
-    const uniqueModels = [...new Set(apiModels)].filter(isLanguageModelName);
-
-    if (uniqueModels.length > 0) {
-      return uniqueModels.map(function (name) {
-        return toModelOption(name, knownModels);
-      });
-    }
-  } catch (error) {
-    dependencies.logger.log(
-      'debug',
-      'Failed to load live model list; falling back to known models',
-      {
-        error: String(error),
-      },
-    );
-  }
-
-  return knownModels.map(function (model) {
-    return {
-      value: model.name,
-      label: stripTerminalControlSequences(model.label).replace(/[\r\n\t]/g, ' '),
-      hint: stripTerminalControlSequences(model.description ?? '').replace(/[\r\n\t]/g, ' '),
-    };
-  });
+  const models = await dependencies.models();
+  if (models.length === 0) throw new Error('Provider returned no compatible models');
+  return models.map(toModelOption);
 }
 
 function commitActionLabel(commitCapability: ReviewCommitCapability): string {
@@ -181,7 +144,11 @@ async function editMessage(prompts: PromptAdapter, message: string): Promise<str
     placeholder: 'Enter commit message',
   });
   if (prompts.isCancel(edited)) return message;
-  const updated = String(edited);
+  const updated = String(edited).trim();
+  if (!updated) {
+    prompts.note('Commit message cannot be empty. The previous message was kept.', 'Error');
+    return message;
+  }
   prompts.note(updated, 'Updated Commit Message');
   return updated;
 }
@@ -439,7 +406,7 @@ export function createInteractiveGenerationDialogue(
           return false;
         }
         if (action === 'continue') return true;
-        prompts.note(buildAtomicSplitProposal(stagedFiles), 'Atomic split proposal');
+        prompts.note(buildAtomicSplitProposal(stagedFiles, false), 'Atomic split proposal');
       }
     },
   };

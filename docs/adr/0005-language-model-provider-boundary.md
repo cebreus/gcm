@@ -12,12 +12,11 @@ prompt, review or commit workflow.
 
 ## Decision
 
-The runner composes one active `LanguageModelProvider`. The provider owns its
-identity, readiness check, service adapter, default and fallback model metadata,
-model discovery and provider-specific error normalization.
-
-`listModels` returns only models compatible with GCM's structured text-generation
-contract. Provider adapters normalize remote model names before returning them.
+The runner composes one active `LanguageModelProvider`. It owns identity,
+readiness, generation, the default model and one asynchronous `models()`
+catalogue with validated, provider-published token limits. Auth, discovery and
+invalid data fail closed. Gemini has separate input/output limits;
+FreeLLMAPI and LM Studio publish one shared context window.
 Credentials remain inside the provider adapter and must never enter generation,
 dialogue, session state, errors or logs. Displayed provider errors pass through
 terminal sanitization and secret redaction.

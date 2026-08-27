@@ -50,8 +50,13 @@ test('session: restores a validated non-Gemini provider model', async function (
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const stdout = await new Response(child.stdout).text();
-  expect(await child.exited).toBe(0);
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  expect(exitCode).toBe(0);
+  expect(stderr).toBe('');
   expect(JSON.parse(stdout)).toEqual({
     providerId: 'lm-studio',
     modelName: 'qwen/qwen3-8b',

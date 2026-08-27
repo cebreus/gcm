@@ -18,7 +18,7 @@ function getPathScope(file: string, repoType: CommitContextFacts['repoType']): s
   if (/^(infra|scripts)\//.test(file)) return 'dx';
   if (/^(package\.json|pnpm-lock\.yaml|bun\.lock|tsconfig\.json)$/.test(file)) return 'build';
   const parts = file.split('/');
-  return parts[0] === 'src' && parts.length > 1 ? (parts[1] ?? null) : null;
+  return parts[0] === 'src' && parts.length > 2 ? (parts[1] ?? null) : null;
 }
 
 export function getCommitContextHints(
@@ -28,7 +28,7 @@ export function getCommitContextHints(
   if (changedFiles.length === 0) return { scopeSuggestions: [], recentCommitSubjects: [] };
   const scopes = new Set<string>();
   for (const subject of facts.scopeHistorySubjects) {
-    const scope = /^[a-z]+\(([^)]+)\):/.exec(subject)?.[1]?.trim();
+    const scope = /^[a-z][a-z0-9-]*\(([^)]+)\)!?:/.exec(subject)?.[1]?.trim();
     if (scope) scopes.add(scope);
   }
   for (const file of changedFiles) {

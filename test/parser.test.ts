@@ -85,7 +85,7 @@ test('parser: requires a Conventional Commit subject without restricting type or
 
   expect(() =>
     parseLanguageModelOutput(
-      'BRANCH: feat/add-thing\nCOMMIT_MESSAGE: not a commit\nPR_TITLE: Add thing',
+      'BRANCH: feat/add-thing\nCOMMIT_MESSAGE: not a commit\nPR_TITLE: Add thing\nPR_DESCRIPTION: Adds thing',
       'full',
     ),
   ).toThrow('LLM output has invalid Conventional Commit subject');
@@ -102,6 +102,12 @@ test('parser: requires a Conventional Commit subject without restricting type or
 test('parser: rejects bidirectional controls that can spoof reviewed commit text', () => {
   expect(() => parseLanguageModelOutput('feat: safe\u202Etxt', 'commit-only')).toThrow(
     'LLM output contains unsupported control characters',
+  );
+});
+
+test('parser: validates the sanitized commit message', () => {
+  expect(() => parseLanguageModelOutput('feat: \u001B[2J', 'commit-only')).toThrow(
+    'LLM output has invalid Conventional Commit subject',
   );
 });
 
@@ -122,6 +128,15 @@ test('parser: parseLanguageModelOutput - should throw on empty required label va
   expect(() => parseLanguageModelOutput(sample2)).toThrow(
     'LLM output missing required BRANCH or COMMIT_MESSAGE fields',
   );
+});
+
+test('parser: full mode requires every advertised artifact', () => {
+  expect(() =>
+    parseLanguageModelOutput(
+      'BRANCH: feat/missing-report\nCOMMIT_MESSAGE: feat: add report\nPR_TITLE: Add report',
+      'full',
+    ),
+  ).toThrow('required PR_TITLE or PR_DESCRIPTION');
 });
 
 test('parser: parseLanguageModelOutput - should handle multiple colons in label lines', () => {
@@ -145,4 +160,17 @@ test('parser: parseLanguageModelOutput - should sanitize invalid branch names', 
   const sample = `BRANCH: ${invalidBranch}\nCOMMIT_MESSAGE: feat: invalid branch\nPR_TITLE: Invalid branch\nPR_DESCRIPTION: desc`;
   const parsed = parseLanguageModelOutput(sample);
   expect(parsed.BRANCH).toBe('feat/invalid-branch-name');
+});
+
+test.each([
+  ['BRANCH: ...', 'change/change'],
+  ['BRANCH: feature//nested', 'feature/nested'],
+  ['BRANCH: feature.lock/name', 'feature-lock/name'],
+  ['BRANCH: feature/name.lock', 'feature/name-lock'],
+])('parser: always returns a Git-valid branch for %s', (branchLine, expected) => {
+  const parsed = parseLanguageModelOutput(
+    `${branchLine}\nCOMMIT_MESSAGE: feat: safe\nPR_TITLE: safe\nPR_DESCRIPTION: safe`,
+  );
+
+  expect(parsed.BRANCH).toBe(expected);
 });

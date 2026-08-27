@@ -14,7 +14,7 @@ import {
 } from './language-model-service.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from './model-registry.js';
 import { parseLanguageModelOutput, type Labels } from './parser.js';
-import { generateFallbackCommitDetails } from './runner-utils.js';
+import { estimateTokenCount } from './runner-utils.js';
 import type { CommitContextHints } from './scope-detector.js';
 import type { ContextService } from './services/context-service.js';
 import type { LanguageModelService } from './language-model-service.js';
@@ -32,7 +32,7 @@ export type GenerationServices = {
   languageModelService: LanguageModelService;
   providerId: string;
   providerLabel: string;
-  getModelSpec(modelName: string): ModelSpec;
+  models(): Promise<ModelSpec[]>;
   dialogue: InteractiveGenerationDialogue;
   commitActions: CommitActionService;
   getCommitContextHints(files: string[]): Promise<CommitContextHints>;
@@ -586,7 +586,13 @@ async function runSingleGenerationAttempt(params: {
     targetCommit,
     commitCapability,
   } = params;
-  const modelSpec = services.getModelSpec(state.modelName);
+  const modelSpec = (await services.models()).find(function (model) {
+    return model.name === state.modelName;
+  });
+  if (!modelSpec) {
+    services.output.cancel('Error: Unknown ' + services.providerLabel + ' model.');
+    return 'failure';
+  }
   const modelSpecError = getModelSpecValidationError(modelSpec, state.modelName);
   if (modelSpecError) {
     services.output.cancel(`Error: ${modelSpecError}.`);
@@ -596,8 +602,24 @@ async function runSingleGenerationAttempt(params: {
     Number.isSafeInteger(CONFIG.MAX_OUTPUT_TOKENS) && CONFIG.MAX_OUTPUT_TOKENS > 0
       ? CONFIG.MAX_OUTPUT_TOKENS
       : DEFAULT_MAX_OUTPUT_TOKENS;
-  const maxOutputTokens = Math.min(configuredMaxOutputTokens, modelSpec.maxOutputTokens);
-  const safeMaxTokens = modelSpec.maxInputTokens - maxOutputTokens - 1000;
+  const maxOutputTokens =
+    modelSpec.limits.kind === 'separate'
+      ? Math.min(configuredMaxOutputTokens, modelSpec.limits.maxOutputTokens)
+      : Math.min(configuredMaxOutputTokens, Math.floor(modelSpec.limits.contextWindowTokens / 2));
+  const systemPrompt =
+    state.outputMode === 'full' ? SYSTEM_INSTRUCTIONS_FULL : SYSTEM_INSTRUCTIONS_COMMIT_ONLY;
+  const systemPromptTokens = estimateTokenCount(systemPrompt, CONFIG.TOKEN_BYTES_RATIO);
+  const promptCapacity =
+    modelSpec.limits.kind === 'separate'
+      ? modelSpec.limits.maxInputTokens
+      : modelSpec.limits.contextWindowTokens - maxOutputTokens;
+  const maxAvailableTokens = promptCapacity - systemPromptTokens;
+  if (maxAvailableTokens <= 0) {
+    services.output.cancel(
+      'Error: ' + services.providerLabel + ' model has no capacity for the configured output.',
+    );
+    return 'failure';
+  }
   const customHeader =
     state.outputMode === 'full'
       ? 'Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following'
@@ -605,7 +627,7 @@ async function runSingleGenerationAttempt(params: {
   const contextResult = await services.contextService.constructLLMPromptContext({
     diffContent: staged.stagedDiff,
     promptSuffix: staged.truncated ? 'truncated diff' : 'diff',
-    maxAvailableTokens: safeMaxTokens,
+    maxAvailableTokens,
     tokenBytesRatio: CONFIG.TOKEN_BYTES_RATIO,
     stagedFiles: staged.stagedFiles,
     scopeSuggestions: commitContextHints.scopeSuggestions,
@@ -613,6 +635,7 @@ async function runSingleGenerationAttempt(params: {
     logger,
     customHeader,
     userHint: state.userHint,
+    targetCommit: targetCommit ?? undefined,
   });
   logTokenInfo({
     modelName: state.modelName,
@@ -624,8 +647,6 @@ async function runSingleGenerationAttempt(params: {
     targetCommit: targetCommit ?? null,
   });
   services.output.startProgress(`Generating commit message with ${state.modelName}...`);
-  const systemPrompt =
-    state.outputMode === 'full' ? SYSTEM_INSTRUCTIONS_FULL : SYSTEM_INSTRUCTIONS_COMMIT_ONLY;
   const response = await services.languageModelService.generate({
     promptContext: contextResult.promptContext,
     promptParts: contextResult.promptParts,
@@ -635,33 +656,23 @@ async function runSingleGenerationAttempt(params: {
       return services.contextService.reduceForRetry({
         ...params,
         stagedFiles: staged.stagedFiles,
+        targetCommit: targetCommit ?? undefined,
       });
     },
     meta,
     opts: {
       modelOverride: state.modelName,
-      retryIfTruncated: true,
-      retryIfTruncatedMaxRetries: 1,
-      retryIfTruncatedIncreaseTokens: maxOutputTokens,
+      maxOutputTokensLimit: maxOutputTokens,
     },
   });
-  services.output.stopProgress(`${services.providerLabel} response received`);
   if (!response) {
-    logger.log(
-      'warn',
-      `${services.providerLabel} did not return text after retries; using deterministic fallback`,
+    services.output.stopProgress(services.providerLabel + ' returned no usable response');
+    services.output.cancel(
+      'Error: ' + services.providerLabel + ' did not return a usable response after retries.',
     );
-    displayResultStructured(
-      services.output,
-      logger,
-      generateFallbackCommitDetails(staged.stagedFiles, services.providerLabel),
-    );
-    if (state.nonInteractive && state.apply) {
-      services.output.cancel('No generated commit message was available to apply.');
-      return 'failure';
-    }
-    return 'success';
+    return 'failure';
   }
+  services.output.stopProgress(services.providerLabel + ' response received');
   const action = await handleSuccessfulGeneration({
     response,
     state,
@@ -698,7 +709,7 @@ async function handleSuccessfulGeneration(params: {
     services.output.outro('Failed to parse structured output.');
     return 'failure';
   }
-  const warningIcon = response.truncated ? ` ${services.output.style.yellow('[⚠ ZKRACENO]')}` : '';
+  const warningIcon = response.truncated ? ` ${services.output.style.yellow('[⚠ TRUNCATED]')}` : '';
   services.output.note(
     buildNoteContent(services.output, state.outputMode, parsedOut),
     (state.outputMode === 'full' ? 'Generated Report' : 'Generated Commit Message') + warningIcon,

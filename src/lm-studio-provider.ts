@@ -4,7 +4,7 @@ import {
   type LanguageModelGenerateParams,
   type LanguageModelProvider,
 } from './language-model-service.js';
-import { DEFAULT_MAX_OUTPUT_TOKENS, type ModelSpec } from './model-registry.js';
+import type { ModelSpec } from './model-registry.js';
 import {
   generateOpenAiCompatibleChat,
   isRecord,
@@ -13,8 +13,6 @@ import {
 } from './openai-compatible-client.js';
 
 const PREFERRED_LM_STUDIO_MODEL = 'gemma-4-e4b-it-mlx';
-
-const UNLOADED_MODEL_MAX_OUTPUT_TOKENS = 1_024;
 
 function readPositiveInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
@@ -33,24 +31,15 @@ function parseModel(value: unknown): ModelSpec | null {
         })
     : [];
   const catalogContext = readPositiveInteger(value.max_context_length);
-  const maxInputTokens =
-    loadedContexts.length > 0
-      ? Math.min(...loadedContexts)
-      : Math.min(catalogContext ?? 8_192, 8_192);
-  if (maxInputTokens <= 1_001) return null;
+  const contextWindowTokens =
+    loadedContexts.length > 0 ? Math.min(...loadedContexts) : catalogContext;
+  if (contextWindowTokens === null) return null;
   const label = typeof value.display_name === 'string' ? value.display_name : value.key;
   if (!isLanguageModelName(label)) return null;
-  const reservedInputTokens = Math.max(1, Math.min(4_096, maxInputTokens - 1_002));
   return {
     name: value.key,
     label,
-    maxInputTokens,
-    maxOutputTokens: Math.min(
-      loadedContexts.length > 0
-        ? Math.min(DEFAULT_MAX_OUTPUT_TOKENS, maxInputTokens - 1_000 - reservedInputTokens)
-        : UNLOADED_MODEL_MAX_OUTPUT_TOKENS,
-      maxInputTokens - 1_001,
-    ),
+    limits: { kind: 'shared-context', contextWindowTokens },
   };
 }
 
@@ -119,7 +108,7 @@ async function discoverModels(
         return (
           isRecord(instance) &&
           isRecord(instance.config) &&
-          (readPositiveInteger(instance.config.context_length) ?? 0) > 1_001
+          (readPositiveInteger(instance.config.context_length) ?? 0) > 0
         );
       })
     ) {
@@ -246,19 +235,11 @@ export async function createLmStudioProvider(options: {
     label: 'LM Studio',
     selectionNotice,
     defaultModel,
-    fallbackModels: models,
     service: {
       generate,
     },
-    listModels: async function () {
-      return models.map(function (model) {
-        return model.name;
-      });
-    },
-    getModelSpec: function (modelName) {
-      const model = byName.get(modelName);
-      if (!model) throw new Error('Unknown LM Studio model');
-      return model;
+    models: async function () {
+      return models;
     },
   };
 }

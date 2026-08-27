@@ -49,7 +49,7 @@ export function normalizeRetryConfig(values: {
 }): { maxRetries: number; retryBaseMs: number; retryMaxMs: number } {
   const retryMaxMs = integerInRange(values.retryMaxMs, 1, MAX_RETRY_MS, DEFAULT_RETRY_MAX_MS);
   return {
-    maxRetries: integerInRange(values.maxRetries, 1, MAX_RETRIES, DEFAULT_RETRIES),
+    maxRetries: integerInRange(values.maxRetries, 0, MAX_RETRIES, DEFAULT_RETRIES),
     retryBaseMs: integerInRange(
       values.retryBaseMs,
       1,

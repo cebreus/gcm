@@ -78,6 +78,22 @@ describe('commit actions', () => {
     );
   });
 
+  test('parses NUL-delimited status paths literally, including rename destinations', async () => {
+    const { calls, runner } = createRecorder({
+      'status --porcelain=v1 -z':
+        'M  line\nname.ts\0R  new name.ts\0old name.ts\0?? trailing .ts \0',
+      'rev-parse --git-dir': '.git\n',
+    });
+    const service = createGitService({ gitCommandRunner: runner });
+
+    const state = await service.getRepositoryState(null);
+
+    expect(calls[0]).toEqual(['status', '--porcelain=v1', '-z']);
+    expect(state.changedFiles).toEqual(['line\nname.ts', 'new name.ts', 'trailing .ts ']);
+    expect(state.hasStagedChanges).toBe(true);
+    expect(state.hasUntrackedFiles).toBe(true);
+  });
+
   test('binds a staged diff to a stable index snapshot after one retry', async () => {
     let treeRead = 0;
     let diffRead = 0;
@@ -215,12 +231,13 @@ describe('commit actions', () => {
       commit: '',
       'rev-parse --verify HEAD^{tree}': 'tree',
       'rev-parse --verify HEAD^1^{tree}': 'tree',
+      'rev-parse --verify HEAD': TARGET.headHash,
     });
     const service = createGitService({ gitCommandRunner: runner });
 
     await service.rewordCommit(TARGET, 'feat(scope): new subject\n\n- new bullet', null);
 
-    expect(calls[0]).toEqual([
+    expect(calls.find(args => args[0] === 'commit')).toEqual([
       'commit',
       '--allow-empty',
       '-m',
@@ -235,6 +252,7 @@ describe('commit actions', () => {
       commit: '',
       'rev-parse --verify HEAD^{tree}': 'tree',
       'rev-parse --verify HEAD^1^{tree}': 'tree',
+      'rev-parse --verify HEAD': TARGET.headHash,
     });
     const service = createGitService({ gitCommandRunner: runner });
 
@@ -245,9 +263,11 @@ describe('commit actions', () => {
     expect(calls.some(args => args.includes('--amend'))).toBe(false);
   });
 
-  test('reword stops after a hook adds content to the amend commit', async () => {
+  test('reword rolls back after a hook adds content to the amend commit', async () => {
+    const commands: string[][] = [];
     const service = createGitService({
       gitCommandRunner: async function (args) {
+        commands.push(args);
         if (args[0] === 'commit') return { text: '', truncated: false };
         if (args.join(' ') === 'rev-parse --verify HEAD^{tree}') {
           return { text: 'changed-tree\n', truncated: false };
@@ -255,6 +275,18 @@ describe('commit actions', () => {
         if (args.join(' ') === 'rev-parse --verify HEAD^1^{tree}') {
           return { text: 'parent-tree\n', truncated: false };
         }
+        if (args.join(' ') === 'rev-parse --verify HEAD') {
+          const headReads = commands.filter(command => command.join(' ') === args.join(' '));
+          return {
+            text: headReads.length === 1 ? TARGET.headHash : 'created-head',
+            truncated: false,
+          };
+        }
+        if (args.join(' ') === 'rev-parse --verify HEAD^') {
+          return { text: TARGET.headHash, truncated: false };
+        }
+        if (args.join(' ') === `reset --soft ${TARGET.headHash}`)
+          return { text: '', truncated: false };
         throw new Error(`unexpected git command: ${args.join(' ')}`);
       },
     });
@@ -262,6 +294,7 @@ describe('commit actions', () => {
     await expect(service.rewordCommit(TARGET, 'fix: replacement', null)).rejects.toThrow(
       'amend! commit contains file changes',
     );
+    expect(commands).toContainEqual(['reset', '--soft', TARGET.headHash]);
   });
 
   test('inspect reports an unpublished head', async () => {

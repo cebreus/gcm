@@ -38,9 +38,17 @@ function sanitiseTextForLogs(text: string, maxLen = 256): string {
   return out;
 }
 
-function redactForLogs(value: unknown): unknown {
+function redactForLogs(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'string') {
     return sanitiseTextForLogs(value);
+  }
+  if (typeof value === 'object' && value !== null) {
+    if (seen.has(value)) return '[Circular]';
+    seen.add(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => redactForLogs(item, seen));
   }
   if (typeof value === 'object' && value !== null) {
     const output: LogMetadata = {};
@@ -51,7 +59,11 @@ function redactForLogs(value: unknown): unknown {
         output[key] = '[REDACTED]';
         continue;
       }
-      output[key] = redactForLogs(record[key]);
+      try {
+        output[key] = redactForLogs(record[key], seen);
+      } catch {
+        output[key] = '[Unserializable]';
+      }
     }
     return output;
   }
@@ -62,7 +74,8 @@ function sanitiseMetaForLogs(meta: LogMetadata): LogMetadata {
   const out: LogMetadata = {};
   for (const key of Object.keys(meta)) {
     const value = meta[key];
-    if (typeof value === 'string') out[key] = sanitiseTextForLogs(value);
+    if (/key|token|pass|secret/i.test(key)) out[key] = '[REDACTED-KEY]';
+    else if (typeof value === 'string') out[key] = sanitiseTextForLogs(value);
     else out[key] = redactForLogs(value);
   }
   return out;
@@ -74,7 +87,11 @@ function formatLogLine(ts: string, level: LogLevel, message: string): string {
 
 function formatLogMeta(meta: LogMetadata | undefined): string {
   if (!meta || Object.keys(meta).length === 0) return '';
-  return ' ' + JSON.stringify(meta);
+  try {
+    return ' ' + JSON.stringify(meta);
+  } catch {
+    return ' [Unserializable metadata]';
+  }
 }
 
 function shouldLogLevel(state: LoggerState, level: LogLevel): boolean {

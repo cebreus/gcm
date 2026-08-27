@@ -5,7 +5,6 @@ import {
   type GenerationState,
   type PromptAdapter,
 } from '../src/interactive-generation-dialogue.js';
-import { KNOWN_MODELS } from '../src/model-registry.js';
 import type { ModelSpec } from '../src/model-registry.js';
 
 const escape = Symbol('escape');
@@ -71,11 +70,31 @@ function createScriptedDialogue(
         copied.push(message);
       },
     },
-    listModels: async function () {
-      if (options.listModels) return options.listModels();
-      return ['gemini-3.7-flash', 'gemini-3.1-pro-preview'];
+    models: async function () {
+      const names = options.listModels
+        ? await options.listModels()
+        : ['gemini-3.7-flash', 'gemini-3.1-pro-preview'];
+      const catalogue =
+        options.fallbackModels ??
+        names.map(function (name) {
+          return {
+            name,
+            label: name,
+            limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+          };
+        });
+      return names.map(function (name) {
+        return (
+          catalogue.find(function (model) {
+            return model.name === name;
+          }) ?? {
+            name,
+            label: name,
+            limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+          }
+        );
+      });
     },
-    fallbackModels: options.fallbackModels ?? KNOWN_MODELS,
     providers: options.providers ?? [{ id: 'gemini', label: 'Gemini' }],
     logger: { log: function () {} },
   });
@@ -310,7 +329,7 @@ describe('interactive generation dialogue', () => {
     expect(selectOptions).toHaveLength(2);
   });
 
-  test('keeps an empty edited message and returns to the menu', async () => {
+  test('rejects an empty edited message and keeps the previous message', async () => {
     const result = { COMMIT_MESSAGE: 'original message' };
     const { dialogue, notes, selectOptions } = createScriptedDialogue(['edit', '', 'commit']);
 
@@ -321,8 +340,10 @@ describe('interactive generation dialogue', () => {
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
-    expect(result.COMMIT_MESSAGE).toBe('');
-    expect(notes).toEqual([['', 'Updated Commit Message']]);
+    expect(result.COMMIT_MESSAGE).toBe('original message');
+    expect(notes).toEqual([
+      ['Commit message cannot be empty. The previous message was kept.', 'Error'],
+    ]);
     expect(selectOptions).toHaveLength(2);
   });
 
@@ -432,8 +453,7 @@ describe('interactive generation dialogue', () => {
       name: 'models/olive-model',
       label: 'Local Model',
       description: 'Runs locally.',
-      maxInputTokens: 8_192,
-      maxOutputTokens: 1_024,
+      limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
     };
     const { dialogue, selectOptions } = createScriptedDialogue(['switch', 'models/olive-model'], {
       listModels: async function () {
@@ -468,43 +488,34 @@ describe('interactive generation dialogue', () => {
     expect(selectOptions).toHaveLength(3);
   });
 
-  test.each([
-    [
-      'when listing models rejects',
-      async function () {
+  test('model selection fails closed when catalogue loading rejects', async () => {
+    const { dialogue } = createScriptedDialogue(['switch'], {
+      listModels: async function () {
         throw new Error('offline');
       },
-    ],
-    [
-      'when listing models is empty',
-      async function () {
-        return [];
-      },
-    ],
-  ])('falls back to known models %s', async (_, listModels) => {
-    const { dialogue, selectOptions } = createScriptedDialogue(
-      ['switch', 'gemini-3.1-pro-preview'],
-      {
-        listModels,
-      },
-    );
-
+    });
     await expect(
       dialogue.review({
         state: createState(),
         result: { COMMIT_MESSAGE: 'message' },
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({
-      type: 'regenerate',
-      modelName: 'gemini-3.1-pro-preview',
-      userHint: undefined,
+    ).rejects.toThrow('offline');
+  });
+
+  test('model selection rejects an empty catalogue', async () => {
+    const { dialogue } = createScriptedDialogue(['switch'], {
+      listModels: async function () {
+        return [];
+      },
     });
-    expect(selectOptions[1]).toEqual(
-      KNOWN_MODELS.map(function (model) {
-        return { value: model.name, label: model.label, hint: model.description };
+    await expect(
+      dialogue.review({
+        state: createState(),
+        result: { COMMIT_MESSAGE: 'message' },
+        commitCapability: createCapability(),
       }),
-    );
+    ).rejects.toThrow('Provider returned no compatible models');
   });
 
   test('returns continue when configuration selects Generate', async () => {
@@ -651,7 +662,8 @@ describe('interactive generation dialogue', () => {
 
     await expect(dialogue.confirmAtomicity(files, null)).resolves.toBe(true);
     expect(notes[0]?.[1]).toBe('Atomic split proposal');
-    expect(notes[0]?.[0]).toContain('git reset');
+    expect(notes[0]?.[0]).toContain('Commands omitted');
+    expect(notes[0]?.[0]).not.toContain('git reset');
     expect(selectOptions).toHaveLength(2);
   });
 

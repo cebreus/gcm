@@ -93,3 +93,16 @@ test('keeps the first ten unique non-empty recent subjects in order', async () =
     'chore: tenth',
   ]);
 });
+
+test('ignores direct src files and accepts valid conventional scope variants', () => {
+  const result = getCommitContextHints(['src/index.ts'], {
+    scopeHistorySubjects: [
+      'custom-type(core): keep hyphenated type',
+      'feat(api)!: keep breaking marker',
+    ],
+    recentSubjects: [],
+    repoType: 'single',
+  });
+
+  expect(result.scopeSuggestions).toEqual(['core', 'api']);
+});

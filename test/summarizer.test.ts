@@ -71,3 +71,12 @@ test('summarizer: caps Unicode output by UTF-8 bytes', async () => {
   expect(result.text).toContain('files truncated by per-file buffer');
   expect(new TextEncoder().encode(result.text).byteLength).toBeLessThanOrEqual(90);
 });
+
+test('summarizer: reports per-file truncation when every selected hunk fits', () => {
+  const result = summarizeDiff(
+    'one file changed',
+    [facts('src/a.ts', ['@@ -1 +1 @@\n', '+value\n'], true)],
+    policy,
+  );
+  expect(result.text).toContain('1 files truncated by per-file buffer');
+});

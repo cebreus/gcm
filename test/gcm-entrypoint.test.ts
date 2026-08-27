@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 
 test('gcm entrypoint: catches runner rejections', async () => {
-  const fixturePath = new URL('./gcm-entrypoint.fixture.ts', import.meta.url).pathname;
-  const entrypointPath = new URL('../gcm.ts', import.meta.url).pathname;
+  const fixturePath = Bun.fileURLToPath(new URL('./gcm-entrypoint.fixture.ts', import.meta.url));
+  const entrypointPath = Bun.fileURLToPath(new URL('../gcm.ts', import.meta.url));
   const child = Bun.spawn({
     cmd: [process.execPath, '--preload', fixturePath, entrypointPath],
     stdout: 'pipe',

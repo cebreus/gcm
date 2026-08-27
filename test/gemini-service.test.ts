@@ -18,7 +18,7 @@ const noSleep = async function (): Promise<void> {
   await Promise.resolve();
 };
 
-async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
+async function geminiServiceReturnsTruncatedAtCapTest(): Promise<void> {
   let callCount = 0;
   const mockClient: GeminiClient = {
     async callGemini(): Promise<GeminiResponse> {
@@ -51,19 +51,20 @@ async function geminiServiceRetryOnTruncatedTest(): Promise<void> {
     },
     meta: {},
     opts: {
-      retryIfTruncated: true,
-      retryIfTruncatedMaxRetries: 2,
-      retryIfTruncatedIncreaseTokens: 100,
+      maxOutputTokensLimit: 8_192,
       modelOverride: 'gemini-3.1-pro-preview',
     },
   });
-  expect(callCount).toBe(2);
-  expect(res?.truncated).toBeFalsy();
+  expect(callCount).toBe(1);
+  expect(res?.truncated).toBe(true);
 }
 
-test('gemini-service: owns truncated response retries', geminiServiceRetryOnTruncatedTest);
+test(
+  'gemini-service: returns truncated output at the policy cap',
+  geminiServiceReturnsTruncatedAtCapTest,
+);
 
-test('gemini-service: bounds invalid truncation retry options', async () => {
+test('gemini-service: uses the configured output cap without speculative retry', async () => {
   const outputLimits: number[] = [];
   const service = createGeminiService({
     client: {
@@ -89,17 +90,15 @@ test('gemini-service: bounds invalid truncation retry options', async () => {
     },
     meta: {},
     opts: {
-      retryIfTruncated: true,
-      retryIfTruncatedMaxRetries: -1,
-      retryIfTruncatedIncreaseTokens: -1,
+      maxOutputTokensLimit: 8_192,
       modelOverride: 'gemini-3.1-pro-preview',
     },
   });
 
-  expect(outputLimits).toEqual([8192, 16_384]);
+  expect(outputLimits).toEqual([8192]);
 });
 
-test('gemini-service: truncation retries do not consume context overflow retries', async () => {
+test('gemini-service: stops truncated output at the policy cap', async () => {
   let calls = 0;
   let reductions = 0;
   const service = createGeminiService({
@@ -141,15 +140,14 @@ test('gemini-service: truncation retries do not consume context overflow retries
     },
     meta: {},
     opts: {
-      retryIfTruncated: true,
-      retryIfTruncatedMaxRetries: 1,
-      retryIfTruncatedIncreaseTokens: 100,
+      maxOutputTokensLimit: 8_192,
       modelOverride: 'gemini-3.1-pro-preview',
     },
   });
 
-  expect(result?.text).toBe('complete');
-  expect(reductions).toBe(2);
+  expect(result?.text).toBe('partial');
+  expect(result?.truncated).toBe(true);
+  expect(reductions).toBe(0);
 });
 
 test('gemini-service: retry delegates context reduction to the call boundary', async () => {
@@ -180,6 +178,7 @@ test('gemini-service: retry delegates context reduction to the call boundary', a
     client,
     logger: silentLogger,
     apiKey: 'fake',
+    sleep: noSleep,
   });
 
   await service.generate({
@@ -187,6 +186,7 @@ test('gemini-service: retry delegates context reduction to the call boundary', a
     promptParts,
     systemPrompt: 'system',
     meta: {},
+    opts: { maxOutputTokensLimit: 8_192 },
     reduceForRetry: async (params: RetryReductionInput) => {
       reductions.push(params);
       return {
@@ -247,6 +247,7 @@ test('gemini-service: keeps a construction summary and structured context on ove
     summaryAttempted: contextResult.summaryAttempted,
     systemPrompt: 'system',
     meta: {},
+    opts: { maxOutputTokensLimit: 8_192 },
     reduceForRetry: (params: RetryReductionInput) =>
       contextService.reduceForRetry({ ...params, stagedFiles: ['src/service.ts'] }),
   });
@@ -291,6 +292,7 @@ test('gemini-service: retries after emptying a diff below an unreachable proport
     summaryAttempted: true,
     systemPrompt: 'system',
     meta: {},
+    opts: { maxOutputTokensLimit: 8_192 },
     reduceForRetry: createContextService({
       summarizeLargeDiff: async function () {
         throw new Error('Summary was not expected');
@@ -312,7 +314,7 @@ test('gemini-service: retries after emptying a diff below an unreachable proport
 test('gemini-service: retry mode selects its original delay and log message', async () => {
   for (const [mode, delay, message] of [
     ['summary', 200, 'switching to top-hunks summary and retrying'],
-    ['truncation', 500, 'retrying with smaller input and lower maxOutputTokens'],
+    ['truncation', 500, 'retrying with smaller input'],
   ] as const) {
     const delays: number[] = [];
     const messages: string[] = [];
@@ -348,12 +350,50 @@ test('gemini-service: retry mode selects its original delay and log message', as
       promptContext: 'context',
       systemPrompt: 'system',
       meta: {},
+      opts: { maxOutputTokensLimit: 8_192 },
       reduceForRetry,
     });
 
     expect(delays).toEqual([delay]);
     expect(messages).toContain(`Gemini returned MAX_TOKENS or no text; ${message}`);
   }
+});
+
+test('gemini-service: context overflow retry stays within the model output limit', async () => {
+  const outputLimits: number[] = [];
+  const service = createGeminiService({
+    client: {
+      callGemini: async function (params) {
+        outputLimits.push(params.callOptions.maxOutputTokens ?? 0);
+        if (outputLimits.length === 1) throw new Error('MAX_TOKENS');
+        return { text: 'result', usage: { promptTokens: 1, outputTokens: 1, thinkingTokens: 0 } };
+      },
+    },
+    logger: silentLogger,
+    apiKey: 'fake',
+    sleep: noSleep,
+  });
+
+  await service.generate({
+    promptContext: 'context',
+    systemPrompt: 'system',
+    meta: {},
+    opts: {
+      maxOutputTokensLimit: 8_192,
+      modelOverride: 'gemini-3.7-flash',
+    },
+    reduceForRetry: async function () {
+      return {
+        promptContext: 'smaller context',
+        promptParts: { prefix: '', diffHeading: '', diffBody: 'smaller context', suffix: '' },
+        mode: 'truncation',
+        summaryAttempted: false,
+        summaryUsed: false,
+      };
+    },
+  });
+
+  expect(outputLimits).toEqual([8192, 8192]);
 });
 test('gemini-service: normalizes provider errors', async () => {
   const service = createGeminiService({
@@ -371,6 +411,7 @@ test('gemini-service: normalizes provider errors', async () => {
       promptContext: 'prompt',
       systemPrompt: 'system',
       meta: {},
+      opts: { maxOutputTokensLimit: 8_192 },
       reduceForRetry: async function () {
         throw new Error('not used');
       },

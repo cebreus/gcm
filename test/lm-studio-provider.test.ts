@@ -60,18 +60,28 @@ test('LM Studio discovers sorted text models and uses the active context length'
     const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
 
     expect(provider.defaultModel).toBe('zeta');
-    expect(await provider.listModels()).toEqual(['alpha', 'zeta']);
-    expect(provider.getModelSpec('zeta')).toEqual({
+    expect(
+      (await provider.models()).map(function (model) {
+        return model.name;
+      }),
+    ).toEqual(['alpha', 'zeta']);
+    expect(
+      (await provider.models()).find(function (model) {
+        return model.name === 'zeta';
+      }),
+    ).toEqual({
       name: 'zeta',
       label: 'Zeta',
-      maxInputTokens: 8_192,
-      maxOutputTokens: 3_096,
+      limits: { kind: 'shared-context' as const, contextWindowTokens: 8_192 },
     });
-    expect(provider.getModelSpec('alpha')).toEqual({
+    expect(
+      (await provider.models()).find(function (model) {
+        return model.name === 'alpha';
+      }),
+    ).toEqual({
       name: 'alpha',
       label: 'alpha',
-      maxInputTokens: 8_192,
-      maxOutputTokens: 1_024,
+      limits: { kind: 'shared-context' as const, contextWindowTokens: 16_384 },
     });
   } finally {
     await server.stop(true);
@@ -138,7 +148,11 @@ test('LM Studio loads an explicit unloaded model, waits, and refreshes its conte
       { method: 'GET', path: '/api/v1/models', authorization: 'Bearer local-token' },
     ]);
     expect(provider.defaultModel).toBe('preferred-model');
-    expect(provider.getModelSpec('preferred-model').maxInputTokens).toBe(32_768);
+    expect(
+      (await provider.models()).find(function (model) {
+        return model.name === 'preferred-model';
+      })?.limits,
+    ).toEqual({ kind: 'shared-context', contextWindowTokens: 32_768 });
 
     requests.length = 0;
     await createLmStudioProvider({
@@ -293,7 +307,7 @@ test('LM Studio maps chat requests and responses without putting its token in th
           { role: 'user', content: 'diff [REDACTED-TOKEN]' },
         ],
         temperature: 0.25,
-        max_tokens: 1_024,
+        max_tokens: 8_192,
         stream: false,
       },
     });
@@ -583,7 +597,7 @@ test.each([
   }
 });
 
-test('LM Studio bounds truncation retries and uses caller context reduction', async function () {
+test('LM Studio returns truncated output without speculative retry', async function () {
   const userPrompts: string[] = [];
   const outputLimits: number[] = [];
   const server = Bun.serve({
@@ -643,15 +657,13 @@ test('LM Studio bounds truncation retries and uses caller context reduction', as
       meta: {},
       opts: {
         modelOverride: 'local-model',
-        retryIfTruncated: true,
-        retryIfTruncatedMaxRetries: 1,
-        retryIfTruncatedIncreaseTokens: 256,
       },
     });
 
-    expect(userPrompts).toEqual(['large diff', 'smaller diff']);
-    expect(outputLimits).toEqual([1_024, 1_280]);
-    expect(response?.text).toBe('complete');
+    expect(userPrompts).toEqual(['large diff']);
+    expect(outputLimits).toEqual([1_024]);
+    expect(response?.text).toBe('partial');
+    expect(response?.truncated).toBe(true);
   } finally {
     await server.stop(true);
   }

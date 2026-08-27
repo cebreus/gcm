@@ -11,24 +11,19 @@ function createProvider(overrides: Partial<LanguageModelProvider> = {}): Languag
   const fallbackModel = {
     name: 'qwen/qwen3-8b',
     label: 'Qwen',
-    maxInputTokens: 8_192,
-    maxOutputTokens: 1_024,
+    limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
   };
   return {
     id: 'local',
     label: 'Local',
     defaultModel: 'qwen/qwen3-8b',
-    fallbackModels: [fallbackModel],
+    models: async function () {
+      return [fallbackModel];
+    },
     service: {
       generate: async function () {
         return null;
       },
-    },
-    listModels: async function () {
-      return [];
-    },
-    getModelSpec: function (name) {
-      return { name, label: name, maxInputTokens: 8_192, maxOutputTokens: 1_024 };
     },
     ...overrides,
   };
@@ -52,18 +47,19 @@ test('provider validation rejects terminal controls and unsafe model names', fun
   expect(
     getLanguageModelProviderValidationError(createProvider({ defaultModel: 'bad\nmodel' })),
   ).toBe('Invalid default model name');
-  expect(getLanguageModelProviderValidationError(createProvider({ fallbackModels: [] }))).toBe(
-    'Provider requires a fallback model',
-  );
   expect(
-    getLanguageModelProviderValidationError(
-      createProvider({
-        getModelSpec: function (name) {
-          return { name, label: name, maxInputTokens: 1_000, maxOutputTokens: 1_000 };
-        },
-      }),
-    ),
-  ).toBe('Invalid model token limits');
+    getLanguageModelProviderValidationError(createProvider({ models: undefined as never })),
+  ).toBe('Provider requires a model catalogue');
+});
+
+test('provider validation rejects bidirectional model-name controls', function () {
+  expect(
+    getModelSpecValidationError({
+      name: 'safe\u202Etxt',
+      label: 'safe',
+      limits: { kind: 'shared-context', contextWindowTokens: 8_192 },
+    }),
+  ).toBe('Invalid model name');
 });
 
 test('model validation accepts provider-specific ids and rejects unsafe runtime specs', function () {
@@ -71,13 +67,16 @@ test('model validation accepts provider-specific ids and rejects unsafe runtime 
     getModelSpecValidationError({
       name: 'org/model@q4 k m',
       label: 'Model',
-      maxInputTokens: 8_192,
-      maxOutputTokens: 1_024,
+      limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
     }),
   ).toBeNull();
   expect(
     getModelSpecValidationError(
-      { name: 'other', label: 'Other', maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+      {
+        name: 'other',
+        label: 'Other',
+        limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+      },
       'selected',
     ),
   ).toBe('Invalid model name');

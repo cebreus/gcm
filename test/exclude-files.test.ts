@@ -100,6 +100,46 @@ test('exclude-files: real-world scenario - excluding build and manifest files', 
   expect(filteredFiles).toEqual(['src/index.ts', 'src/utils.ts', 'package.json']);
 });
 
+test('exclude-files: excludes root and nested dist from staged and commit analysis by default', async () => {
+  const calls: string[][] = [];
+  const service = createGitService({
+    gitCommandRunner: async args => {
+      calls.push(args);
+      if (args.includes('--name-only')) {
+        return {
+          text: 'src/app.ts\0dist/gcm\0packages/cli/dist/index.js\0',
+          truncated: false,
+        };
+      }
+      if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
+      if (args[0] === 'ls-files') {
+        return {
+          text: '100644 1111111111111111111111111111111111111111 0\tsrc/app.ts\0',
+          truncated: false,
+        };
+      }
+      return { text: 'diff', truncated: false };
+    },
+  });
+
+  const staged = await service.retrieveStagedChanges(null, null);
+  const committed = await service.retrieveStagedChanges('abc123', null);
+
+  expect(staged?.stagedFiles).toEqual(['src/app.ts']);
+  expect(staged?.excludedPaths).toEqual([]);
+  expect(committed?.stagedFiles).toEqual(['src/app.ts']);
+  expect(committed?.excludedPaths).toEqual([]);
+  expect(calls).toContainEqual(['diff', '--staged', '-w', '--', ':(literal)src/app.ts']);
+  expect(calls).toContainEqual([
+    'show',
+    '--first-parent',
+    '-w',
+    'abc123',
+    '--',
+    ':(literal)src/app.ts',
+  ]);
+});
+
 test('exclude-files: diff requests only include non-excluded paths', async () => {
   const calls: string[][] = [];
   const service = createGitService({

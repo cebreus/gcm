@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test';
+import { mkdir, mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 import { readCommitContextFacts } from '../src/services/repository-context.js';
 import type { SpawnGitStreamResult } from '../src/git-utils.js';
@@ -24,7 +27,7 @@ test('reads exact scope and recent history commands for changed paths', async ()
   });
 
   expect(commands).toEqual([
-    ['log', '-n', '50', '--pretty=format:%s', '--', 'src/a.ts', 'src/b.ts'],
+    ['log', '-n', '50', '--pretty=format:%s', '--', ':(literal)src/a.ts', ':(literal)src/b.ts'],
   ]);
   expect(result).toEqual({
     scopeHistorySubjects: history,
@@ -64,8 +67,8 @@ test('recovers recent history when the longer history read fails', async () => {
   });
 
   expect(commands).toEqual([
-    ['log', '-n', '50', '--pretty=format:%s', '--', 'src/a.ts'],
-    ['log', '-n', '20', '--pretty=format:%s', '--', 'src/a.ts'],
+    ['log', '-n', '50', '--pretty=format:%s', '--', ':(literal)src/a.ts'],
+    ['log', '-n', '20', '--pretty=format:%s', '--', ':(literal)src/a.ts'],
   ]);
   expect(result.scopeHistorySubjects).toEqual([]);
   expect(result.recentSubjects).toEqual(['feat: recovered']);
@@ -116,4 +119,35 @@ test('returns deterministic empty facts without I/O for no changed files', async
 
   expect(result).toEqual({ scopeHistorySubjects: [], recentSubjects: [], repoType: 'single' });
   expect(calls).toBe(0);
+});
+
+test('returns no history subject for empty Git output', async () => {
+  const result = await readCommitContextFacts(['src/a.ts'], {
+    runGit: async function () {
+      return gitResult('');
+    },
+    fileExists: async function () {
+      return false;
+    },
+  });
+
+  expect(result.scopeHistorySubjects).toEqual([]);
+  expect(result.recentSubjects).toEqual([]);
+});
+
+test('detects packages and apps directories with the default Bun adapter', async () => {
+  const repository = await mkdtemp(join(tmpdir(), 'gcm-context-'));
+  const previousDirectory = process.cwd();
+  try {
+    await mkdir(join(repository, 'packages'));
+    await mkdir(join(repository, 'apps'));
+    process.chdir(repository);
+
+    const result = await readCommitContextFacts(['src/index.ts']);
+
+    expect(result.repoType).toBe('monorepo');
+  } finally {
+    process.chdir(previousDirectory);
+    await rm(repository, { recursive: true, force: true });
+  }
 });

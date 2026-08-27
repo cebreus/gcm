@@ -95,13 +95,13 @@ test('utils: pushHunkToTop - ignores zero capacity', () => {
 
 // --- Tests for unescapeNewlinesInText ---
 test('utils: unescapeNewlinesInText - should unescape newlines in text fields', () => {
-  const obj = { a: 1, data: { text: 'hello\nworld' } };
+  const obj = { a: 1, data: { text: 'hello\\nworld' } };
   const result = unescapeNewlinesInText(obj);
   expect((result as { data: { text: string } }).data.text).toBe('hello\nworld');
 });
 
 test('utils: unescapeNewlinesInText - should handle nested objects and arrays', () => {
-  const obj = { a: [{ text: 'a\nb' }, { c: { text: 'c\nd' } }] };
+  const obj = { a: [{ text: 'a\\nb' }, { c: { text: 'c\\nd' } }] };
   const result = unescapeNewlinesInText(obj);
   const typed = result as { a: Array<{ text?: string; c?: { text: string } }> };
   expect(typed.a[0].text).toBe('a\nb');
@@ -356,8 +356,16 @@ test('utils: redactSensitiveText keeps broad log redaction', () => {
 });
 
 test('utils: secret redaction removes Authorization credentials', () => {
-  const input = 'Authorization: Bearer arbitrary-secret\nAuthorization: Basic dXNlcjpwYXNz';
-  const expected = 'Authorization: Bearer [REDACTED]\nAuthorization: Basic [REDACTED]';
+  const input = [
+    'Authorization: Bearer arbitrary-secret',
+    'Authorization: Basic dXNlcjpwYXNz',
+    'Authorization: Digest opaque-secret',
+  ].join('\n');
+  const expected = [
+    'Authorization: Bearer [REDACTED]',
+    'Authorization: Basic [REDACTED]',
+    'Authorization: Digest [REDACTED]',
+  ].join('\n');
 
   expect(redactSensitiveText(input)).toBe(expected);
   expect(redactSensitiveTextForPrompt(input)).toBe(expected);

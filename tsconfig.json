@@ -12,7 +12,7 @@
     "isolatedModules": true,
     "allowJs": true,
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["bun-types"]
+    "types": ["bun"]
   },
   "include": ["**/*.ts", "**/*.tsx", "eslint.config.js"],
   "exclude": ["node_modules", "dist"]

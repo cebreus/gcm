@@ -8,6 +8,7 @@ const originalUrl = process.env.GCM_LM_STUDIO_URL;
 const originalModel = process.env.GCM_LM_STUDIO_MODEL;
 const originalGeminiKey = process.env.GOOGLE_GEMINI_API_KEY;
 const repository = await mkdtemp(`${Bun.env.TMPDIR ?? '/tmp'}/gcm-lm-studio-`);
+const originalExitCode = process.exitCode;
 const note = mock(function () {});
 
 await mock.module('@clack/prompts', function () {
@@ -58,6 +59,7 @@ afterAll(async function () {
   if (originalGeminiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
   else process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
   await rm(repository, { recursive: true, force: true });
+  process.exitCode = originalExitCode;
 });
 
 test('LM Studio runs end to end without a Gemini API key and cancellation creates no commit', async function () {

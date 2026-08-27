@@ -18,7 +18,9 @@ void mock.module('@clack/prompts', () => ({
   }),
   text: mock(() => Promise.resolve('')),
   isCancel: mock((value: unknown) => value === 'cancel'),
-  cancel: mock(() => {}),
+  cancel: mock(function (message: string) {
+    process.stderr.write(message);
+  }),
 }));
 
 async function runnerFallbackStructuredOutputTest(): Promise<void> {
@@ -93,6 +95,7 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
   const logs: string[] = [];
   const originalStdoutWrite = process.stdout.write;
   const originalStderrWrite = process.stderr.write;
+  const originalExitCode = process.exitCode;
   process.stdout.write = ((chunk: string | Uint8Array) => {
     logs.push(String(chunk));
     return true;
@@ -109,17 +112,32 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
     await runner.executeCommitMessageGeneration(['--model', 'gemini-3.7-flash'], {
       gitService: createGitServiceFake(),
       geminiService: createGeminiServiceFake(),
+      geminiModelLister: async function () {
+        return [
+          {
+            name: 'models/gemini-3.7-flash',
+            label: 'Gemini 3.7 Flash',
+            limits: {
+              kind: 'separate' as const,
+              maxInputTokens: 1_048_576,
+              maxOutputTokens: 65_536,
+            },
+          },
+        ];
+      },
       logger: createLogger({ LOG_LEVEL: 'info' }),
     });
   } finally {
     process.stdout.write = originalStdoutWrite;
     process.stderr.write = originalStderrWrite;
-    process.env.GOOGLE_GEMINI_API_KEY = origApiKey;
+    process.exitCode = originalExitCode;
+    if (origApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
+    else process.env.GOOGLE_GEMINI_API_KEY = origApiKey;
   }
 
   const joined = logs.join('\n');
-  expect(joined).toContain('BRANCH');
-  expect(joined).toMatch(/COMMIT_MESSAGE|chore\/update-/);
+  expect(joined).toContain('did not return a usable response after retries');
+  expect(joined).not.toContain('BRANCH');
   console.log('  fallbackTest -> passed');
 }
 test('runner: fallback structured output', runnerFallbackStructuredOutputTest);

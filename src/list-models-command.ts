@@ -4,7 +4,7 @@ import { isLanguageModelName } from './language-model-service.js';
 export async function runListModelsCommand(options: {
   providerLabel: string;
   readinessError?: string;
-  listModels(): Promise<string[]>;
+  models(): Promise<import('./model-registry.js').ModelSpec[]>;
   output: {
     cancel(message: string): void;
     note(message: string): void;
@@ -18,11 +18,12 @@ export async function runListModelsCommand(options: {
     return 1;
   }
   try {
-    const models = await options.listModels();
+    const models = await options.models();
+    if (models.length === 0) throw new Error('Provider returned no compatible models');
     let modelList = `Available ${options.providerLabel} models:\n`;
-    for (const modelName of models) {
-      if (!isLanguageModelName(modelName)) throw new Error('Provider returned invalid model name');
-      modelList += `  - ${modelName}\n`;
+    for (const model of models) {
+      if (!isLanguageModelName(model.name)) throw new Error('Provider returned invalid model name');
+      modelList += `  - ${model.name}\n`;
     }
     options.output.note(modelList);
     options.output.outro('Done.');

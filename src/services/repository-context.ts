@@ -7,7 +7,12 @@ type RepositoryContextDependencies = {
 };
 
 async function bunFileExists(path: string): Promise<boolean> {
-  return Bun.file(path).exists();
+  try {
+    await Bun.file(path).stat();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readHistory(
@@ -15,7 +20,10 @@ async function readHistory(
   args: string[],
 ): Promise<string[] | null> {
   try {
-    return (await dependencies.runGit(args)).text.split('\n');
+    const result = await dependencies.runGit(args);
+    if (result.truncated) throw new Error('Git history output was truncated');
+    const text = result.text;
+    return text ? text.split('\n') : [];
   } catch {
     return null;
   }
@@ -36,7 +44,7 @@ export async function readCommitContextFacts(
     '50',
     '--pretty=format:%s',
     '--',
-    ...changedFiles,
+    ...changedFiles.map(file => `:(literal)${file}`),
   ]).then(async function (history) {
     if (history !== null) {
       return { scopeHistorySubjects: history, recentSubjects: history.slice(0, 20) };
@@ -48,7 +56,7 @@ export async function readCommitContextFacts(
         '20',
         '--pretty=format:%s',
         '--',
-        ...changedFiles,
+        ...changedFiles.map(file => `:(literal)${file}`),
       ])) ?? [];
     return { scopeHistorySubjects: [], recentSubjects };
   });
