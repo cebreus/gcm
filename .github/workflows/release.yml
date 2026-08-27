@@ -66,16 +66,15 @@ jobs:
             echo "Release notes could not be extracted from CHANGELOG.md for version $VERSION" > RELEASE_NOTES.md
           fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@c95fe1489354935867daa76d8e75f340087d8004 # v2
-        with:
-          body_path: RELEASE_NOTES.md
-          name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          files: |
-            dist/bin/gcm-darwin-arm64
-            dist/bin/gcm-darwin-x64
-            dist/bin/gcm-linux-x64
-            dist/bin/gcm-linux-arm64
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file RELEASE_NOTES.md \
+            dist/bin/gcm-darwin-arm64 \
+            dist/bin/gcm-darwin-x64 \
+            dist/bin/gcm-linux-x64 \
+            dist/bin/gcm-linux-arm64 \
             dist/bin/checksums.txt
