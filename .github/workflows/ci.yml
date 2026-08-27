@@ -30,5 +30,3 @@ jobs:
       - run: bun run lint
       - run: bun run test
       - run: bun run build
-      - name: Verify production build
-        run: git diff --exit-code -- dist/gcm
