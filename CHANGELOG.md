@@ -1,5 +1,35 @@
 # gcm
 
+## 0.11.0
+
+> GCM now gets its model list from the selected AI service. It no longer depends on a fixed list that can become old. Generation stops more safely when an AI service or Git action fails. GitHub Actions now checks changes and publishes ready-to-run files for macOS and Linux.
+
+### Minor Changes
+
+- **Model choice:** GCM gets the model list and token limits from Gemini, FreeLLMAPI, or LM Studio when it loads the list. It rejects a model with no valid limit because it cannot know how much text the model can read. Gemini loads every page of the list and removes models that cannot create text.
+- **Empty AI reply:** GCM stops with an error if the AI service gives no useful text after all retries. It does not create a commit. Before this release, it could show a general message that did not come from the AI service.
+- **Safe `amend!` commit:** A Git hook may add file changes while GCM creates an `amend!` commit. GCM checks the parent commit, removes the new commit with a soft reset, and keeps the hook changes in the staging area, which holds files ready for the next commit. An `amend!` commit is a new fix for an older commit. The user can join them later with an autosquash rebase. GCM does not run this rebase.
+- **Better repository analysis:** GCM reads file names with spaces, quotes, new lines, or non-ASCII text correctly. It does not send `dist/` build folders to the AI service by default. These files stay in the staging area.
+- **Safer Git output:** GCM stops a Git process that runs for too long. It rejects cut output when it cannot check the result. It also rejects a change summary with no diff section and no marked skipped file. Text cuts keep full UTF-8 characters.
+- **Valid branch names:** GCM removes bad separators and blocked text from a suggested branch name. The result can be used as a Git branch name.
+- **Correct old commit analysis:** When GCM works on a range of old commits, it now reads the selected old commit. It no longer reads the current staging area by mistake.
+- **Complete and safe AI output:** Full mode now needs a pull request title and description, a branch name, and a commit message. GCM rejects an incomplete reply. It also removes terminal control text before it reads the reply.
+- **Safe error messages:** GCM removes known API keys, tokens, and terminal control text before it prints an unexpected error.
+- **Safe manual edit:** GCM rejects an empty commit message after a manual edit and keeps the earlier message.
+- **Clear CLI input:** GCM now rejects text that is not linked to a named option. This includes text after `--`. Scripts must pass input with supported options such as `--model` or `--hint`.
+- **Better Conventional Commits:** A file placed directly in `src/` no longer uses its file name as the suggested scope. GCM can also read a scope from a breaking commit marked with `!` and from a commit type with a hyphen.
+- **Safer local work and logs:** Git processes no longer receive API keys or tokens for AI services. Debug logs hide values with names such as key, token, password, or secret. Unusual values, such as circular data, no longer break the log.
+- **Safer service retries:** All AI services retry a small set of temporary HTTP errors. Model-list requests and FreeLLMAPI or LM Studio requests also retry network errors. Gemini generation does not retry a network error. A timeout, a user stop, or a redirect is not retried. A POST request is retried only for HTTP `429` or `503`.
+- **Retry settings:** Retry settings now use `GCM_MAX_RETRIES`, `GCM_RETRY_BASE_MS`, and `GCM_RETRY_MAX_MS`.
+- **Old retry setting names:** In `0.11.0`, the old `GCM_GEMINI_*` names still work as a temporary fallback. The later commit `0102b10` removes this fallback, but that commit is not part of this release.
+- **Safe split plan:** GCM does not print `git reset` and `git add` commands when it splits files that are already staged. It cannot make these commands safe without knowing the unstaged content. If the staging area is empty, it can make a plan from worktree files. These commands keep file paths exact and show control text safely.
+- **Debug log on macOS:** GCM now uses the correct file options when it creates or adds to a debug log on macOS. If the log cannot start, GCM stops later log writes instead of showing the same error again.
+
+### Patch Changes
+
+- **Change checks:** Pull requests and pushes to `main` now run the TypeScript check, lint, all tests, and a build. A new run for the same branch stops an older run, so the result matches the latest change.
+- **Binary releases:** A pushed tag that starts with `v` checks the project and creates a GitHub Release. It adds ready-to-run files for macOS and Linux on x64 and arm64, plus SHA-256 checksums. It tries to use notes for the same version from the changelog. If it cannot find them, it adds a warning. It does not build a Windows file.
+
 ## 0.10.0
 
 > GCM can now run without menus, work on several old commits, use extra user instructions, and select Gemini, FreeLLMAPI, or LM Studio. Users can check which AI services are ready before they start generation.
