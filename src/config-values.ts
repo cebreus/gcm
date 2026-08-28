@@ -24,10 +24,14 @@ export function integerInRange(
   minimum: number,
   maximum: number,
   fallback: number,
+  invalidName?: string,
 ): number {
   const parsed = parseNumber(value);
-  if (parsed === undefined) return fallback;
-  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) return fallback;
+  if (value === undefined) return fallback;
+  if (parsed === undefined || !Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    if (invalidName) throw new Error(`Invalid ${invalidName}`);
+    return fallback;
+  }
   return parsed;
 }
 
@@ -36,9 +40,14 @@ export function numberInRange(
   minimum: number,
   maximum: number,
   fallback: number,
+  invalidName?: string,
 ): number {
   const parsed = parseNumber(value);
-  if (parsed === undefined || parsed < minimum || parsed > maximum) return fallback;
+  if (value === undefined) return fallback;
+  if (parsed === undefined || parsed < minimum || parsed > maximum) {
+    if (invalidName) throw new Error(`Invalid ${invalidName}`);
+    return fallback;
+  }
   return parsed;
 }
 
@@ -46,15 +55,32 @@ export function normalizeRetryConfig(values: {
   maxRetries: NumericInput;
   retryBaseMs: NumericInput;
   retryMaxMs: NumericInput;
-}): { maxRetries: number; retryBaseMs: number; retryMaxMs: number } {
-  const retryMaxMs = integerInRange(values.retryMaxMs, 1, MAX_RETRY_MS, DEFAULT_RETRY_MAX_MS);
+}, names?: { maxRetries: string; retryBaseMs: string; retryMaxMs: string }): {
+  maxRetries: number;
+  retryBaseMs: number;
+  retryMaxMs: number;
+} {
+  const retryMaxMs = integerInRange(
+    values.retryMaxMs,
+    1,
+    MAX_RETRY_MS,
+    DEFAULT_RETRY_MAX_MS,
+    names?.retryMaxMs,
+  );
   return {
-    maxRetries: integerInRange(values.maxRetries, 0, MAX_RETRIES, DEFAULT_RETRIES),
+    maxRetries: integerInRange(
+      values.maxRetries,
+      0,
+      MAX_RETRIES,
+      DEFAULT_RETRIES,
+      names?.maxRetries,
+    ),
     retryBaseMs: integerInRange(
       values.retryBaseMs,
       1,
       retryMaxMs,
       Math.min(DEFAULT_RETRY_BASE_MS, retryMaxMs),
+      names?.retryBaseMs,
     ),
     retryMaxMs,
   };

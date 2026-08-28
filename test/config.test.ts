@@ -39,6 +39,22 @@ async function readConfig(env: Record<string, string>): Promise<unknown> {
   return config;
 }
 
+async function runCli(env: Record<string, string>) {
+  const child = Bun.spawn({
+    cmd: ['bun', 'run', './gcm.ts', '--version'],
+    cwd: process.cwd(),
+    env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', ...env },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  return { stdout, stderr, exitCode };
+}
+
 test('config: reads the short GCM names', async () => {
   await expect(readConfig({ GCM_MODEL: 'test-model', GCM_TEMP: '0.25' })).resolves.toEqual({
     ...DEFAULT_CONFIG,
@@ -47,7 +63,7 @@ test('config: reads the short GCM names', async () => {
   });
 });
 
-test('config: reads general retry names before legacy Gemini aliases', async () => {
+test('config: reads provider-neutral retry names only', async () => {
   await expect(
     readConfig({
       GCM_MAX_RETRIES: '2',
@@ -72,9 +88,6 @@ test('config: reads general retry names before legacy Gemini aliases', async () 
     }),
   ).resolves.toEqual({
     ...DEFAULT_CONFIG,
-    retries: 4,
-    retryBase: 40,
-    retryMax: 400,
   });
 });
 
@@ -106,20 +119,20 @@ test('config: reads only FreeLLMAPI-specific names', async () => {
   });
 });
 
-test('config: rejects unsafe numeric values by using safe defaults', async () => {
-  await expect(
-    readConfig({
-      GCM_TEMP: 'garbage',
-      GCM_MAX_BUFFER: '-2',
-      GCM_MAX_HUNKS: '9007199254740991',
-      GCM_PER_FILE_BUFFER: '9007199254740991',
-      GCM_TOKEN_BYTES_RATIO: '5e-324',
-      GCM_MAX_OUTPUT_TOKENS: '1e100',
-      GCM_DEBUG_MAX_BODY_LOG_BYTES: '9007199254740991',
-      GCM_MAX_RETRIES: '9007199254740991',
-      GCM_RETRY_BASE_MS: '9007199254740991',
-      GCM_RETRY_MAX_MS: '9007199254740991',
-    }),
-  ).resolves.toEqual(DEFAULT_CONFIG);
-  await expect(readConfig({ GCM_TEMP: '   ' })).resolves.toEqual(DEFAULT_CONFIG);
+test('CLI names an invalid GCM_TEMP setting', async () => {
+  const result = await runCli({ GCM_TEMP: 'garbage' });
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr).toContain('Invalid GCM_TEMP');
+});
+
+test('CLI names an invalid GCM_MAX_BUFFER setting', async () => {
+  const result = await runCli({ GCM_MAX_BUFFER: '-2' });
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr).toContain('Invalid GCM_MAX_BUFFER');
+});
+
+test('CLI names an invalid GCM_MAX_RETRIES setting', async () => {
+  const result = await runCli({ GCM_MAX_RETRIES: '20' });
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr).toContain('Invalid GCM_MAX_RETRIES');
 });
