@@ -1,11 +1,3 @@
-import {
-  CODE_EXTENSIONS,
-  MARKUP_EXTENSIONS,
-  STYLE_EXTENSIONS,
-  BINARY_EXTENSIONS,
-  FILE_IMPORTANCE_WEIGHTS,
-} from './constants.js';
-
 const encoder = new TextEncoder();
 
 export function estimateTokenCount(text: string, tokenBytesRatio: number): number {
@@ -99,28 +91,6 @@ export function filterExcludedFiles(files: string[], excludePatterns: string[]):
 
   const excluded = excludePatterns.map(globToRegex);
   return files.filter(file => !excluded.some(pattern => pattern.test(file)));
-}
-
-/**
- * Determines file importance weight for prioritizing hunks
- */
-export function fileImportanceWeight(file: string): number {
-  if (!file) return 0;
-  const lower = file.toLowerCase();
-
-  if (CODE_EXTENSIONS.some(ext => lower.endsWith(`.${ext}`))) {
-    return FILE_IMPORTANCE_WEIGHTS.CODE;
-  }
-  if (MARKUP_EXTENSIONS.some(ext => lower.endsWith(`.${ext}`))) {
-    return FILE_IMPORTANCE_WEIGHTS.MARKUP;
-  }
-  if (STYLE_EXTENSIONS.some(ext => lower.endsWith(`.${ext}`))) {
-    return FILE_IMPORTANCE_WEIGHTS.STYLE;
-  }
-  if (BINARY_EXTENSIONS.some(ext => lower.endsWith(`.${ext}`))) {
-    return FILE_IMPORTANCE_WEIGHTS.BINARY;
-  }
-  return FILE_IMPORTANCE_WEIGHTS.DEFAULT;
 }
 
 export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void {

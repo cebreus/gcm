@@ -119,28 +119,27 @@ Analysed diff is sent to the selected provider. LM Studio stays on the configure
 
 `GCM_MODEL`, `GCM_TEMP` only model/temperature names; legacy Gemini aliases not read. Invalid numeric values fall back safely.
 
-| Variable                  | Default                 | Purpose                                            |
-| ------------------------- | ----------------------- | -------------------------------------------------- |
-| `GCM_MODEL`               | `gemini-3.7-flash`      | Gemini model.                                      |
-| `GCM_PROVIDER`            | `gemini`                | Provider: `gemini`, `freellmapi`, or `lm-studio`.  |
-| `GCM_FREELLMAPI_URL`      | `http://127.0.0.1:3001` | FreeLLMAPI endpoint URL.                           |
-| `GCM_FREELLMAPI_MODEL`    | `auto`                  | FreeLLMAPI routing model.                          |
-| `GCM_FREELLMAPI_TOKEN`    | none                    | FreeLLMAPI Bearer token.                           |
-| `GCM_LM_STUDIO_URL`       | `http://127.0.0.1:1234` | LM Studio loopback URL.                            |
-| `GCM_LM_STUDIO_MODEL`     | Gemma, then fallback    | Strict LM Studio model override.                   |
-| `LM_API_TOKEN`            | none                    | Optional LM Studio API token.                      |
-| `GCM_TEMP`                | `1`                     | Temperature from 0 to 1.                           |
-| `GCM_MAX_BUFFER`          | `50 MiB`                | Maximum Git output.                                |
-| `GCM_PER_FILE_BUFFER`     | `1 MiB`                 | Maximum per-file diff.                             |
-| `GCM_MAX_HUNKS`           | `40`                    | Maximum analysed hunks.                            |
-| `GCM_TOKEN_BYTES_RATIO`   | `3.5`                   | Estimated bytes per input token.                   |
-| `GCM_MAX_OUTPUT_TOKENS`   | `8192`                  | Response-token policy; the model cap also applies. |
-| `GCM_ENABLE_HUNK_WEIGHTS` | `false`                 | Prefer important files when selecting hunks.       |
-| `GCM_LOG_LEVEL`           | `info`                  | Console log level.                                 |
-| `GCM_DEBUG_API`           | `false`                 | Enable API trace logging.                          |
-| `GCM_MAX_RETRIES`         | `3`                     | Retries for transient provider failures.           |
-| `GCM_RETRY_BASE_MS`       | `1000`                  | Initial retry delay.                               |
-| `GCM_RETRY_MAX_MS`        | `60000`                 | Maximum retry delay.                               |
+| Variable                | Default                 | Purpose                                            |
+| ----------------------- | ----------------------- | -------------------------------------------------- |
+| `GCM_MODEL`             | `gemini-3.7-flash`      | Gemini model.                                      |
+| `GCM_PROVIDER`          | `gemini`                | Provider: `gemini`, `freellmapi`, or `lm-studio`.  |
+| `GCM_FREELLMAPI_URL`    | `http://127.0.0.1:3001` | FreeLLMAPI endpoint URL.                           |
+| `GCM_FREELLMAPI_MODEL`  | `auto`                  | FreeLLMAPI routing model.                          |
+| `GCM_FREELLMAPI_TOKEN`  | none                    | FreeLLMAPI Bearer token.                           |
+| `GCM_LM_STUDIO_URL`     | `http://127.0.0.1:1234` | LM Studio loopback URL.                            |
+| `GCM_LM_STUDIO_MODEL`   | Gemma, then fallback    | Strict LM Studio model override.                   |
+| `LM_API_TOKEN`          | none                    | Optional LM Studio API token.                      |
+| `GCM_TEMP`              | `1`                     | Temperature from 0 to 1.                           |
+| `GCM_MAX_BUFFER`        | `50 MiB`                | Maximum Git output.                                |
+| `GCM_PER_FILE_BUFFER`   | `1 MiB`                 | Maximum per-file diff.                             |
+| `GCM_MAX_HUNKS`         | `40`                    | Maximum analysed hunks.                            |
+| `GCM_TOKEN_BYTES_RATIO` | `3.5`                   | Estimated bytes per input token.                   |
+| `GCM_MAX_OUTPUT_TOKENS` | `8192`                  | Response-token policy; the model cap also applies. |
+| `GCM_LOG_LEVEL`         | `info`                  | Console log level.                                 |
+| `GCM_DEBUG_API`         | `false`                 | Enable API trace logging.                          |
+| `GCM_MAX_RETRIES`       | `3`                     | Retries for transient provider failures.           |
+| `GCM_RETRY_BASE_MS`     | `1000`                  | Initial retry delay.                               |
+| `GCM_RETRY_MAX_MS`      | `60000`                 | Maximum retry delay.                               |
 
 Legacy `GCM_GEMINI_*` retry names remain fallback aliases.
 

@@ -1,7 +1,6 @@
 import { test, expect } from 'bun:test';
 import {
   estimateTokenCount,
-  fileImportanceWeight,
   pushHunkToTop,
   formatCommitMessage,
   shouldExcludeFile,
@@ -12,42 +11,6 @@ import {
   redactSensitiveTextForPrompt,
 } from '../src/utils';
 import type { Hunk } from '../src/utils';
-
-// --- Tests for fileImportanceWeight ---
-test('utils: fileImportanceWeight - JS/TS files should have high weight', () => {
-  expect(fileImportanceWeight('file.js')).toBe(10);
-  expect(fileImportanceWeight('file.ts')).toBe(10);
-  expect(fileImportanceWeight('file.jsx')).toBe(10);
-  expect(fileImportanceWeight('file.tsx')).toBe(10);
-  expect(fileImportanceWeight('file.svelte')).toBe(10);
-});
-
-test('utils: fileImportanceWeight - HTML/template files should have medium weight', () => {
-  expect(fileImportanceWeight('file.html')).toBe(6);
-  expect(fileImportanceWeight('file.hbs')).toBe(6);
-  expect(fileImportanceWeight('file.njk')).toBe(6);
-});
-
-test('utils: fileImportanceWeight - CSS/style files should have lower weight', () => {
-  expect(fileImportanceWeight('file.css')).toBe(4);
-  expect(fileImportanceWeight('file.scss')).toBe(4);
-  expect(fileImportanceWeight('file.sass')).toBe(4);
-});
-
-test('utils: fileImportanceWeight - Image files should have zero weight', () => {
-  expect(fileImportanceWeight('file.png')).toBe(0);
-  expect(fileImportanceWeight('file.jpg')).toBe(0);
-  expect(fileImportanceWeight('file.gif')).toBe(0);
-});
-
-test('utils: fileImportanceWeight - Other files should have default weight', () => {
-  expect(fileImportanceWeight('file.txt')).toBe(1);
-  expect(fileImportanceWeight('README.md')).toBe(1);
-});
-
-test('utils: fileImportanceWeight - should handle no file name', () => {
-  expect(fileImportanceWeight('')).toBe(0);
-});
 
 // --- Tests for pushHunkToTop ---
 const createHunk = (file: string, score: number): Hunk => ({

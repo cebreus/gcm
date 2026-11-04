@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { summarizeDiff } from '../src/diff-summary.ts';
-const policy = { enableHunkWeights: false, maxHunks: 40, maxOutputBytes: 1_000_000 };
+const policy = { maxHunks: 40, maxOutputBytes: 1_000_000 };
 
 function facts(file: string, lines: string[], truncated = false) {
   return { file, lines, truncated, skipped: false };

@@ -1,7 +1,3 @@
-// File extensions
-export const CODE_EXTENSIONS = ['js', 'ts', 'jsx', 'tsx', 'svelte'] as const;
-export const MARKUP_EXTENSIONS = ['html', 'hbs', 'njk'] as const;
-export const STYLE_EXTENSIONS = ['css', 'scss', 'sass'] as const;
 export const BINARY_EXTENSIONS = [
   'png',
   'jpg',
@@ -16,15 +12,6 @@ export const BINARY_EXTENSIONS = [
   'map',
   'heic',
 ] as const;
-
-// File importance weights
-export const FILE_IMPORTANCE_WEIGHTS = {
-  CODE: 10,
-  MARKUP: 6,
-  STYLE: 4,
-  BINARY: 0,
-  DEFAULT: 1,
-} as const;
 
 // Default values
 export const MAX_CHILD_OUTPUT_BYTES = 1024 * 1024 * 1024;

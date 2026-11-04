@@ -144,7 +144,6 @@ export async function summarizeRepositoryDiff(
     ? `${stats.text}\n... (file statistics truncated by output limit) ...`
     : stats.text;
   return summarizeDiff(statsText, files, {
-    enableHunkWeights: CONFIG.ENABLE_HUNK_WEIGHTS,
     maxHunks: CONFIG.MAX_HUNKS,
     maxOutputBytes: Math.floor(CONFIG.CHILD_PROCESS_MAX_BUFFER / 2),
   });

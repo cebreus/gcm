@@ -1,4 +1,4 @@
-import { fileImportanceWeight, pushHunkToTop } from './utils.js';
+import { pushHunkToTop } from './utils.js';
 import type { Hunk } from './utils.js';
 
 const encoder = new TextEncoder();
@@ -12,7 +12,6 @@ export interface DiffFileFacts {
 }
 
 export interface DiffSummaryPolicy {
-  enableHunkWeights: boolean;
   maxHunks: number;
   maxOutputBytes: number;
 }
@@ -27,7 +26,6 @@ export interface SummarizeDiffResult {
 interface HunkAccumulator {
   topHunks: Hunk[];
   maxHunks: number;
-  enableHunkWeights: boolean;
 }
 
 function truncateUtf8(text: string, maxBytes: number): string {
@@ -46,8 +44,7 @@ function appendWithinLimit(text: string, suffix: string, maxBytes: number): stri
 
 function finalizeHunk(acc: HunkAccumulator, hunk: Hunk | null): void {
   if (!hunk) return;
-  const importance = acc.enableHunkWeights ? fileImportanceWeight(hunk.file) : 0;
-  hunk.score = hunk.added + hunk.removed + importance;
+  hunk.score = hunk.added + hunk.removed;
   pushHunkToTop(acc.topHunks, hunk, acc.maxHunks);
 }
 
@@ -132,7 +129,6 @@ export function summarizeDiff(
   const accumulator: HunkAccumulator = {
     topHunks,
     maxHunks: policy.maxHunks,
-    enableHunkWeights: policy.enableHunkWeights,
   };
   for (const facts of files) {
     if (!facts.skipped) parseDiffLinesToHunks(facts.file, facts.lines, accumulator);

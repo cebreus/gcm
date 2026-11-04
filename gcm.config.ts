@@ -52,7 +52,6 @@ export const CONFIG = {
     DEFAULT_MAX_OUTPUT_TOKENS,
     'GCM_MAX_OUTPUT_TOKENS',
   ),
-  ENABLE_HUNK_WEIGHTS: process.env.GCM_ENABLE_HUNK_WEIGHTS === 'true',
   LOG_LEVEL: stringOrDefault(process.env.GCM_LOG_LEVEL, 'info'),
   DEBUG_API: process.env.GCM_DEBUG_API === 'true',
   MAX_RETRIES: retry.maxRetries,
