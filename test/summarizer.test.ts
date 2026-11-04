@@ -80,3 +80,56 @@ test('summarizer: reports per-file truncation when every selected hunk fits', ()
   );
   expect(result.text).toContain('1 files truncated by per-file buffer');
 });
+
+// --- Characterisation tests for hunk ranking ---
+// Changed-line count is the only ranking signal, so these pin the order the
+// summary emits. Without them a change to the scoring or to the replacement
+// comparison would reorder the prompt unseen.
+
+const hunkOf = (file: string, changedLines: number) =>
+  facts(file, ['@@ -1 +1 @@\n', ...Array.from({ length: changedLines }, () => '+line\n')]);
+
+const emittedOrder = (text: string, files: string[]) =>
+  files
+    .filter(file => text.includes(`File: ${file}`))
+    .sort((left, right) => {
+      return text.indexOf(`File: ${left}`) - text.indexOf(`File: ${right}`);
+    });
+
+test('summarizer: ranks hunks by changed-line count, highest first', () => {
+  const result = summarizeDiff(
+    ' 3 files changed\n',
+    [hunkOf('small.ts', 1), hunkOf('large.ts', 9), hunkOf('medium.ts', 4)],
+    policy,
+  );
+  expect(emittedOrder(result.text, ['small.ts', 'large.ts', 'medium.ts'])).toEqual([
+    'large.ts',
+    'medium.ts',
+    'small.ts',
+  ]);
+});
+
+test('summarizer: equal counts keep the order the files arrived in', () => {
+  const result = summarizeDiff(
+    ' 3 files changed\n',
+    [hunkOf('first.ts', 3), hunkOf('second.ts', 3), hunkOf('third.ts', 3)],
+    policy,
+  );
+  expect(emittedOrder(result.text, ['first.ts', 'second.ts', 'third.ts'])).toEqual([
+    'first.ts',
+    'second.ts',
+    'third.ts',
+  ]);
+});
+
+test('summarizer: a tie does not evict an already selected hunk', () => {
+  const result = summarizeDiff(
+    ' 3 files changed\n',
+    [hunkOf('kept-a.ts', 3), hunkOf('kept-b.ts', 3), hunkOf('dropped.ts', 3)],
+    { ...policy, maxHunks: 2 },
+  );
+  expect(result.numHunks).toBe(2);
+  expect(result.text).toContain('File: kept-a.ts');
+  expect(result.text).toContain('File: kept-b.ts');
+  expect(result.text).not.toContain('File: dropped.ts');
+});
