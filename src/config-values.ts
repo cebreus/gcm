@@ -28,7 +28,12 @@ export function integerInRange(
 ): number {
   const parsed = parseNumber(value);
   if (value === undefined) return fallback;
-  if (parsed === undefined || !Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+  if (
+    parsed === undefined ||
+    !Number.isSafeInteger(parsed) ||
+    parsed < minimum ||
+    parsed > maximum
+  ) {
     if (invalidName) throw new Error(`Invalid ${invalidName}`);
     return fallback;
   }
@@ -51,11 +56,14 @@ export function numberInRange(
   return parsed;
 }
 
-export function normalizeRetryConfig(values: {
-  maxRetries: NumericInput;
-  retryBaseMs: NumericInput;
-  retryMaxMs: NumericInput;
-}, names?: { maxRetries: string; retryBaseMs: string; retryMaxMs: string }): {
+export function normalizeRetryConfig(
+  values: {
+    maxRetries: NumericInput;
+    retryBaseMs: NumericInput;
+    retryMaxMs: NumericInput;
+  },
+  names?: { maxRetries: string; retryBaseMs: string; retryMaxMs: string },
+): {
   maxRetries: number;
   retryBaseMs: number;
   retryMaxMs: number;

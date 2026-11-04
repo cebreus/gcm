@@ -11,15 +11,18 @@ import {
 } from './src/config-values.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from './src/model-registry.js';
 
-const retry = normalizeRetryConfig({
-  maxRetries: process.env.GCM_MAX_RETRIES,
-  retryBaseMs: process.env.GCM_RETRY_BASE_MS,
-  retryMaxMs: process.env.GCM_RETRY_MAX_MS,
-}, {
-  maxRetries: 'GCM_MAX_RETRIES',
-  retryBaseMs: 'GCM_RETRY_BASE_MS',
-  retryMaxMs: 'GCM_RETRY_MAX_MS',
-});
+const retry = normalizeRetryConfig(
+  {
+    maxRetries: process.env.GCM_MAX_RETRIES,
+    retryBaseMs: process.env.GCM_RETRY_BASE_MS,
+    retryMaxMs: process.env.GCM_RETRY_MAX_MS,
+  },
+  {
+    maxRetries: 'GCM_MAX_RETRIES',
+    retryBaseMs: 'GCM_RETRY_BASE_MS',
+    retryMaxMs: 'GCM_RETRY_MAX_MS',
+  },
+);
 
 export const CONFIG = {
   CHILD_PROCESS_MAX_BUFFER: integerInRange(
