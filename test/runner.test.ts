@@ -1692,14 +1692,14 @@ describe('Refactored Runner', () => {
     // Flow:
     // 1. Pre-flight: 'generate'
     // 2. Review: 'regenerate'
-    // 3. Select Model: 'gemini-2.5-pro'
+    // 3. Select Model: 'gemini-special'
     // -- Loop restarts --
     // 4. Review (2nd run): 'commit'
 
     mockSelect
       .mockResolvedValueOnce('generate') // 1
       .mockResolvedValueOnce('switch') // 2 (Changed from 'regenerate' to 'switch')
-      .mockResolvedValueOnce('gemini-2.5-pro') // 3
+      .mockResolvedValueOnce('gemini-special') // 3
       .mockResolvedValueOnce('commit'); // 4
 
     await executeCommitMessageGeneration([], {
@@ -1792,7 +1792,7 @@ describe('Refactored Runner', () => {
   test('Should use the session model for the active provider', async () => {
     mockLoadSession.mockResolvedValueOnce({
       providerId: 'gemini',
-      modelName: 'gemini-2.5-flash',
+      modelName: 'gemini-special',
       outputMode: null,
     });
     mockGitService.retrieveStagedChanges.mockResolvedValue({
@@ -1821,7 +1821,7 @@ describe('Refactored Runner', () => {
 
     expect(mockGeminiService.generate).toHaveBeenCalledWith(
       expect.objectContaining({
-        opts: expect.objectContaining({ modelOverride: 'gemini-2.5-flash' }) as unknown,
+        opts: expect.objectContaining({ modelOverride: 'gemini-special' }) as unknown,
       }),
     );
   });

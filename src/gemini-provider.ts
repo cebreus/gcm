@@ -42,7 +42,11 @@ export function createGeminiProvider(options: {
       for (const value of discovered) {
         const model = { ...value, name: value.name.replace(/^models\//, '') };
         if (!model.name.startsWith('gemini-')) continue;
-        if (/(embedding|image|tts|audio|live|robotics|computer-use|veo|imagen)/i.test(model.name)) {
+        if (
+          /(^gemini-2\.5-|preview|experimental|embedding|image|tts|audio|live|robotics|computer-use|veo|imagen|nano-banana|omni|transcribe)/i.test(
+            model.name,
+          )
+        ) {
           continue;
         }
         const validationError = getModelSpecValidationError(model);
