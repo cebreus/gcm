@@ -1,6 +1,6 @@
 # User flows
 
-`gcm` has three generation use cases. Flags such as `--provider`, `--model`, `--hint`, `--mode`,
+`gcm` has three generation use cases. Flags such as `--provider`, `--model`, `--hint`,
 `--exclude`, `--verbose` and `--debug` modify these flows; they do not create
 separate ones.
 
@@ -12,11 +12,9 @@ action.
 
 ```mermaid
 flowchart TD
-  A[Run gcm --list-providers] --> B{Provider factory set valid?}
-  B -- No --> X[Show reason and stop]
-  B -- Yes --> C[Check every provider in parallel]
+  A[Run gcm --list-providers] --> C[Check every provider in parallel]
   C --> D[Create provider without loading a model]
-  D --> E[Check identity, setup and text-model catalogue]
+  D --> E[Check setup and text-model catalogue]
   E --> F[Show each provider as available or unavailable]
   F --> G{Available providers}
   G -- All --> H[Exit 0]
