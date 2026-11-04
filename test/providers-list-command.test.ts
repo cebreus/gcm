@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'bun:test';
-import { runListProvidersCommand } from '../src/list-providers-command.js';
+import { runProvidersListCommand } from '../src/providers-list-command.js';
 import type { LanguageModelProvider } from '../src/language-model-service.js';
 
 const model = {
@@ -27,7 +27,7 @@ function createProvider(overrides: Partial<LanguageModelProvider> = {}): Languag
 
 test('list providers reports a safe mixed result and returns 1', async function () {
   const note = mock(function (_message: string, _title?: string) {});
-  const exitCode = await runListProvidersCommand({
+  const exitCode = await runProvidersListCommand({
     factories: [
       {
         id: 'ready',
@@ -68,7 +68,7 @@ test('list providers reports a safe mixed result and returns 1', async function 
 
 test('list providers rejects unusable providers and returns 2', async function () {
   const note = mock(function (_message: string, _title?: string) {});
-  const exitCode = await runListProvidersCommand({
+  const exitCode = await runProvidersListCommand({
     factories: [
       {
         id: 'empty',
@@ -97,7 +97,7 @@ test.each([
   ['unknown failure', 'Provider check failed.'],
 ])('list providers explains %s', async function (error, expected) {
   const note = mock(function (_message: string, _title?: string) {});
-  await runListProvidersCommand({
+  await runProvidersListCommand({
     factories: [
       {
         id: 'failed',

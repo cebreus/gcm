@@ -21,7 +21,7 @@ function formatProbeError(error: unknown): string {
   return 'Provider check failed.';
 }
 
-export async function runListProvidersCommand(options: {
+export async function runProvidersListCommand(options: {
   factories: LanguageModelProviderFactory[];
   output: {
     note(message: string, title?: string): void;

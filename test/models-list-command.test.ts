@@ -1,9 +1,9 @@
 import { expect, mock, test } from 'bun:test';
-import { runListModelsCommand } from '../src/list-models-command.js';
+import { runModelsListCommand } from '../src/models-list-command.js';
 
 test('list models redacts secrets from provider readiness errors', async function () {
   const cancel = mock(function () {});
-  const exitCode = await runListModelsCommand({
+  const exitCode = await runModelsListCommand({
     providerLabel: 'Local',
     readinessError: 'Rejected sk-1234567890abcdef',
     models: async function () {
@@ -18,7 +18,7 @@ test('list models redacts secrets from provider readiness errors', async functio
 
 test('list models redacts secrets from provider discovery errors', async function () {
   const cancel = mock(function () {});
-  const exitCode = await runListModelsCommand({
+  const exitCode = await runModelsListCommand({
     providerLabel: 'Local',
     models: async function () {
       throw new Error('Rejected sk-1234567890abcdef');

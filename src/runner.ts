@@ -3,8 +3,8 @@ import type { ParsedOptions } from './cli.js';
 import { CONFIG } from '../gcm.config.js';
 import { createLogger } from './logger.js';
 import type { Logger, LoggerConfig } from './logger.js';
-import { runListModelsCommand } from './list-models-command.js';
-import { runListProvidersCommand } from './list-providers-command.js';
+import { runModelsListCommand } from './models-list-command.js';
+import { runProvidersListCommand } from './providers-list-command.js';
 import { createGitService } from './services/git-service.js';
 import type { GitService } from './services/git-service.js';
 import { createCommitActionService } from './commit-action-service.js';
@@ -187,12 +187,12 @@ function createRunnerOutput(
   };
 }
 
-async function maybeHandleListModels(
+async function maybeHandleModelsList(
   parsedArgs: ParsedOptions,
   provider: LanguageModelProvider,
 ): Promise<number | null> {
-  if (!parsedArgs.listModels) return null;
-  return runListModelsCommand({
+  if (!parsedArgs.modelsList) return null;
+  return runModelsListCommand({
     providerLabel: provider.label,
     readinessError: provider.readinessError,
     models: () => provider.models(),
@@ -328,8 +328,8 @@ export async function executeCommitMessageGeneration(
       return;
     }
     const factories = createProviderFactories(opts, logger, parsedArgs.debug);
-    if (parsedArgs.listProviders && !parsedArgs.help) {
-      process.exitCode = await runListProvidersCommand({
+    if (parsedArgs.providersList && !parsedArgs.help) {
+      process.exitCode = await runProvidersListCommand({
         factories,
         output: {
           note,
@@ -408,7 +408,7 @@ export async function executeCommitMessageGeneration(
       }
       intro(`${C.bright}${provider.label} Commit Message Helper v${pkg.version}${C.reset}`);
       if (provider.selectionNotice) note(provider.selectionNotice, 'Model fallback');
-      const earlyExitCode = await maybeHandleListModels(parsedArgs, provider);
+      const earlyExitCode = await maybeHandleModelsList(parsedArgs, provider);
       if (earlyExitCode !== null) {
         exitCode = earlyExitCode;
         break;

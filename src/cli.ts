@@ -11,8 +11,8 @@ interface Args extends ParsedArgs {
   verbose?: boolean;
   debug?: boolean;
   apply?: boolean;
-  'list-models'?: boolean;
-  'list-providers'?: boolean;
+  'models-list'?: boolean;
+  'providers-list'?: boolean;
   exclude?: string | string[];
 }
 
@@ -28,8 +28,8 @@ export interface ParsedOptions {
   debug: boolean;
   nonInteractive: boolean;
   apply: boolean;
-  listModels: boolean;
-  listProviders: boolean;
+  modelsList: boolean;
+  providersList: boolean;
   exclude: string[];
 }
 
@@ -131,16 +131,16 @@ export const CLI_OPTION_DEFINITIONS = [
     takesValue: false,
   },
   {
-    name: 'listModels',
-    aliases: ['--list-models'],
-    usage: '--list-models',
+    name: 'modelsList',
+    aliases: ['--models-list'],
+    usage: '--models-list',
     description: 'List available {provider} models and exit.',
     takesValue: false,
   },
   {
-    name: 'listProviders',
-    aliases: ['--list-providers'],
-    usage: '--list-providers',
+    name: 'providersList',
+    aliases: ['--providers-list'],
+    usage: '--providers-list',
     description: 'Actively check available AI providers and exit.',
     takesValue: false,
   },
@@ -261,8 +261,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
         'debug',
         'non-interactive',
         'apply',
-        'list-models',
-        'list-providers',
+        'models-list',
+        'providers-list',
       ],
       string: ['commit', 'commit-range', 'model', 'provider', 'hint', 'exclude'],
     },
@@ -311,8 +311,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     debug: Boolean(parsed.debug),
     nonInteractive,
     apply,
-    listModels: Boolean(parsed['list-models']),
-    listProviders: Boolean(parsed['list-providers']),
+    modelsList: Boolean(parsed['models-list']),
+    providersList: Boolean(parsed['providers-list']),
     exclude: excludePatterns,
   };
 }

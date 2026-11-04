@@ -29,16 +29,17 @@ test('cli: should parse default arguments with empty argv', () => {
     hint: null,
     verbose: false,
     debug: false,
-    listModels: false,
-    listProviders: false,
+    modelsList: false,
+    providersList: false,
     nonInteractive: false,
     apply: false,
     exclude: [],
   });
 });
 
-test('cli: parses --list-providers', () => {
-  expect(parseArgs(['--list-providers']).listProviders).toBe(true);
+test('cli: parses --providers-list and --models-list', () => {
+  expect(parseArgs(['--providers-list']).providersList).toBe(true);
+  expect(parseArgs(['--models-list']).modelsList).toBe(true);
 });
 
 test('cli: parses provider', () => {
@@ -162,6 +163,8 @@ test('cli: gives precedence to flags over string arguments', () => {
 test('cli: rejects unknown flags', () => {
   expect(() => parseArgs(['--commmit', 'abc123'])).toThrow('Unknown flag: --commmit');
   expect(() => parseArgs(['--listModels'])).toThrow('Unknown flag: --listModels');
+  expect(() => parseArgs(['--list-models'])).toThrow('Unknown flag: --list-models');
+  expect(() => parseArgs(['--list-providers'])).toThrow('Unknown flag: --list-providers');
 });
 
 test('cli: rejects unknown clustered flags', () => {

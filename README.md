@@ -44,7 +44,7 @@ gcm --commit HEAD --model gemini-3.7-flash --non-interactive
 gcm --exclude 'dist/*'
 
 # List models available to your API key
-gcm --list-models
+gcm --models-list
 
 # Use local LM Studio
 GCM_PROVIDER=lm-studio gcm
@@ -77,8 +77,8 @@ See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 | `--model <name>`          | Select a model from the active provider.                                                                     |
 | `--provider <name>`       | Select `gemini`, `freellmapi`, or `lm-studio`.                                                               |
 | `--hint <text>`           | Add an instruction for generation.                                                                           |
-| `--list-models`           | List available text-generation models and exit.                                                              |
-| `--list-providers`        | Actively check available AI providers and exit.                                                              |
+| `--models-list`           | List available text-generation models and exit.                                                              |
+| `--providers-list`        | Actively check available AI providers and exit.                                                              |
 | `--non-interactive`       | Generate without prompts; read-only unless `--apply` is also set.                                            |
 | `--apply`                 | Perform the available Git action; requires `--non-interactive`.                                              |
 | `-v, --verbose`           | Show debug-level console logs. Default: off.                                                                 |
@@ -86,7 +86,7 @@ See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 | `-h, --help`              | Show built-in help.                                                                                          |
 | `--version`               | Show the version.                                                                                            |
 
-`--list-providers` returns `0` when all providers are available, `1` when only some are
+`--providers-list` returns `0` when all providers are available, `1` when only some are
 available, and `2` when none are available. Checks do not load LM Studio models.
 
 `--exclude` patterns case-sensitive, match whole path, support `*` and `?`. Excluded files stay staged, will commit; GCM asks confirmation before writing. Generated `dist` files are omitted from analysis but commit normally. Merge commit analysed against first parent.

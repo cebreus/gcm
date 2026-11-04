@@ -202,7 +202,7 @@ describe('Refactored Runner', () => {
       throw new Error('offline');
     });
 
-    await executeCommitMessageGeneration(['--list-providers'], {
+    await executeCommitMessageGeneration(['--providers-list'], {
       logger: mockLogger,
       gitService: mockGitService,
       languageModelProviderFactories: [
@@ -243,7 +243,7 @@ describe('Refactored Runner', () => {
     });
 
     try {
-      await executeCommitMessageGeneration(['--list-providers'], {
+      await executeCommitMessageGeneration(['--providers-list'], {
         logger: mockLogger,
         languageModelProviderFactories: [{ id: 'ready', label: 'Ready', create }],
       });
@@ -255,12 +255,12 @@ describe('Refactored Runner', () => {
     }
   });
 
-  test('Should show help without probing providers when list-providers is also present', async () => {
+  test('Should show help without probing providers when providers-list is also present', async () => {
     const create = mock(async function () {
       throw new Error('must not probe');
     });
 
-    await executeCommitMessageGeneration(['--help', '--list-providers'], {
+    await executeCommitMessageGeneration(['--help', '--providers-list'], {
       logger: mockLogger,
       languageModelProviderFactories: [{ id: 'local', label: 'Local', create }],
     });

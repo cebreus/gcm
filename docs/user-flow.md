@@ -8,11 +8,11 @@ separate ones.
 stops after generation unless explicit `--apply` requests the available Git
 action.
 
-## Provider check: `gcm --list-providers`
+## Provider check: `gcm --providers-list`
 
 ```mermaid
 flowchart TD
-  A[Run gcm --list-providers] --> C[Check every provider in parallel]
+  A[Run gcm --providers-list] --> C[Check every provider in parallel]
   C --> D[Create provider without loading a model]
   D --> E[Check setup and text-model catalogue]
   E --> F[Show each provider as available or unavailable]

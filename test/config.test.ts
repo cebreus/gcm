@@ -144,8 +144,8 @@ test('an unsafe GCM_MODEL still lets the CLI answer --version', async function (
   expect(result.stdout).toContain('gcm ');
 });
 
-test('an unsafe GCM_MODEL stops --list-providers with the real reason', async function () {
-  const result = await runCli(UNSAFE_MODEL, ['--list-providers']);
+test('an unsafe GCM_MODEL stops --providers-list with the real reason', async function () {
+  const result = await runCli(UNSAFE_MODEL, ['--providers-list']);
   expect(result.exitCode).not.toBe(0);
   expect(result.stdout + result.stderr).toContain('Invalid GCM_MODEL');
 });
@@ -157,20 +157,20 @@ test('an unsafe GCM_MODEL still lets the CLI answer --help', async function () {
   expect(result.stdout + result.stderr).not.toContain('Invalid GCM_MODEL');
 });
 
-test('--help wins over --list-models', async function () {
-  const result = await runCli({}, ['--help', '--list-models']);
+test('--help wins over --models-list', async function () {
+  const result = await runCli({}, ['--help', '--models-list']);
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain('Usage');
 });
 
-test('--version wins over --list-providers', async function () {
-  const result = await runCli({}, ['--version', '--list-providers']);
+test('--version wins over --providers-list', async function () {
+  const result = await runCli({}, ['--version', '--providers-list']);
   expect(result.exitCode).toBe(0);
   expect(result.stdout.trim()).toMatch(/^gcm \S+$/);
 });
 
-test('--version wins over --list-models', async function () {
-  const result = await runCli({}, ['--version', '--list-models']);
+test('--version wins over --models-list', async function () {
+  const result = await runCli({}, ['--version', '--models-list']);
   expect(result.exitCode).toBe(0);
   expect(result.stdout.trim()).toMatch(/^gcm \S+$/);
 });

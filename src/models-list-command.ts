@@ -1,6 +1,6 @@
 import { sanitizeTerminalText } from './utils.js';
 
-export async function runListModelsCommand(options: {
+export async function runModelsListCommand(options: {
   providerLabel: string;
   readinessError?: string;
   models(): Promise<import('./model-registry.js').ModelSpec[]>;
