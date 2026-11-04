@@ -1,5 +1,11 @@
 # gcm
 
+## 0.11.1
+
+### Patch Changes
+
+- 26b4b56: Gemini model lists now show stable general-purpose text models and hide legacy, preview, image, audio, and specialist models.
+
 ## 0.11.0
 
 > GCM now gets its model list from the selected AI service. It no longer depends on a fixed list that can become old. Generation stops more safely when an AI service or Git action fails. GitHub Actions now checks changes and publishes ready-to-run files for macOS and Linux.
