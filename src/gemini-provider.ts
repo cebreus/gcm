@@ -27,7 +27,7 @@ function traceBody(body: string): string {
 }
 
 function withRequestTrace(logger: Logger, fetchImpl: ProviderFetch): ProviderFetch {
-  return async function (input, init) {
+  return async (input, init) => {
     logger.log('debug', 'Gemini API request', {
       url: String(input),
       body: traceBody(String(init?.body ?? '')),
@@ -35,9 +35,7 @@ function withRequestTrace(logger: Logger, fetchImpl: ProviderFetch): ProviderFet
     const response = await fetchImpl(input, init);
     const body = await readResponseBody(response.clone())
       .then(traceBody)
-      .catch(function () {
-        return '[response body too large]';
-      });
+      .catch(() => '[response body too large]');
     logger.log('debug', 'Gemini API response', {
       status: response.status,
       body,
@@ -58,9 +56,9 @@ function selectCompatibleModels(discovered: ModelSpec[]): ModelSpec[] {
     }
     compatible.push(model);
   }
-  return requireDistinctModels(compatible, 'Gemini', function (message) {
-    return createLanguageModelApiError(message, { category: 'data' });
-  });
+  return requireDistinctModels(compatible, 'Gemini', message =>
+    createLanguageModelApiError(message, { category: 'data' }),
+  );
 }
 
 export function createGeminiProvider(options: {
@@ -82,7 +80,7 @@ export function createGeminiProvider(options: {
     if (cataloguePromise) return cataloguePromise;
     cataloguePromise = listModels(apiKey)
       .then(selectCompatibleModels)
-      .catch(function (error: unknown) {
+      .catch((error: unknown) => {
         cataloguePromise = null;
         throw error;
       });
@@ -90,9 +88,7 @@ export function createGeminiProvider(options: {
   }
 
   async function generate(params: LanguageModelGenerateParams) {
-    const known = (await loadModels()).some(function (candidate) {
-      return candidate.name === params.modelName;
-    });
+    const known = (await loadModels()).some(candidate => candidate.name === params.modelName);
     if (!known) throw new Error('Unknown Gemini model');
     return generateOpenAiCompatibleChat({
       providerLabel: 'Gemini',

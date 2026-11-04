@@ -235,13 +235,11 @@ async function retrieveStagedChanges(
   const allFiles = parseFileList(fileListRes.text);
   const files = filterExcludedFiles(allFiles, analysisExcludePatterns);
   const explicitlyIncludedPaths = new Set(filterExcludedFiles(allFiles, excludePatterns));
-  const excludedPaths = allFiles.filter(function (path) {
-    return !explicitlyIncludedPaths.has(path);
-  });
+  const excludedPaths = allFiles.filter(path => !explicitlyIncludedPaths.has(path));
   const originalFileCount = allFiles.length;
-  const matchedExcludePatterns = analysisExcludePatterns.filter(function (pattern) {
-    return allFiles.some(path => shouldExcludeFile(path, [pattern]));
-  });
+  const matchedExcludePatterns = analysisExcludePatterns.filter(pattern =>
+    allFiles.some(path => shouldExcludeFile(path, [pattern])),
+  );
   logExcludedFiles(logger, matchedExcludePatterns, originalFileCount, files.length);
   if (files.length === 0) {
     logNoChanges(logger, commitHash);
@@ -308,7 +306,7 @@ function parseIndexEntries(text: string): IndexEntry[] {
   return text
     .split('\0')
     .filter(Boolean)
-    .flatMap(function (line): IndexEntry[] {
+    .flatMap((line): IndexEntry[] => {
       const separator = line.indexOf('\t');
       if (separator < 0) return [];
       const [mode, objectId, stage] = line.slice(0, separator).split(' ');
@@ -413,9 +411,7 @@ async function warnIfCommittedTreeChanged(
     if (committedTree === safety.snapshot.tree) return;
     const changedPaths = parseFileList(
       (await runGit(['diff', '--name-only', '-z', safety.snapshot.tree, committedTree])).text,
-    ).map(function (path) {
-      return JSON.stringify(path);
-    });
+    ).map(path => JSON.stringify(path));
     logger?.log(
       'warn',
       'Commit completed, but pre-commit hooks changed the committed tree after analysis. Paths that differ from the analysed snapshot: ' +

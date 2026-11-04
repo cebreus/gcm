@@ -28,9 +28,7 @@ export function createProviderFactories(
       {
         id: provider.id,
         label: provider.label,
-        create: async function () {
-          return provider;
-        },
+        create: async () => provider,
       },
     ];
   }
@@ -39,39 +37,36 @@ export function createProviderFactories(
       {
         id: 'gemini',
         label: 'Gemini',
-        create: async function () {
-          return createGeminiProvider({
+        create: async () =>
+          createGeminiProvider({
             logger,
             debugApi,
             service: options.geminiService,
             listModels: options.geminiModelLister,
-          });
-        },
+          }),
       },
       {
         id: 'freellmapi',
         label: 'FreeLLMAPI',
-        create: async function () {
-          return createFreeLlmApiProvider({
+        create: async () =>
+          createFreeLlmApiProvider({
             baseUrl: CONFIG.FREELLMAPI_URL,
             model: CONFIG.FREELLMAPI_MODEL,
             token: CONFIG.FREELLMAPI_TOKEN,
             temperature: CONFIG.TEMP,
-          });
-        },
+          }),
       },
       {
         id: 'lm-studio',
         label: 'LM Studio',
-        create: async function (factoryOptions) {
-          return createLmStudioProvider({
+        create: async factoryOptions =>
+          createLmStudioProvider({
             baseUrl: process.env.GCM_LM_STUDIO_URL ?? 'http://127.0.0.1:1234',
             model: process.env.GCM_LM_STUDIO_MODEL,
             token: process.env.LM_API_TOKEN,
             temperature: CONFIG.TEMP,
             probeOnly: factoryOptions?.probeOnly,
-          });
-        },
+          }),
       },
     ]
   );

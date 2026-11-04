@@ -16,9 +16,10 @@ const PROVIDER_CREDENTIAL_NAMES = new Set([
 
 function gitEnvironment(): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(process.env).filter(function (entry): entry is [string, string] {
-      return entry[1] !== undefined && !PROVIDER_CREDENTIAL_NAMES.has(entry[0]);
-    }),
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && !PROVIDER_CREDENTIAL_NAMES.has(entry[0]),
+    ),
   );
 }
 
@@ -55,7 +56,7 @@ async function killSpawnedChild(
       /* ignore */
     }
   }, 2000);
-  void child.exited.then(function () {
+  void child.exited.then(() => {
     clearTimeout(forceKillTimer);
   });
 }
@@ -79,7 +80,7 @@ async function spawnCore(
   let truncated = false;
   let timedOut = false;
   const killState = { killed: false };
-  const timeout = setTimeout(function () {
+  const timeout = setTimeout(() => {
     timedOut = true;
     void killSpawnedChild(child, killState);
   }, timeoutMs);

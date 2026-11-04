@@ -105,7 +105,7 @@ function resolveModelCandidates(url: URL): URL[] {
   }
 
   const seen = new Set<string>();
-  return candidates.filter(function (candidate) {
+  return candidates.filter(candidate => {
     if (seen.has(candidate.href)) return false;
     seen.add(candidate.href);
     return true;
@@ -188,27 +188,14 @@ export async function createFreeLlmApiProvider(options: {
 
   const { models } = await discoverModels(url, options.token);
 
-  if (
-    options.model &&
-    !models.some(function (model) {
-      return model.name === options.model;
-    })
-  ) {
+  if (options.model && !models.some(model => model.name === options.model)) {
     throw new Error('Configured FreeLLMAPI model is not available');
   }
 
-  const byName = new Map(
-    models.map(function (model) {
-      return [model.name, model];
-    }),
-  );
+  const byName = new Map(models.map(model => [model.name, model]));
 
   const defaultModel = options.model ?? DEFAULT_FREELLMAPI_MODEL;
-  if (
-    !models.some(function (model) {
-      return model.name === defaultModel;
-    })
-  ) {
+  if (!models.some(model => model.name === defaultModel)) {
     throw createLanguageModelApiError(
       'FreeLLMAPI auto model is unavailable or lacks context metadata',
     );
@@ -235,8 +222,6 @@ export async function createFreeLlmApiProvider(options: {
     service: {
       generate,
     },
-    models: async function () {
-      return models;
-    },
+    models: async () => models,
   };
 }

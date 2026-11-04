@@ -43,7 +43,7 @@ export async function readResponseBody(response: Response): Promise<string> {
   let bytesRead = 0;
   const body = response.body.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
-      transform: function (chunk, controller): void {
+      transform: (chunk, controller): void => {
         bytesRead += chunk.byteLength;
         if (bytesRead > MAX_RESPONSE_BODY_BYTES) throw new Error('response body too large');
         controller.enqueue(chunk);
@@ -111,10 +111,7 @@ export async function requestProviderText(params: {
     ? AbortSignal.any([params.init.signal, timeoutSignal])
     : timeoutSignal;
   const sleep =
-    params.sleep ??
-    function (milliseconds: number) {
-      return wait(milliseconds, undefined, { signal });
-    };
+    params.sleep ?? ((milliseconds: number) => wait(milliseconds, undefined, { signal }));
 
   for (let attempt = 1; ; attempt += 1) {
     params.onAttempt?.(attempt);

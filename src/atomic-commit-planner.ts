@@ -138,8 +138,9 @@ function escapeAnsiCString(value: string): string {
     .replace(/\r/g, '\\r')
     .replace(/\n/g, '\\n')
     .replace(/\t/g, '\\t')
-    .replace(/[\x00-\x06\x08-\x1a\x1c-\x1f\x7f-\x9f]/g, function (character) {
-      return `\\x${character.charCodeAt(0).toString(16).padStart(2, '0')}`;
-    });
+    .replace(
+      /[\x00-\x06\x08-\x1a\x1c-\x1f\x7f-\x9f]/g,
+      character => `\\x${character.charCodeAt(0).toString(16).padStart(2, '0')}`,
+    );
 }
 import { stripTerminalControlSequences } from './utils.js';

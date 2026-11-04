@@ -52,16 +52,8 @@ function indexEntryKey(entry: IndexEntry): string {
 }
 
 function describeChangedIndexPaths(before: IndexEntry[], after: IndexEntry[]): string | null {
-  const oldEntries = new Map(
-    before.map(function (entry) {
-      return [entry.path, indexEntryKey(entry)];
-    }),
-  );
-  const newEntries = new Map(
-    after.map(function (entry) {
-      return [entry.path, indexEntryKey(entry)];
-    }),
-  );
+  const oldEntries = new Map(before.map(entry => [entry.path, indexEntryKey(entry)]));
+  const newEntries = new Map(after.map(entry => [entry.path, indexEntryKey(entry)]));
   const changes: string[] = [];
   for (const path of newEntries.keys()) {
     const displayed = JSON.stringify(path);
@@ -71,9 +63,7 @@ function describeChangedIndexPaths(before: IndexEntry[], after: IndexEntry[]): s
   for (const path of oldEntries.keys()) {
     if (!newEntries.has(path)) changes.push(`Removed: ${JSON.stringify(path)}`);
   }
-  changes.sort(function (left, right) {
-    return left.localeCompare(right);
-  });
+  changes.sort((left, right) => left.localeCompare(right));
   if (changes.length === 0) return null;
   const shown = changes.slice(0, 4);
   const more = changes.length - shown.length;
@@ -88,9 +78,7 @@ function describeIndexDrift(before: IndexEntry[], after: IndexEntry[]): string {
 }
 
 export function describeExcludedPaths(paths: string[]): string {
-  const shown = paths.slice(0, 4).map(function (path) {
-    return JSON.stringify(path);
-  });
+  const shown = paths.slice(0, 4).map(path => JSON.stringify(path));
   const more = paths.length - shown.length;
   const suffix = more > 0 ? `; ${more} more` : '';
   const noun = paths.length === 1 ? 'path was' : 'paths were';

@@ -33,7 +33,7 @@ export async function runListProvidersCommand(options: {
   };
 }): Promise<number> {
   const results = await Promise.all(
-    options.factories.map(async function (factory) {
+    options.factories.map(async factory => {
       try {
         const provider = await factory.create({ probeOnly: true });
         if (provider.readinessError) throw new Error(provider.readinessError);
@@ -57,7 +57,7 @@ export async function runListProvidersCommand(options: {
     }),
   );
   const report = results
-    .map(function (result) {
+    .map(result => {
       const status = result.available ? 'available' : 'unavailable';
       const style = result.available
         ? options.output.style?.available

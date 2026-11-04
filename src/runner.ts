@@ -43,9 +43,7 @@ import {
 import { runCommitBatch } from './batch-generation.js';
 
 function paint(code: string): (message: string) => string {
-  return function (message) {
-    return `${code}${message}${C.reset}`;
-  };
+  return message => `${code}${message}${C.reset}`;
 }
 
 const C = {
@@ -70,7 +68,7 @@ function getPackageInfo(): PackageInfo {
 function showHelp(providerLabel: string) {
   const packageInfo = getPackageInfo();
   const optionWidth = Math.max(...CLI_OPTION_DEFINITIONS.map(option => option.usage.length));
-  const options = CLI_OPTION_DEFINITIONS.map(function (option) {
+  const options = CLI_OPTION_DEFINITIONS.map(option => {
     const description = option.description.replaceAll('{provider}', providerLabel);
     return `      ${C.cyan}${option.usage.padEnd(optionWidth)}${C.reset}  ${description}`;
   }).join('\n');
@@ -137,13 +135,11 @@ function createRunnerDialogue(
       isCancel,
     },
     clipboard: {
-      write: async function (message) {
+      write: async message => {
         await clipboardy.write(message);
       },
     },
-    models: function () {
-      return provider.models();
-    },
+    models: () => provider.models(),
     providers,
     logger,
   });
@@ -170,9 +166,7 @@ function createRunnerServices(
     languageModelService: provider.service,
     providerId: provider.id,
     providerLabel: provider.label,
-    models: function () {
-      return provider.models();
-    },
+    models: () => provider.models(),
     dialogue,
     commitActions,
     getCommitContextHints: resolveCommitContextHints,
@@ -186,19 +180,17 @@ function createRunnerOutput(
 ): GenerationServices['output'] {
   return {
     isInteractive,
-    startProgress: function (message) {
+    startProgress: message => {
       s.start(message);
     },
-    stopProgress: function (message) {
+    stopProgress: message => {
       s.stop(message);
     },
     cancel,
     note,
     outro,
     sanitizeGeneratedText: sanitizeForDisplay,
-    sanitizeTerminalText: function (message) {
-      return redactSensitiveText(stripTerminalControlSequences(message));
-    },
+    sanitizeTerminalText: message => redactSensitiveText(stripTerminalControlSequences(message)),
     style: {
       cyan: paint(C.cyan),
       dim: paint(C.dim),
@@ -215,9 +207,7 @@ async function maybeHandleListModels(
   return runListModelsCommand({
     providerLabel: provider.label,
     readinessError: provider.readinessError,
-    models: function () {
-      return provider.models();
-    },
+    models: () => provider.models(),
     output: { cancel, note, outro },
   });
 }
@@ -280,13 +270,10 @@ async function runCommitRangeCommand(params: {
     const result = await runCommitBatch({
       targets,
       initialHead,
-      getHead: function () {
-        return gitService.getHeadHash(logger);
-      },
-      hasAmendment: function (hash) {
-        return parsedArgs.apply ? gitService.hasAmendment(hash, logger) : Promise.resolve(false);
-      },
-      runOne: async function (hash) {
+      getHead: () => gitService.getHeadHash(logger),
+      hasAmendment: hash =>
+        parsedArgs.apply ? gitService.hasAmendment(hash, logger) : Promise.resolve(false),
+      runOne: async hash => {
         try {
           const outcome = await runGenerationCommand({
             createServices,
@@ -304,7 +291,7 @@ async function runCommitRangeCommand(params: {
           return false;
         }
       },
-      report: function (message) {
+      report: message => {
         logger.log('info', message);
       },
     });
@@ -362,12 +349,8 @@ export async function executeCommitMessageGeneration(
           outro,
           style: process.stdout.isTTY
             ? {
-                available: function (message) {
-                  return `${C.green}${message}${C.reset}`;
-                },
-                unavailable: function (message) {
-                  return `${C.yellow}${message}${C.reset}`;
-                },
+                available: message => `${C.green}${message}${C.reset}`,
+                unavailable: message => `${C.yellow}${message}${C.reset}`,
               }
             : undefined,
         },
@@ -460,9 +443,8 @@ export async function executeCommitMessageGeneration(
         const outcome = await runCommitRangeCommand({
           gitService,
           range: activeParsedArgs.commitRange,
-          createServices: function () {
-            return createRunnerServices(opts, logger, provider, factories, gitService, false);
-          },
+          createServices: () =>
+            createRunnerServices(opts, logger, provider, factories, gitService, false),
           parsedArgs: activeParsedArgs,
           logger,
           providerReadinessError: provider.readinessError,
@@ -473,9 +455,7 @@ export async function executeCommitMessageGeneration(
         break;
       }
       const outcome = await runGenerationCommand({
-        createServices: function () {
-          return createRunnerServices(opts, logger, provider, factories, gitService);
-        },
+        createServices: () => createRunnerServices(opts, logger, provider, factories, gitService),
         parsedArgs: activeParsedArgs,
         logger,
         providerReadinessError: provider.readinessError,

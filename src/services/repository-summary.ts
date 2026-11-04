@@ -63,9 +63,9 @@ async function readFileFacts(
     maxBytes: CONFIG.PER_FILE_BUFFER,
     allowTruncated: true,
   });
-  const gitDetectedBinary = result.lines.some(function (line) {
-    return /^Binary files .* differ\s*$/.test(line) || line.trim() === 'GIT binary patch';
-  });
+  const gitDetectedBinary = result.lines.some(
+    line => /^Binary files .* differ\s*$/.test(line) || line.trim() === 'GIT binary patch',
+  );
   return {
     file,
     lines: gitDetectedBinary ? [] : result.lines,
@@ -94,9 +94,7 @@ export async function summarizeRepositoryDiff(
         '--stat-width=80',
         dependencies.targetCommit,
         '--',
-        ...stagedFiles.map(function (file) {
-          return `:(literal)${file}`;
-        }),
+        ...stagedFiles.map(file => `:(literal)${file}`),
       ]
     : [
         'diff',
@@ -105,9 +103,7 @@ export async function summarizeRepositoryDiff(
         '--stat',
         '--stat-width=80',
         '--',
-        ...stagedFiles.map(function (file) {
-          return `:(literal)${file}`;
-        }),
+        ...stagedFiles.map(file => `:(literal)${file}`),
       ];
   const stats = await dependencies.spawnStreamImpl(statsArgs, { allowTruncated: true });
   const files = new Array<DiffFileFacts>(stagedFiles.length);
@@ -133,11 +129,7 @@ export async function summarizeRepositoryDiff(
       }
     }
   }
-  await Promise.all(
-    Array.from({ length: Math.min(8, stagedFiles.length) }, function () {
-      return readNextFile();
-    }),
-  );
+  await Promise.all(Array.from({ length: Math.min(8, stagedFiles.length) }, () => readNextFile()));
   const firstFailure = failures.find(Boolean);
   if (firstFailure) throw firstFailure.error;
   const statsText = stats.truncated

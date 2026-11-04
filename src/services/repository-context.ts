@@ -45,7 +45,7 @@ export async function readCommitContextFacts(
     '--pretty=format:%s',
     '--',
     ...changedFiles.map(file => `:(literal)${file}`),
-  ]).then(async function (history) {
+  ]).then(async history => {
     if (history !== null) {
       return { scopeHistorySubjects: history, recentSubjects: history.slice(0, 20) };
     }

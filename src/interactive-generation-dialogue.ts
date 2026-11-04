@@ -263,7 +263,7 @@ export function createInteractiveGenerationDialogue(
 ): InteractiveGenerationDialogue {
   const { prompts } = dependencies;
   return {
-    handleEmptyStaging: async function (targetCommit, stagedFilesFromWorktree) {
+    handleEmptyStaging: async (targetCommit, stagedFilesFromWorktree) => {
       if (targetCommit) {
         prompts.cancel(`No changes found in commit ${targetCommit}.`);
         return 'cancel';
@@ -301,7 +301,7 @@ export function createInteractiveGenerationDialogue(
         return 'retry';
       }
     },
-    configure: async function (state) {
+    configure: async state => {
       for (;;) {
         const providerLabel =
           dependencies.providers.find(provider => provider.id === state.providerId)?.label ??
@@ -332,9 +332,10 @@ export function createInteractiveGenerationDialogue(
         if (action === 'provider') {
           const selectedProvider = await prompts.select({
             message: 'Select AI Provider',
-            options: dependencies.providers.map(function (provider) {
-              return { value: provider.id, label: provider.label };
-            }),
+            options: dependencies.providers.map(provider => ({
+              value: provider.id,
+              label: provider.label,
+            })),
           });
           if (!prompts.isCancel(selectedProvider) && selectedProvider !== state.providerId) {
             return { type: 'switch-provider', providerId: String(selectedProvider) };
@@ -352,7 +353,7 @@ export function createInteractiveGenerationDialogue(
         }
       }
     },
-    review: async function ({ state, commitMessage, commitCapability }) {
+    review: async ({ state, commitMessage, commitCapability }) => {
       let finalMessage = commitMessage;
       if (!commitCapability.allowed && commitCapability.reason) {
         prompts.note(commitCapability.reason, 'Commit unavailable');
@@ -387,7 +388,7 @@ export function createInteractiveGenerationDialogue(
         return actionResult.result;
       }
     },
-    confirmAtomicity: async function (stagedFiles, targetCommit) {
+    confirmAtomicity: async (stagedFiles, targetCommit) => {
       if (targetCommit) return true;
       const stagedGroups = Array.from(new Set(stagedFiles.map(detectAtomicGroup)));
       if (stagedGroups.length <= 1) return true;

@@ -535,9 +535,7 @@ async function runSingleGenerationAttempt(params: {
     targetCommit,
     commitCapability,
   } = params;
-  const modelSpec = (await services.models()).find(function (model) {
-    return model.name === state.modelName;
-  });
+  const modelSpec = (await services.models()).find(model => model.name === state.modelName);
   if (!modelSpec) {
     services.output.cancel('Error: Unknown ' + services.providerLabel + ' model.');
     return 'failure';

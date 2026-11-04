@@ -39,9 +39,7 @@ export function redactSensitiveTextForPrompt(text: string): string {
     )
     .replace(
       /\b(?:AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{31,}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{60,}|sk-(?:proj-)?[A-Za-z0-9_-]{32,}|AQ\.[A-Za-z0-9_-]{24,}|xoxb-[0-9]{6,}-[0-9]{6,}-[A-Za-z0-9-]{24,})\b/g,
-      function (value: string): string {
-        return hasSecretEntropy(value) ? '[REDACTED-KEY]' : value;
-      },
+      (value: string): string => (hasSecretEntropy(value) ? '[REDACTED-KEY]' : value),
     )
     .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED-PEM]');
 }

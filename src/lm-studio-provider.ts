@@ -24,13 +24,11 @@ function parseModel(value: unknown): ModelSpec | null {
   if (!isRecord(value) || value.type !== 'llm' || !isLanguageModelName(value.key)) return null;
   const loadedContexts = Array.isArray(value.loaded_instances)
     ? value.loaded_instances
-        .map(function (instance) {
+        .map(instance => {
           if (!isRecord(instance) || !isRecord(instance.config)) return null;
           return readPositiveTokenCount(instance.config.context_length);
         })
-        .filter(function (context): context is number {
-          return context !== null;
-        })
+        .filter((context): context is number => context !== null)
     : [];
   const catalogContext = readPositiveTokenCount(value.max_context_length);
   const contextWindowTokens =
@@ -82,13 +80,12 @@ async function discoverModels(
     if (!isRecord(entry) || !isLanguageModelName(entry.key)) continue;
     if (
       Array.isArray(entry.loaded_instances) &&
-      entry.loaded_instances.some(function (instance) {
-        return (
+      entry.loaded_instances.some(
+        instance =>
           isRecord(instance) &&
           isRecord(instance.config) &&
-          (readPositiveTokenCount(instance.config.context_length) ?? 0) > 0
-        );
-      })
+          (readPositiveTokenCount(instance.config.context_length) ?? 0) > 0,
+      )
     ) {
       loadedModelIds.add(entry.key);
     }
@@ -110,12 +107,7 @@ export async function createLmStudioProvider(options: {
     throw createLanguageModelApiError('Invalid LM Studio API token');
   }
   let { models, loadedModelIds } = await discoverModels(url, options.token);
-  if (
-    options.model &&
-    !models.some(function (model) {
-      return model.name === options.model;
-    })
-  ) {
+  if (options.model && !models.some(model => model.name === options.model)) {
     throw new Error('Configured LM Studio model is not available');
   }
   async function loadModel(modelName: string): Promise<void> {
@@ -142,10 +134,7 @@ export async function createLmStudioProvider(options: {
     }
   }
   let selectedModel =
-    options.model ??
-    models.find(function (model) {
-      return model.name === PREFERRED_LM_STUDIO_MODEL;
-    })?.name;
+    options.model ?? models.find(model => model.name === PREFERRED_LM_STUDIO_MODEL)?.name;
   let selectionNotice: string | undefined;
   if (selectedModel && !options.probeOnly) {
     try {
@@ -159,17 +148,9 @@ export async function createLmStudioProvider(options: {
   const firstModel = models[0];
   if (!firstModel)
     throw createLanguageModelApiError('LM Studio returned no compatible text models');
-  const byName = new Map(
-    models.map(function (model) {
-      return [model.name, model];
-    }),
-  );
+  const byName = new Map(models.map(model => [model.name, model]));
   const defaultModel =
-    selectedModel ??
-    models.find(function (model) {
-      return loadedModelIds.has(model.name);
-    })?.name ??
-    firstModel.name;
+    selectedModel ?? models.find(model => loadedModelIds.has(model.name))?.name ?? firstModel.name;
   if (!options.model && defaultModel !== PREFERRED_LM_STUDIO_MODEL) {
     selectionNotice = `${selectionNotice ?? `${PREFERRED_LM_STUDIO_MODEL} is unavailable`}; using ${defaultModel}`;
   }
@@ -195,8 +176,6 @@ export async function createLmStudioProvider(options: {
     service: {
       generate,
     },
-    models: async function () {
-      return models;
-    },
+    models: async () => models,
   };
 }
