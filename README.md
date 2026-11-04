@@ -113,7 +113,7 @@ Rationale detail: [commit consistency](docs/adr/0002-commit-action-consistency.m
 
 Analysed diff is sent to the selected provider. LM Studio stays on the configured loopback URL. Known Google, AWS, GitHub, Slack, OpenAI-style keys, JWTs, PEM blocks redacted, but pattern-based redaction can't recognise every secret.
 
-`--debug` writes capped request/response traces to `.debug.log`. Treat file sensitive, delete after use. See [secret redaction](docs/adr/0004-redact-secrets-leaving-the-machine.md).
+`--debug` prints redacted request/response traces to the console, each body capped at 32 KiB. No trace file is written. The traces contain the analysed diff, so avoid `--debug` where the output is kept: a shared terminal, a recorded session or CI logs. See [secret redaction](docs/adr/0004-redact-secrets-leaving-the-machine.md).
 
 ## Configuration
 
