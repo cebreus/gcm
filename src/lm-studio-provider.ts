@@ -4,7 +4,12 @@ import {
   type LanguageModelGenerateParams,
   type LanguageModelProvider,
 } from './language-model-service.js';
-import { readPositiveTokenCount, requireDistinctModels, type ModelSpec } from './model-registry.js';
+import {
+  collectSortedModels,
+  readPositiveTokenCount,
+  requireDistinctModels,
+  type ModelSpec,
+} from './model-registry.js';
 import { parseProviderBaseUrl } from './provider-http.js';
 import {
   generateOpenAiCompatibleChat,
@@ -88,14 +93,7 @@ async function discoverModels(
       loadedModelIds.add(entry.key);
     }
   }
-  const models = payload.models
-    .map(parseModel)
-    .filter(function (model): model is ModelSpec {
-      return model !== null;
-    })
-    .sort(function (left, right) {
-      return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
-    });
+  const models = collectSortedModels(payload.models, parseModel);
   requireDistinctModels(models, 'LM Studio', createLanguageModelApiError);
   return { models, loadedModelIds };
 }

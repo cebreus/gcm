@@ -12,7 +12,12 @@ import {
   requestLanguageModelJson,
   sanitizeLanguageModelErrorText,
 } from './openai-compatible-client.js';
-import { readPositiveTokenCount, requireDistinctModels, type ModelSpec } from './model-registry.js';
+import {
+  collectSortedModels,
+  readPositiveTokenCount,
+  requireDistinctModels,
+  type ModelSpec,
+} from './model-registry.js';
 import { parseProviderBaseUrl } from './provider-http.js';
 
 const DEFAULT_FREELLMAPI_MODEL = 'auto';
@@ -150,14 +155,7 @@ async function discoverModels(url: URL, token?: string): Promise<{ models: Model
         }
       }
 
-      const models = rawList
-        .map(parseModel)
-        .filter(function (model): model is ModelSpec {
-          return model !== null;
-        })
-        .sort(function (left, right) {
-          return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
-        });
+      const models = collectSortedModels(rawList, parseModel);
 
       requireDistinctModels(models, 'FreeLLMAPI', candidateCatalogueError);
       return { models };

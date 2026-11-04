@@ -11,6 +11,17 @@ export interface ModelSpec {
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
 
+/** Parses a raw provider catalogue into specs, dropping unusable entries and sorting by name. */
+export function collectSortedModels(
+  rawEntries: readonly unknown[],
+  parseModel: (entry: unknown) => ModelSpec | null,
+): ModelSpec[] {
+  return rawEntries
+    .map(parseModel)
+    .filter((model): model is ModelSpec => model !== null)
+    .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+}
+
 /**
  * Rejects a catalogue that is empty or names the same model twice. Providers
  * pass their own error factory so the failure keeps their error taxonomy.
