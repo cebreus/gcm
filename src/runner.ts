@@ -58,15 +58,23 @@ const C = {
 
 function showHelp(providerLabel: string) {
   const optionWidth = Math.max(...CLI_OPTION_DEFINITIONS.map(option => option.usage.length));
+  const descriptionLine = new RegExp(`.{1,${80 - optionWidth - 8}}(?:\\s|$)`, 'g');
   const options = CLI_OPTION_DEFINITIONS.map(option => {
     const description = option.description.replaceAll('{provider}', providerLabel);
-    return `      ${C.cyan}${option.usage.padEnd(optionWidth)}${C.reset}  ${description}`;
+    const [first, ...rest] = (description.match(descriptionLine) ?? [description]).map(line =>
+      line.trim(),
+    );
+    return [
+      `      ${C.cyan}${option.usage.padEnd(optionWidth)}${C.reset}  ${first}`,
+      ...rest.map(line => ' '.repeat(optionWidth + 8) + line),
+    ].join('\n');
   }).join('\n');
   const helpText = `
     ${C.bright}${providerLabel} Commit Message Helper${C.reset}
     Version: ${pkg.version}
 
-    Automatically generates professional Conventional Commit messages using ${providerLabel} AI.
+    Automatically generates professional Conventional Commit messages
+    using ${providerLabel} AI.
 
     ${C.bright}Usage:${C.reset}
       gcm [options]
@@ -75,28 +83,31 @@ function showHelp(providerLabel: string) {
 ${options}
 
     ${C.bright}Provider:${C.reset}
-      Use ${C.cyan}--provider <name>${C.reset}, choose in interactive Settings, or set ${C.cyan}GCM_PROVIDER${C.reset}.
+      Use ${C.cyan}--provider <name>${C.reset}, choose in interactive Settings,
+      or set ${C.cyan}GCM_PROVIDER${C.reset}.
       Available values: gemini, freellmapi, lm-studio.
       Example: ${C.cyan}GCM_PROVIDER=lm-studio gcm${C.reset}
 
     ${C.bright}Examples:${C.reset}
-      gcm                                      Generate from staged changes.
-      gcm --commit HEAD                        Generate from the latest commit.
-      gcm --commit-range 'abc123^..def456' --non-interactive --apply
-                                               Generate from abc123 through def456.
-                                               The first commit is included because of ^.
+      ${C.cyan}gcm${C.reset}                                      Generate from staged changes.
+      ${C.cyan}gcm --commit HEAD${C.reset}                        Generate from the latest commit.
+      ${C.cyan}gcm --commit-range 'abc123^..def456' --non-interactive --apply${C.reset}
+        Generate from abc123 through def456; ^ includes abc123.
 
     ${C.bright}Commit Safety:${C.reset}
       - Without ${C.cyan}--commit${C.reset} the action commits the staged changes.
       - With ${C.cyan}--commit${C.reset} on an unpublished HEAD the action amends that commit.
       - With ${C.cyan}--commit${C.reset} on any other commit the action adds an 'amend!' commit.
         History stays intact until you run 'git rebase --autosquash' yourself.
-      - Amend is never offered for a commit already reachable from a remote branch.
-      - Nothing is offered for a commit unreachable from HEAD, on a detached HEAD,
-        or while the index has staged changes.
+      - Amend is never offered for a commit already reachable from
+        a remote branch.
+      - Nothing is offered for a commit unreachable from HEAD,
+        on a detached HEAD, or while the index has staged changes.
       - All actions are disabled when git has unresolved conflicts.
-      - All actions are disabled while merge/rebase/cherry-pick/revert/bisect is in progress.
-      - ${C.cyan}--commit-range${C.reset} creates one separate 'amend!' commit per target and never runs rebase.
+      - All actions are disabled while merge/rebase/cherry-pick/revert/bisect
+        is in progress.
+      - ${C.cyan}--commit-range${C.reset} creates one separate 'amend!' commit per target
+        and never runs rebase.
 
     `;
   process.stdout.write(helpText.trim() + '\n');
