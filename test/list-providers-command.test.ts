@@ -78,7 +78,7 @@ test('list providers rejects unusable providers and returns 2', async function (
             id: 'empty',
             label: 'Empty',
             models: async function () {
-              return [];
+              throw new Error('Gemini returned no compatible text models');
             },
           });
         },

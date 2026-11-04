@@ -1,15 +1,15 @@
 import { expect, test } from 'bun:test';
+import { CONFIG } from '../gcm.config.js';
 import { createLmStudioProvider } from '../src/lm-studio-provider.js';
 import { isLanguageModelApiError } from '../src/language-model-service.js';
 
-function createGenerateParams(timeoutMs?: number) {
+function createGenerateParams() {
   return {
     promptContext: 'diff content',
     systemPrompt: 'system rules',
     meta: {},
     modelName: 'local-model',
     maxOutputTokens: 8_192,
-    timeoutMs,
   };
 }
 
@@ -287,7 +287,6 @@ test('LM Studio maps chat requests and responses without putting its token in th
     const provider = await createLmStudioProvider({
       baseUrl: server.url.origin,
       token: 'local-secret-token',
-      temperature: 0.25,
     });
     const response = await provider.service.generate({
       ...createGenerateParams(),
@@ -305,7 +304,7 @@ test('LM Studio maps chat requests and responses without putting its token in th
           { role: 'system', content: 'rules [REDACTED-TOKEN]' },
           { role: 'user', content: 'diff [REDACTED-TOKEN]' },
         ],
-        temperature: 0.25,
+        temperature: CONFIG.TEMP,
         max_tokens: 8_192,
         stream: false,
       },
@@ -372,36 +371,6 @@ test('LM Studio rejects secret-bearing catalogue metadata before it reaches prov
     ).rejects.toMatchObject({
       name: 'LanguageModelApiError',
       message: 'Invalid LM Studio model metadata',
-    });
-  } finally {
-    await server.stop(true);
-  }
-});
-
-test('LM Studio normalizes a timeout while reading the response body', async function () {
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: function (request) {
-      if (request.method === 'GET') {
-        return Response.json({
-          models: [{ key: 'local-model', type: 'llm', max_context_length: 16_384 }],
-        });
-      }
-      return new Response(
-        new ReadableStream({
-          start: function (controller) {
-            controller.enqueue(new TextEncoder().encode('{"choices":'));
-          },
-        }),
-      );
-    },
-  });
-  try {
-    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
-    await expect(provider.service.generate(createGenerateParams(5))).rejects.toMatchObject({
-      name: 'LanguageModelApiError',
-      message: 'LM Studio request timed out',
     });
   } finally {
     await server.stop(true);
@@ -520,54 +489,6 @@ test('LM Studio rejects malformed API tokens before making a request', async fun
     name: 'LanguageModelApiError',
     message: 'Invalid LM Studio API token',
   });
-});
-
-test('LM Studio rejects invalid generation timeouts with a provider-owned error', async function () {
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: function () {
-      return Response.json({
-        models: [{ key: 'local-model', type: 'llm', max_context_length: 16_384 }],
-      });
-    },
-  });
-  try {
-    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
-    await expect(
-      provider.service.generate(createGenerateParams(Number.POSITIVE_INFINITY)),
-    ).rejects.toMatchObject({
-      name: 'LanguageModelApiError',
-      message: 'Invalid LM Studio timeout',
-    });
-  } finally {
-    await server.stop(true);
-  }
-});
-
-test('LM Studio normalizes generation timeouts', async function () {
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: async function (request) {
-      if (request.method === 'GET') {
-        return Response.json({
-          models: [{ key: 'local-model', type: 'llm', max_context_length: 16_384 }],
-        });
-      }
-      await Bun.sleep(100);
-      return Response.json({});
-    },
-  });
-  try {
-    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
-    await expect(provider.service.generate(createGenerateParams(5))).rejects.toMatchObject({
-      name: 'LanguageModelApiError',
-      message: 'LM Studio request timed out',
-    });
-  } finally {
-    await server.stop(true);
-  }
 });
 
 test.each([

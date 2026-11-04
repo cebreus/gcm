@@ -4,14 +4,14 @@ import { requestProviderText } from '../src/provider-http.js';
 
 const retry = { maxRetries: 2, retryBaseMs: 10, retryMaxMs: 100 };
 
-test('OpenAI-compatible transport retries transient HTTP failures', async function () {
+test('provider transport retries transient HTTP failures', async function () {
   let calls = 0;
   const delays: number[] = [];
-  const payload = await requestLanguageModelJson({
-    providerLabel: 'Test provider',
+  const result = await requestProviderText({
     url: new URL('https://example.test/v1/models'),
     timeoutMs: 1_000,
     retry,
+    retryNetworkErrors: false,
     sleep: async function (milliseconds) {
       delays.push(milliseconds);
     },
@@ -27,18 +27,18 @@ test('OpenAI-compatible transport retries transient HTTP failures', async functi
     },
   });
 
-  expect(payload).toEqual({ ok: true });
+  expect(JSON.parse(result.body)).toEqual({ ok: true });
   expect(calls).toBe(2);
   expect(delays).toEqual([10]);
 });
 
-test('OpenAI-compatible transport retries network failures within its bound', async function () {
+test('provider transport retries network failures within its bound', async function () {
   let calls = 0;
-  const payload = await requestLanguageModelJson({
-    providerLabel: 'Test provider',
+  const result = await requestProviderText({
     url: new URL('https://example.test/v1/models'),
     timeoutMs: 1_000,
     retry,
+    retryNetworkErrors: true,
     sleep: async function () {},
     fetchImpl: async function () {
       calls += 1;
@@ -47,7 +47,7 @@ test('OpenAI-compatible transport retries network failures within its bound', as
     },
   });
 
-  expect(payload).toEqual({ ok: true });
+  expect(JSON.parse(result.body)).toEqual({ ok: true });
   expect(calls).toBe(3);
 });
 
@@ -58,8 +58,6 @@ test('OpenAI-compatible transport does not retry permanent HTTP failures', async
       providerLabel: 'Test provider',
       url: new URL('https://example.test/v1/models'),
       timeoutMs: 1_000,
-      retry,
-      sleep: async function () {},
       fetchImpl: async function () {
         calls += 1;
         return Response.json({ error: 'bad request' }, { status: 400 });
@@ -77,8 +75,6 @@ test('OpenAI-compatible transport does not retry ambiguous gateway failures for 
       url: new URL('https://example.test/v1/chat/completions'),
       init: { method: 'POST' },
       timeoutMs: 1_000,
-      retry,
-      sleep: async function () {},
       fetchImpl: async function () {
         calls += 1;
         return Response.json({ error: 'gateway failed' }, { status: 504 });

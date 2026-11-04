@@ -8,6 +8,7 @@ import {
 import type { Logger, LogMetadata } from './logger.js';
 import { isLanguageModelApiError, type ModelSpec } from './language-model-service.js';
 import { resolveTokenBudget } from './model-registry.js';
+import { isRecord } from './openai-compatible-client.js';
 import { parseLanguageModelOutput } from './parser.js';
 import { estimateTokenCount } from './utils.js';
 import type { CommitContextHints } from './scope-detector.js';
@@ -49,8 +50,8 @@ export type GenerationServices = {
   };
 };
 
-export type ProviderSwitchOutcome = { type: 'switch-provider'; providerId: string };
-export type TerminalOutcome = 'success' | 'failure' | ProviderSwitchOutcome;
+type ProviderSwitchOutcome = { type: 'switch-provider'; providerId: string };
+type TerminalOutcome = 'success' | 'failure' | ProviderSwitchOutcome;
 
 export function createGenerationState(
   parsedArgs: ParsedOptions,
@@ -71,10 +72,6 @@ export function createGenerationState(
       userHint: parsedArgs.hint ?? undefined,
     },
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 export async function runGenerationCommand(params: {
@@ -116,7 +113,7 @@ export async function runGenerationCommand(params: {
     } else if (/unknown revision/i.test(errStr))
       output.cancel(`Error: Invalid commit SHA: ${targetCommit}`);
     else if (isLanguageModelApiError(error)) {
-      const metadata = error.metadata ?? {};
+      const { metadata } = error;
       let status = 'Unknown';
       if (typeof metadata.status === 'string' || typeof metadata.status === 'number') {
         status = String(metadata.status);
@@ -420,7 +417,7 @@ function buildLogMetadata(
   targetCommit: string | null,
 ): LogMetadata {
   return {
-    targetCommit: targetCommit ?? null,
+    targetCommit,
     numFiles: staged.stagedFiles.length,
     origLen: staged.stagedDiff.length,
     truncated: staged.truncated,
@@ -540,11 +537,10 @@ async function runSingleGenerationAttempt(params: {
     services.output.cancel('Error: Unknown ' + services.providerLabel + ' model.');
     return 'failure';
   }
-  const systemPrompt = SYSTEM_INSTRUCTIONS;
   const { maxOutputTokens, maxAvailableTokens } = resolveTokenBudget(
     modelSpec.limits,
     CONFIG.MAX_OUTPUT_TOKENS,
-    estimateTokenCount(systemPrompt, CONFIG.TOKEN_BYTES_RATIO),
+    estimateTokenCount(SYSTEM_INSTRUCTIONS, CONFIG.TOKEN_BYTES_RATIO),
   );
   if (maxAvailableTokens <= 0) {
     services.output.cancel(
@@ -573,12 +569,12 @@ async function runSingleGenerationAttempt(params: {
     logger,
   });
   logger.log('debug', 'Run started', {
-    targetCommit: targetCommit ?? null,
+    targetCommit,
   });
   services.output.startProgress(`Generating commit message with ${state.modelName}...`);
   const response = await services.languageModelService.generate({
     promptContext: contextResult.promptContext,
-    systemPrompt,
+    systemPrompt: SYSTEM_INSTRUCTIONS,
     meta,
     modelName: state.modelName,
     maxOutputTokens,

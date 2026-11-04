@@ -13,11 +13,9 @@ export interface Logger {
   log: (level: LogLevel, message: string, meta?: LogMetadata) => void;
 }
 
-interface LoggerState {
-  LOG_LEVEL: string;
-}
-
 const DEFAULT_LEVEL = 'info';
+
+const SENSITIVE_KEY_PATTERN = /key|token|pass|secret/i;
 
 const levels: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
@@ -30,7 +28,6 @@ function writeStderrLine(text: string): void {
 }
 
 function sanitiseTextForLogs(text: string, maxLen = 256): string {
-  if (!text || typeof text !== 'string') return text;
   const out = stripTerminalControlSequences(
     redactSensitiveText(text).replace(/(key|token|pass|secret)=[^&\s]+/gi, '$1=[REDACTED]'),
   );
@@ -40,9 +37,7 @@ function sanitiseTextForLogs(text: string, maxLen = 256): string {
 
 function redactForLogs(value: unknown, seen = new WeakSet<object>()): unknown {
   if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'string') {
-    return sanitiseTextForLogs(value);
-  }
+  if (typeof value === 'string') return sanitiseTextForLogs(value);
   if (typeof value === 'object' && value !== null) {
     if (seen.has(value)) return '[Circular]';
     seen.add(value);
@@ -55,7 +50,7 @@ function redactForLogs(value: unknown, seen = new WeakSet<object>()): unknown {
     const record = value as LogMetadata;
     for (const key in record) {
       if (!Object.prototype.hasOwnProperty.call(record, key)) continue;
-      if (/key|token|pass|secret/i.test(key)) {
+      if (SENSITIVE_KEY_PATTERN.test(key)) {
         output[key] = '[REDACTED]';
         continue;
       }
@@ -73,10 +68,7 @@ function redactForLogs(value: unknown, seen = new WeakSet<object>()): unknown {
 function sanitiseMetaForLogs(meta: LogMetadata): LogMetadata {
   const out: LogMetadata = {};
   for (const key of Object.keys(meta)) {
-    const value = meta[key];
-    if (/key|token|pass|secret/i.test(key)) out[key] = '[REDACTED-KEY]';
-    else if (typeof value === 'string') out[key] = sanitiseTextForLogs(value);
-    else out[key] = redactForLogs(value);
+    out[key] = SENSITIVE_KEY_PATTERN.test(key) ? '[REDACTED-KEY]' : redactForLogs(meta[key]);
   }
   return out;
 }
@@ -87,16 +79,7 @@ function formatLogLine(ts: string, level: LogLevel, message: string): string {
 
 function formatLogMeta(meta: LogMetadata | undefined): string {
   if (!meta || Object.keys(meta).length === 0) return '';
-  try {
-    return ' ' + JSON.stringify(meta);
-  } catch {
-    return ' [Unserializable metadata]';
-  }
-}
-
-function shouldLogLevel(state: LoggerState, level: LogLevel): boolean {
-  const current = levels[state.LOG_LEVEL as LogLevel] ?? levels.info;
-  return (levels[level] ?? levels.info) >= current;
+  return ' ' + JSON.stringify(meta);
 }
 
 function writeRuntimeLog(level: LogLevel, formatted: string, meta: LogMetadata): void {
@@ -108,28 +91,17 @@ function writeRuntimeLog(level: LogLevel, formatted: string, meta: LogMetadata):
   writeStdoutLine(line);
 }
 
-function createLogFunction(
-  state: LoggerState,
-): (level: LogLevel, message: string, meta?: LogMetadata) => void {
-  return function log(level: LogLevel, message: string, meta?: LogMetadata): void {
-    if (!shouldLogLevel(state, level)) return;
-    const metaLocal = meta ?? {};
-    writeRuntimeLog(
-      level,
-      formatLogLine(new Date().toISOString(), level, sanitiseTextForLogs(message, Infinity)),
-      sanitiseMetaForLogs(metaLocal),
-    );
-  };
-}
-
-function createLoggerState(config?: LoggerConfig): LoggerState {
-  return {
-    LOG_LEVEL: stringOrDefault(config?.LOG_LEVEL, DEFAULT_LEVEL),
-  };
-}
-
 export function createLogger(config?: LoggerConfig): Logger {
-  const state = createLoggerState(config);
-  const log = createLogFunction(state);
-  return { log };
+  const threshold =
+    levels[stringOrDefault(config?.LOG_LEVEL, DEFAULT_LEVEL) as LogLevel] ?? levels.info;
+  return {
+    log(level, message, meta) {
+      if (levels[level] < threshold) return;
+      writeRuntimeLog(
+        level,
+        formatLogLine(new Date().toISOString(), level, sanitiseTextForLogs(message, Infinity)),
+        sanitiseMetaForLogs(meta ?? {}),
+      );
+    },
+  };
 }

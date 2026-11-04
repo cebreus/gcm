@@ -53,7 +53,6 @@ export function createProviderFactories(
             baseUrl: CONFIG.FREELLMAPI_URL,
             model: CONFIG.FREELLMAPI_MODEL,
             token: CONFIG.FREELLMAPI_TOKEN,
-            temperature: CONFIG.TEMP,
           }),
       },
       {
@@ -64,7 +63,6 @@ export function createProviderFactories(
             baseUrl: process.env.GCM_LM_STUDIO_URL ?? 'http://127.0.0.1:1234',
             model: process.env.GCM_LM_STUDIO_MODEL,
             token: process.env.LM_API_TOKEN,
-            temperature: CONFIG.TEMP,
             probeOnly: factoryOptions?.probeOnly,
           }),
       },

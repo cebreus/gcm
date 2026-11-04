@@ -4,9 +4,8 @@ export type ModelTokenLimits =
 
 export interface ModelSpec {
   name: string;
-  label: string; // Friendly name for UI
+  label: string;
   limits: ModelTokenLimits;
-  description?: string;
 }
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
@@ -45,7 +44,7 @@ export function readPositiveTokenCount(value: unknown): number | null {
   return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
 }
 
-export interface TokenBudget {
+interface TokenBudget {
   maxOutputTokens: number;
   maxAvailableTokens: number;
 }

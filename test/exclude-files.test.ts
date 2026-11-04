@@ -146,7 +146,7 @@ test('exclude-files: diff requests only include non-excluded paths', async () =>
     gitCommandRunner: async args => {
       calls.push(args);
       return {
-        text: args.includes('--name-only') ? 'src/app.ts\n.env.local\n' : 'diff',
+        text: args.includes('--name-only') ? 'src/app.ts\0.env.local\0' : 'diff',
         truncated: false,
       };
     },
@@ -161,7 +161,7 @@ test('exclude-files: carries excluded staged paths alongside the analysed snapsh
   const service = createGitService({
     gitCommandRunner: async args => {
       if (args.includes('--name-only'))
-        return { text: 'src/app.ts\nsecrets.txt\n', truncated: false };
+        return { text: 'src/app.ts\0secrets.txt\0', truncated: false };
       if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
       if (args[0] === 'ls-files')
         return {
@@ -177,31 +177,10 @@ test('exclude-files: carries excluded staged paths alongside the analysed snapsh
   expect(staged?.excludedPaths).toEqual(['secrets.txt']);
 });
 
-test('exclude-files: parses quoted and NUL-separated file-list fixtures as real paths', async () => {
-  const quotedPath = 'žluťoučký.txt';
+test('exclude-files: parses NUL-separated file-list fixtures as real paths', async () => {
   const nulPath = ' leading space.txt';
   const quotedNulPath = '"quoted name"';
-  const calls: string[][] = [];
   const service = createGitService({
-    gitCommandRunner: async args => {
-      calls.push(args);
-      if (args.includes('--name-only')) {
-        return {
-          text: '"\\305\\276lu\\305\\245ou\\304\\215k\\303\\275.txt"\n',
-          truncated: false,
-        };
-      }
-      if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
-      if (args[0] === 'ls-files') return { text: '', truncated: false };
-      return { text: 'diff', truncated: false };
-    },
-  });
-
-  const quoted = await service.retrieveStagedChanges(null, null, [quotedPath]);
-  expect(quoted).toBeNull();
-  expect(calls[0]).toEqual(['diff', '--staged', '--name-only', '-z']);
-
-  const nulService = createGitService({
     gitCommandRunner: async args => {
       if (args.includes('--name-only')) {
         return { text: `${nulPath}\0${quotedNulPath}\0source.ts\0`, truncated: false };
@@ -212,7 +191,7 @@ test('exclude-files: parses quoted and NUL-separated file-list fixtures as real 
     },
   });
 
-  const nul = await nulService.retrieveStagedChanges(null, null, [nulPath, quotedNulPath]);
+  const nul = await service.retrieveStagedChanges(null, null, [nulPath, quotedNulPath]);
   expect(nul?.stagedFiles).toEqual(['source.ts']);
 });
 

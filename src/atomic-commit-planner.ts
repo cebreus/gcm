@@ -1,3 +1,5 @@
+import { WORKSPACE_PATH_PATTERN } from './scope-detector.js';
+
 export function buildAtomicSplitProposal(
   stagedFiles: readonly string[],
   includeCommands = true,
@@ -48,7 +50,7 @@ export function detectAtomicGroup(file: string): string {
   if (isDependencyMetadataFile(file)) return 'deps';
   if (isDocsOrFormattingFile(file)) return 'docs-formatting';
 
-  const workspaceMatch = /^(apps|packages|sites|tools)\/([^/]+)/.exec(file);
+  const workspaceMatch = WORKSPACE_PATH_PATTERN.exec(file);
   if (workspaceMatch?.[2]) return workspaceMatch[2];
   if (file.startsWith('.github/')) return 'ci';
   if (/^(infra|scripts)\//.test(file)) return 'tooling';

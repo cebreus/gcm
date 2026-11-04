@@ -28,7 +28,7 @@ import {
   isCancel,
   cancel,
 } from '@clack/prompts';
-import { redactSensitiveText, sanitizeForDisplay, stripTerminalControlSequences } from './utils.js';
+import { sanitizeForDisplay, sanitizeTerminalText } from './utils.js';
 import clipboardy from 'clipboardy';
 import pkg from '../package.json';
 import {
@@ -56,17 +56,7 @@ const C = {
   magenta: '\x1b[35m',
 };
 
-interface PackageInfo {
-  name: string;
-  version: string;
-}
-
-function getPackageInfo(): PackageInfo {
-  return { name: pkg.name, version: pkg.version };
-}
-
 function showHelp(providerLabel: string) {
-  const packageInfo = getPackageInfo();
   const optionWidth = Math.max(...CLI_OPTION_DEFINITIONS.map(option => option.usage.length));
   const options = CLI_OPTION_DEFINITIONS.map(option => {
     const description = option.description.replaceAll('{provider}', providerLabel);
@@ -74,7 +64,7 @@ function showHelp(providerLabel: string) {
   }).join('\n');
   const helpText = `
     ${C.bright}${providerLabel} Commit Message Helper${C.reset}
-    Version: ${packageInfo.version}
+    Version: ${pkg.version}
 
     Automatically generates professional Conventional Commit messages using ${providerLabel} AI.
 
@@ -120,7 +110,6 @@ export interface RunnerOptions extends ProviderFactoryOptions {
 }
 
 function createRunnerDialogue(
-  logger: Logger,
   provider: LanguageModelProvider,
   providers: Array<{ id: string; label: string }>,
 ): InteractiveGenerationDialogue {
@@ -141,7 +130,6 @@ function createRunnerDialogue(
     },
     models: () => provider.models(),
     providers,
-    logger,
   });
 }
 
@@ -155,7 +143,7 @@ function createRunnerServices(
 ): Omit<GenerationServices, 'output'> {
   const contextService =
     opts.contextService ?? createContextService({ summarizeLargeDiff: summarizeRepositoryDiff });
-  const dialogue = createRunnerDialogue(logger, provider, providers);
+  const dialogue = createRunnerDialogue(provider, providers);
   const commitActions = createCommitActionService({ gitService, logger, allowDirectAmend });
   async function resolveCommitContextHints(files: string[]) {
     return getCommitContextHints(files, await readCommitContextFacts(files));
@@ -176,7 +164,7 @@ function createRunnerServices(
 
 function createRunnerOutput(
   s: ReturnType<typeof spinner>,
-  isInteractive = Boolean(process.stdin.isTTY),
+  isInteractive: boolean,
 ): GenerationServices['output'] {
   return {
     isInteractive,
@@ -190,7 +178,7 @@ function createRunnerOutput(
     note,
     outro,
     sanitizeGeneratedText: sanitizeForDisplay,
-    sanitizeTerminalText: message => redactSensitiveText(stripTerminalControlSequences(message)),
+    sanitizeTerminalText,
     style: {
       cyan: paint(C.cyan),
       dim: paint(C.dim),
@@ -298,7 +286,7 @@ async function runCommitRangeCommand(params: {
     const summary = `Commit range: ${result.completed.length} completed, ${result.skipped.length} skipped.`;
     if (result.failed) {
       const failedIndex = targets.indexOf(result.failed);
-      const remaining = targets.slice(Math.max(0, failedIndex)).join(', ');
+      const remaining = targets.slice(failedIndex).join(', ');
       output.cancel(
         `${summary} Failed at ${result.failed}. Remaining: ${remaining}. No rebase was run.`,
       );
@@ -320,14 +308,13 @@ export async function executeCommitMessageGeneration(
 ): Promise<void> {
   const opts = dependencies ?? {};
   const parsedArgs = parseArgsOrReport(argv ?? process.argv.slice(2));
-  const packageInfo = getPackageInfo();
   let exitCode = 0;
   if (parsedArgs) {
     const loggerConfig = buildLoggerConfig(parsedArgs);
     const logger = opts.logger ?? createLogger(loggerConfig);
     const isInteractive = opts.isInteractive ?? Boolean(process.stdin.isTTY);
     if (parsedArgs.version) {
-      process.stdout.write(`${packageInfo.name} ${packageInfo.version}\n`);
+      process.stdout.write(`${pkg.name} ${pkg.version}\n`);
       process.exitCode = 0;
       return;
     }
@@ -360,10 +347,9 @@ export async function executeCommitMessageGeneration(
     const session = await loadSession();
     const gitService = opts.gitService ?? createGitService();
     const requestedProviderId = parsedArgs.provider ?? process.env.GCM_PROVIDER;
-    const configuredProviderId = requestedProviderId;
     let providerId = opts.languageModelProvider
       ? opts.languageModelProvider.id
-      : (configuredProviderId ?? factories[0]?.id);
+      : (requestedProviderId ?? factories[0]?.id);
     if (!providerId || (parsedArgs.model && !isLanguageModelName(parsedArgs.model))) {
       cancel(
         `Error: ${providerId ? 'Invalid model name' : 'No language model provider available'}.`,
@@ -371,17 +357,14 @@ export async function executeCommitMessageGeneration(
       process.exitCode = 1;
       return;
     }
-    if (!factories.some(factory => factory.id === providerId)) {
+    const helpFactory = factories.find(factory => factory.id === providerId);
+    if (!helpFactory) {
       cancel('Error: Unknown language model provider.');
       process.exitCode = 1;
       return;
     }
     if (parsedArgs.help) {
-      const helpFactory = factories.find(factory => factory.id === providerId) ?? factories[0];
-      if (!helpFactory) throw new Error('No language model provider available.');
-      intro(
-        `${C.bright}${helpFactory.label} Commit Message Helper v${packageInfo.version}${C.reset}`,
-      );
+      intro(`${C.bright}${helpFactory.label} Commit Message Helper v${pkg.version}${C.reset}`);
       showHelp(helpFactory.label);
       process.exitCode = 0;
       return;
@@ -399,7 +382,7 @@ export async function executeCommitMessageGeneration(
       try {
         provider = await factory.create();
       } catch (error) {
-        const message = redactSensitiveText(stripTerminalControlSequences(String(error)));
+        const message = sanitizeTerminalText(String(error));
         if (previousProviderId) {
           note(message, `${factory.label} unavailable`);
           providerId = previousProviderId;
@@ -423,7 +406,7 @@ export async function executeCommitMessageGeneration(
         exitCode = 1;
         break;
       }
-      intro(`${C.bright}${provider.label} Commit Message Helper v${packageInfo.version}${C.reset}`);
+      intro(`${C.bright}${provider.label} Commit Message Helper v${pkg.version}${C.reset}`);
       if (provider.selectionNotice) note(provider.selectionNotice, 'Model fallback');
       const earlyExitCode = await maybeHandleListModels(parsedArgs, provider);
       if (earlyExitCode !== null) {

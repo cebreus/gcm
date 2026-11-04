@@ -15,8 +15,6 @@ import { spawnGitStream } from '../src/git-utils.js';
 
 const CLEAN: RepositoryState = {
   hasStagedChanges: true,
-  hasUnstagedChanges: false,
-  hasUntrackedFiles: false,
   hasUnmergedPaths: false,
   inProgressOperation: null,
   changedFiles: ['first.ts'],

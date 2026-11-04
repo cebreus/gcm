@@ -44,6 +44,10 @@ export function redactSensitiveTextForPrompt(text: string): string {
     .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED-PEM]');
 }
 
+export function sanitizeTerminalText(text: string): string {
+  return redactSensitiveText(stripTerminalControlSequences(text));
+}
+
 export function stripTerminalControlSequences(text: string): string {
   return text
     .replace(
@@ -53,42 +57,20 @@ export function stripTerminalControlSequences(text: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
 }
 
-/**
- * Converts a glob pattern to a regex
- * Supports simple wildcards: * matches anything, ? matches single char
- */
 function globToRegex(pattern: string): RegExp {
   const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape regex special chars
-    .replace(/\*/g, '.*') // * -> .*
-    .replace(/\?/g, '.'); // ? -> .
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
   return new RegExp(`^${escaped}$`);
 }
 
-/**
- * Checks if a file path matches any of the exclude patterns
- */
 export function shouldExcludeFile(filePath: string, excludePatterns: string[]): boolean {
-  if (!excludePatterns || excludePatterns.length === 0) {
-    return false;
-  }
-
-  return excludePatterns.some(pattern => {
-    const regex = globToRegex(pattern);
-    return regex.test(filePath);
-  });
+  return excludePatterns.some(pattern => globToRegex(pattern).test(filePath));
 }
 
-/**
- * Filters files based on exclude patterns
- */
 export function filterExcludedFiles(files: string[], excludePatterns: string[]): string[] {
-  if (!excludePatterns || excludePatterns.length === 0) {
-    return files;
-  }
-
-  const excluded = excludePatterns.map(globToRegex);
-  return files.filter(file => !excluded.some(pattern => pattern.test(file)));
+  return files.filter(file => !shouldExcludeFile(file, excludePatterns));
 }
 
 export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void {
@@ -107,20 +89,10 @@ export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void 
  * ASCII characters and internal control markers.
  */
 export function sanitizeForDisplay(text: string): string {
-  if (!text || typeof text !== 'string') return text;
-  // Allow printable ASCII and all UTF-8. Remove non-printable control characters.
   return stripTerminalControlSequences(text.replace(/^[ \t]+/, '').replace(/[ \t]+$/, ''));
 }
 
-/**
- * Cleans up a generated commit message by trimming it.
- * (Hard-wrapping has been removed to prevent broken markdown/bullet points)
- */
 export function formatCommitMessage(message: string): string {
-  if (!message || typeof message !== 'string') {
-    return message;
-  }
-
   const trimmed = message.trim();
   const firstNewlineIndex = trimmed.indexOf('\n');
   if (firstNewlineIndex === -1) {

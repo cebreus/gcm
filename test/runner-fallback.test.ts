@@ -79,8 +79,6 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
       getIndexEntries: async (_logger: Parameters<GitService['getIndexEntries']>[0]) => [],
       getRepositoryState: async (_logger: Parameters<GitService['getRepositoryState']>[0]) => ({
         hasStagedChanges: true,
-        hasUnstagedChanges: false,
-        hasUntrackedFiles: false,
         hasUnmergedPaths: false,
         inProgressOperation: null,
         changedFiles: ['src/index.js', 'README.md'],

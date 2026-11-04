@@ -95,7 +95,6 @@ function createScriptedDialogue(
       });
     },
     providers: options.providers ?? [{ id: 'gemini', label: 'Gemini' }],
-    logger: { log: function () {} },
   });
   return {
     dialogue,
@@ -513,7 +512,6 @@ describe('interactive generation dialogue', () => {
     const localModel = {
       name: 'models/olive-model',
       label: 'Local Model',
-      description: 'Runs locally.',
       limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
     };
     const { dialogue, selectOptions } = createScriptedDialogue(['switch', 'models/olive-model'], {
@@ -529,9 +527,7 @@ describe('interactive generation dialogue', () => {
       commitCapability: createCapability(),
     });
 
-    expect(selectOptions[1]).toEqual([
-      { value: 'models/olive-model', label: 'Local Model', hint: 'Runs locally.' },
-    ]);
+    expect(selectOptions[1]).toEqual([{ value: 'models/olive-model', label: 'Local Model' }]);
   });
 
   test('continues after escaping the model prompt', async () => {
@@ -567,21 +563,6 @@ describe('interactive generation dialogue', () => {
         commitCapability: createCapability(),
       }),
     ).rejects.toThrow('offline');
-  });
-
-  test('model selection rejects an empty catalogue', async () => {
-    const { dialogue } = createScriptedDialogue(['switch'], {
-      listModels: async function () {
-        return [];
-      },
-    });
-    await expect(
-      dialogue.review({
-        state: createState(),
-        commitMessage: 'message',
-        commitCapability: createCapability(),
-      }),
-    ).rejects.toThrow('Provider returned no compatible models');
   });
 
   test('returns continue when configuration selects Generate', async () => {

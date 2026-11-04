@@ -1,19 +1,10 @@
-import { spawnGitStream } from '../git-utils.js';
+import { fileExists, literalPathspec, spawnGitStream } from '../git-utils.js';
 import type { CommitContextFacts } from '../scope-detector.js';
 
 type RepositoryContextDependencies = {
   runGit: typeof spawnGitStream;
   fileExists(path: string): Promise<boolean>;
 };
-
-async function bunFileExists(path: string): Promise<boolean> {
-  try {
-    await Bun.file(path).stat();
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 async function readHistory(
   dependencies: RepositoryContextDependencies,
@@ -33,7 +24,7 @@ export async function readCommitContextFacts(
   changedFiles: string[],
   dependencies: RepositoryContextDependencies = {
     runGit: spawnGitStream,
-    fileExists: bunFileExists,
+    fileExists,
   },
 ): Promise<CommitContextFacts> {
   if (changedFiles.length === 0)
@@ -44,7 +35,7 @@ export async function readCommitContextFacts(
     '50',
     '--pretty=format:%s',
     '--',
-    ...changedFiles.map(file => `:(literal)${file}`),
+    ...changedFiles.map(literalPathspec),
   ]).then(async history => {
     if (history !== null) {
       return { scopeHistorySubjects: history, recentSubjects: history.slice(0, 20) };
@@ -56,7 +47,7 @@ export async function readCommitContextFacts(
         '20',
         '--pretty=format:%s',
         '--',
-        ...changedFiles.map(file => `:(literal)${file}`),
+        ...changedFiles.map(literalPathspec),
       ])) ?? [];
     return { scopeHistorySubjects: [], recentSubjects };
   });

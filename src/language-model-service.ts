@@ -54,11 +54,8 @@ export function isLanguageModelName(value: unknown): value is string {
   );
 }
 
-export function getModelSpecValidationError(
-  model: ModelSpec,
-  expectedName = model.name,
-): string | null {
-  if (!isLanguageModelName(model.name) || model.name !== expectedName) {
+export function getModelSpecValidationError(model: ModelSpec): string | null {
+  if (!isLanguageModelName(model.name)) {
     return 'Invalid model name';
   }
   if (model.limits.kind === 'separate') {
@@ -108,5 +105,4 @@ export interface LanguageModelGenerateParams {
   /** Authoritative per-request output cap, already clamped to the model limits. */
   maxOutputTokens: number;
   modelName: string;
-  timeoutMs?: number;
 }

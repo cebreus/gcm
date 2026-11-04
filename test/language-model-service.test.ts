@@ -30,14 +30,4 @@ test('model validation accepts provider-specific ids and rejects unsafe runtime 
       limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
     }),
   ).toBeNull();
-  expect(
-    getModelSpecValidationError(
-      {
-        name: 'other',
-        label: 'Other',
-        limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
-      },
-      'selected',
-    ),
-  ).toBe('Invalid model name');
 });

@@ -1,4 +1,4 @@
-import { redactSensitiveText, stripTerminalControlSequences } from './utils.js';
+import { sanitizeTerminalText } from './utils.js';
 
 export async function runListModelsCommand(options: {
   providerLabel: string;
@@ -11,23 +11,18 @@ export async function runListModelsCommand(options: {
   };
 }): Promise<number> {
   if (options.readinessError) {
-    options.output.cancel(
-      `Error: ${redactSensitiveText(stripTerminalControlSequences(options.readinessError))}`,
-    );
+    options.output.cancel(`Error: ${sanitizeTerminalText(options.readinessError)}`);
     return 1;
   }
   try {
     const models = await options.models();
-    if (models.length === 0) throw new Error('Provider returned no compatible models');
     let modelList = `Available ${options.providerLabel} models:\n`;
     for (const model of models) modelList += `  - ${model.name}\n`;
     options.output.note(modelList);
     options.output.outro('Done.');
     return 0;
   } catch (error) {
-    options.output.cancel(
-      `Failed to fetch models: ${redactSensitiveText(stripTerminalControlSequences(String(error)))}`,
-    );
+    options.output.cancel(`Failed to fetch models: ${sanitizeTerminalText(String(error))}`);
     return 2;
   }
 }

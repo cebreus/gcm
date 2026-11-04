@@ -91,7 +91,6 @@ describe('commit actions', () => {
     expect(calls[0]).toEqual(['status', '--porcelain=v1', '-z']);
     expect(state.changedFiles).toEqual(['line\nname.ts', 'new name.ts', 'trailing .ts ']);
     expect(state.hasStagedChanges).toBe(true);
-    expect(state.hasUntrackedFiles).toBe(true);
   });
 
   test('binds a staged diff to a stable index snapshot after one retry', async () => {
@@ -356,8 +355,6 @@ describe('commit actions', () => {
 describe('commit capability', () => {
   const CLEAN: RepositoryState = {
     hasStagedChanges: false,
-    hasUnstagedChanges: false,
-    hasUntrackedFiles: false,
     hasUnmergedPaths: false,
     inProgressOperation: null,
     changedFiles: [],
@@ -458,8 +455,6 @@ describe('commit capability', () => {
 describe('reword edge cases', () => {
   const CLEAN_STATE: RepositoryState = {
     hasStagedChanges: false,
-    hasUnstagedChanges: false,
-    hasUntrackedFiles: false,
     hasUnmergedPaths: false,
     inProgressOperation: null,
     changedFiles: [],

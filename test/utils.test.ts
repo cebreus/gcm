@@ -112,12 +112,6 @@ test('utils: formatCommitMessage - should handle empty string', () => {
   expect(formatCommitMessage('')).toBe('');
 });
 
-test('utils: formatCommitMessage - should handle null/undefined gracefully', () => {
-  const formatUnknown = formatCommitMessage as unknown as (value: unknown) => unknown;
-  expect(formatUnknown(null)).toBe(null);
-  expect(formatUnknown(undefined)).toBe(undefined);
-});
-
 // --- Tests for shouldExcludeFile ---
 test('utils: shouldExcludeFile - should match exact patterns', () => {
   expect(shouldExcludeFile('manifest.json', ['manifest.json'])).toBe(true);

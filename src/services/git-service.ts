@@ -1,9 +1,9 @@
-import { spawnGitStream } from '../git-utils.js';
+import { fileExists, literalPathspec, spawnGitStream } from '../git-utils.js';
 import { filterExcludedFiles, shouldExcludeFile } from '../utils.js';
 import { DEFAULT_ANALYSIS_EXCLUDE_PATTERNS } from '../constants.js';
 import type { Logger } from '../logger.js';
 
-export interface StagedChangesResult {
+interface StagedChangesResult {
   stagedDiff: string;
   stagedFiles: string[];
   excludedPaths?: string[];
@@ -64,14 +64,12 @@ export interface GitService {
 
 export type GitCommandRunner = typeof spawnGitStream;
 
-export interface GitServiceOptions {
+interface GitServiceOptions {
   gitCommandRunner?: GitCommandRunner;
 }
 
 export interface RepositoryState {
   hasStagedChanges: boolean;
-  hasUnstagedChanges: boolean;
-  hasUntrackedFiles: boolean;
   hasUnmergedPaths: boolean;
   inProgressOperation: null | 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect';
   changedFiles: string[];
@@ -87,49 +85,8 @@ function buildDiffArgs(commitHash: string | null): string[] {
   return commitHash ? ['show', '--first-parent', '-w', commitHash] : ['diff', '--staged', '-w'];
 }
 
-function literalPathspec(path: string): string {
-  return `:(literal)${path}`;
-}
-
-function decodeGitQuotedPath(path: string): string {
-  if (!(path.startsWith('"') && path.endsWith('"'))) return path;
-  const escapes: Record<string, string> = {
-    a: '\x07',
-    b: '\b',
-    f: '\f',
-    n: '\n',
-    r: '\r',
-    t: '\t',
-    v: '\v',
-    '"': '"',
-    '\\': '\\',
-  };
-  const bytes: number[] = [];
-  const encoder = new TextEncoder();
-  for (let index = 1; index < path.length - 1; index += 1) {
-    if (path[index] !== '\\') {
-      bytes.push(...encoder.encode(path[index]));
-      continue;
-    }
-    const octal = path.slice(index + 1, index + 4);
-    if (/^[0-7]{3}$/.test(octal)) {
-      bytes.push(Number.parseInt(octal, 8));
-      index += 3;
-      continue;
-    }
-    const escaped = path[index + 1];
-    bytes.push(...encoder.encode(escapes[escaped] ?? escaped));
-    index += 1;
-  }
-  return new TextDecoder().decode(new Uint8Array(bytes));
-}
-
 function parseFileList(text: string): string[] {
-  if (text.includes('\0')) return text.split('\0').filter(path => path.length > 0);
-  return text
-    .split('\n')
-    .filter(path => path.length > 0)
-    .map(decodeGitQuotedPath);
+  return text.split('\0').filter(path => path.length > 0);
 }
 
 function logExcludedFiles(
@@ -151,9 +108,6 @@ function logNoChanges(logger: Logger | null, commitHash: string | null): void {
   else logger?.log('debug', 'No staged changes found.');
 }
 
-/**
- * Creates a GitService instance
- */
 export function createGitService(opts: GitServiceOptions = {}): GitService {
   const runGit: GitCommandRunner = opts.gitCommandRunner ?? spawnGitStream;
   return {
@@ -548,26 +502,13 @@ async function inspectCommitTarget(
   return target;
 }
 
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await Bun.file(path).stat();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function parsePorcelainStatus(text: string): {
   hasStagedChanges: boolean;
-  hasUnstagedChanges: boolean;
-  hasUntrackedFiles: boolean;
   hasUnmergedPaths: boolean;
   changedFiles: string[];
 } {
   const state = {
     hasStagedChanges: false,
-    hasUnstagedChanges: false,
-    hasUntrackedFiles: false,
     hasUnmergedPaths: false,
     changedFiles: new Set<string>(),
   };
@@ -583,8 +524,6 @@ function parsePorcelainStatus(text: string): {
 
   return {
     hasStagedChanges: state.hasStagedChanges,
-    hasUnstagedChanges: state.hasUnstagedChanges,
-    hasUntrackedFiles: state.hasUntrackedFiles,
     hasUnmergedPaths: state.hasUnmergedPaths,
     changedFiles: Array.from(state.changedFiles),
   };
@@ -594,21 +533,17 @@ function parsePorcelainLine(
   line: string,
   state: {
     hasStagedChanges: boolean;
-    hasUnstagedChanges: boolean;
-    hasUntrackedFiles: boolean;
     hasUnmergedPaths: boolean;
     changedFiles: Set<string>;
   },
 ): void {
   if (line.startsWith('?? ')) {
-    state.hasUntrackedFiles = true;
     addChangedPath(line.slice(3), state.changedFiles);
     return;
   }
   const x = line[0] || ' ';
   const y = line[1] || ' ';
   if (x !== ' ') state.hasStagedChanges = true;
-  if (y !== ' ') state.hasUnstagedChanges = true;
   if (isUnmergedStatus(x, y)) state.hasUnmergedPaths = true;
   addChangedPath(line.slice(3), state.changedFiles);
 }

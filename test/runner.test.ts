@@ -151,8 +151,6 @@ describe('Refactored Runner', () => {
     mockGitService.getRepositoryState.mockClear();
     mockGitService.getRepositoryState.mockResolvedValue({
       hasStagedChanges: true,
-      hasUnstagedChanges: false,
-      hasUntrackedFiles: false,
       hasUnmergedPaths: false,
       inProgressOperation: null,
       changedFiles: ['file.ts'],
@@ -458,8 +456,6 @@ describe('Refactored Runner', () => {
     });
     mockGitService.getRepositoryState.mockResolvedValue({
       hasStagedChanges: false,
-      hasUnstagedChanges: false,
-      hasUntrackedFiles: false,
       hasUnmergedPaths: false,
       inProgressOperation: null,
       changedFiles: [],
@@ -526,8 +522,6 @@ describe('Refactored Runner', () => {
     });
     mockGitService.getRepositoryState.mockResolvedValue({
       hasStagedChanges: false,
-      hasUnstagedChanges: false,
-      hasUntrackedFiles: false,
       hasUnmergedPaths: false,
       inProgressOperation: null,
       changedFiles: [],
@@ -584,8 +578,6 @@ describe('Refactored Runner', () => {
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
     mockGitService.getRepositoryState.mockResolvedValue({
       hasStagedChanges: true,
-      hasUnstagedChanges: false,
-      hasUntrackedFiles: false,
       hasUnmergedPaths: false,
       inProgressOperation: null,
       changedFiles: ['staged.ts'],
@@ -1283,8 +1275,6 @@ describe('Refactored Runner', () => {
     });
     mockGitService.getRepositoryState.mockResolvedValue({
       hasStagedChanges: true,
-      hasUnstagedChanges: false,
-      hasUntrackedFiles: false,
       hasUnmergedPaths: true,
       inProgressOperation: null,
       changedFiles: ['file.ts'],
@@ -1379,24 +1369,18 @@ describe('Refactored Runner', () => {
     mockGitService.getRepositoryState
       .mockResolvedValueOnce({
         hasStagedChanges: true,
-        hasUnstagedChanges: false,
-        hasUntrackedFiles: false,
         hasUnmergedPaths: false,
         inProgressOperation: null,
         changedFiles: ['file.ts'],
       })
       .mockResolvedValueOnce({
         hasStagedChanges: true,
-        hasUnstagedChanges: false,
-        hasUntrackedFiles: false,
         hasUnmergedPaths: false,
         inProgressOperation: 'rebase',
         changedFiles: ['file.ts'],
       })
       .mockResolvedValueOnce({
         hasStagedChanges: true,
-        hasUnstagedChanges: false,
-        hasUntrackedFiles: false,
         hasUnmergedPaths: false,
         inProgressOperation: 'rebase',
         changedFiles: ['file.ts'],
@@ -1438,8 +1422,6 @@ describe('Refactored Runner', () => {
     });
     mockGitService.getRepositoryState.mockResolvedValue({
       hasStagedChanges: true,
-      hasUnstagedChanges: false,
-      hasUntrackedFiles: false,
       hasUnmergedPaths: false,
       inProgressOperation: 'rebase',
       changedFiles: ['file.ts'],

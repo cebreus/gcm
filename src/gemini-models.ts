@@ -1,5 +1,6 @@
-import type { ModelSpec } from './model-registry.js';
+import { readPositiveTokenCount, requireDistinctModels, type ModelSpec } from './model-registry.js';
 import { createLanguageModelApiError, isLanguageModelName } from './language-model-service.js';
+import { isRecord } from './openai-compatible-client.js';
 import { requestProviderText } from './provider-http.js';
 import { CONFIG } from '../gcm.config.js';
 
@@ -17,14 +18,6 @@ function discoveryError(
   });
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function readPositiveInteger(value: unknown): number | null {
-  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
-}
-
 function httpErrorCategory(status: number): 'auth' | 'data' | 'unavailable' {
   if (status === 401 || status === 403) return 'auth';
   if (status === 429 || status >= 500) return 'unavailable';
@@ -39,8 +32,8 @@ function parseModel(value: unknown): ModelSpec | null {
   ) {
     return null;
   }
-  const maxInputTokens = readPositiveInteger(value.inputTokenLimit);
-  const maxOutputTokens = readPositiveInteger(value.outputTokenLimit);
+  const maxInputTokens = readPositiveTokenCount(value.inputTokenLimit);
+  const maxOutputTokens = readPositiveTokenCount(value.outputTokenLimit);
   if (maxInputTokens === null || maxOutputTokens === null) {
     return null;
   }
@@ -57,7 +50,6 @@ function parseModel(value: unknown): ModelSpec | null {
 
 export async function listGeminiModels(apiKey: string): Promise<ModelSpec[]> {
   const models: ModelSpec[] = [];
-  const names = new Set<string>();
   let pageToken: string | null = null;
   for (let page = 0; page < MAX_MODEL_PAGES; page += 1) {
     const url = new URL(MODELS_URL);
@@ -105,18 +97,10 @@ export async function listGeminiModels(apiKey: string): Promise<ModelSpec[]> {
     }
     for (const value of data.models) {
       const model = parseModel(value);
-      if (!model) continue;
-      if (names.has(model.name)) {
-        throw discoveryError('Duplicate Gemini model identifier', 'data');
-      }
-      names.add(model.name);
-      models.push(model);
+      if (model) models.push(model);
     }
     if (data.nextPageToken === undefined) {
-      if (models.length === 0) {
-        throw discoveryError('Gemini returned no compatible text models', 'data');
-      }
-      return models;
+      return requireDistinctModels(models, 'Gemini', message => discoveryError(message, 'data'));
     }
     if (typeof data.nextPageToken !== 'string' || data.nextPageToken.length === 0) {
       throw discoveryError('Invalid model pagination token', 'data');

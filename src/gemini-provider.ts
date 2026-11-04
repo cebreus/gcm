@@ -94,7 +94,6 @@ export function createGeminiProvider(options: {
       providerLabel: 'Gemini',
       url: new URL(CHAT_URL),
       token: apiKey,
-      temperature: CONFIG.TEMP,
       params,
       fetchImpl,
     });

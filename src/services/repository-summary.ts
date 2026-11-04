@@ -1,7 +1,7 @@
 import { CONFIG } from '../../gcm.config.js';
 import { BINARY_EXTENSIONS } from '../constants.js';
 import { summarizeDiff, type DiffFileFacts } from '../diff-summary.js';
-import { spawnGitLines, spawnGitStream } from '../git-utils.js';
+import { literalPathspec, spawnGitLines, spawnGitStream } from '../git-utils.js';
 
 interface DiffLinesResult {
   lines: string[];
@@ -40,6 +40,16 @@ function isBinaryFile(file: string): boolean {
   return new RegExp(`\\.(${BINARY_EXTENSIONS.join('|')})$`).test(file.toLowerCase());
 }
 
+function diffArgs(targetCommit: string | undefined, options: string[], files: string[]): string[] {
+  return [
+    ...(targetCommit
+      ? ['show', '--first-parent', '--format=', '-w', ...options, targetCommit]
+      : ['diff', '--staged', '-w', ...options]),
+    '--',
+    ...files.map(literalPathspec),
+  ];
+}
+
 async function readFileFacts(
   file: string,
   spawnLinesImpl: NonNullable<RepositorySummaryOptions['spawnLinesImpl']>,
@@ -47,18 +57,7 @@ async function readFileFacts(
 ): Promise<DiffFileFacts> {
   if (isBinaryFile(file)) return { file, lines: [], skipped: true, truncated: false };
   const contextLines = isConfigFile(file) ? 0 : 1;
-  const args = targetCommit
-    ? [
-        'show',
-        '--first-parent',
-        '--format=',
-        '-w',
-        `-U${contextLines}`,
-        targetCommit,
-        '--',
-        `:(literal)${file}`,
-      ]
-    : ['diff', '--staged', '-w', `-U${contextLines}`, '--', `:(literal)${file}`];
+  const args = diffArgs(targetCommit, [`-U${contextLines}`], [file]);
   const result = await spawnLinesImpl(args, {
     maxBytes: CONFIG.PER_FILE_BUFFER,
     allowTruncated: true,
@@ -78,33 +77,12 @@ export async function summarizeRepositoryDiff(
   stagedFiles: string[],
   options?: RepositorySummaryOptions,
 ) {
-  if (!Array.isArray(stagedFiles)) throw new Error('stagedFiles must be an array');
   const dependencies = {
     spawnLinesImpl: options?.spawnLinesImpl ?? spawnGitLines,
     spawnStreamImpl: options?.spawnStreamImpl ?? spawnGitStream,
     targetCommit: options?.targetCommit,
   };
-  const statsArgs = dependencies.targetCommit
-    ? [
-        'show',
-        '--first-parent',
-        '--format=',
-        '-w',
-        '--stat',
-        '--stat-width=80',
-        dependencies.targetCommit,
-        '--',
-        ...stagedFiles.map(file => `:(literal)${file}`),
-      ]
-    : [
-        'diff',
-        '--staged',
-        '-w',
-        '--stat',
-        '--stat-width=80',
-        '--',
-        ...stagedFiles.map(file => `:(literal)${file}`),
-      ];
+  const statsArgs = diffArgs(dependencies.targetCommit, ['--stat', '--stat-width=80'], stagedFiles);
   const stats = await dependencies.spawnStreamImpl(statsArgs, { allowTruncated: true });
   const files = new Array<DiffFileFacts>(stagedFiles.length);
   const failures = new Array<{ error: unknown } | undefined>(stagedFiles.length);

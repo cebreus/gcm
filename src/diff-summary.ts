@@ -11,7 +11,7 @@ export interface DiffFileFacts {
   truncated: boolean;
 }
 
-export interface DiffSummaryPolicy {
+interface DiffSummaryPolicy {
   maxHunks: number;
   maxOutputBytes: number;
 }

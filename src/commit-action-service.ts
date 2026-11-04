@@ -18,7 +18,7 @@ export interface CommitCapability {
   exclusionsAcknowledged?: boolean;
 }
 
-export interface CommitActionInspection {
+interface CommitActionInspection {
   repositoryState: RepositoryState | null;
   capability: CommitCapability;
   observedSnapshotInvalid?: true;

@@ -23,7 +23,7 @@ function gitEnvironment(): Record<string, string> {
   );
 }
 
-export interface SpawnGitLinesResult {
+interface SpawnGitLinesResult {
   lines: string[];
   truncated: boolean;
 }
@@ -132,9 +132,6 @@ async function spawnCore(
     throw new Error(execName + ' ' + args.join(' ') + ' output was truncated');
   }
   if (timedOut) throw new Error('git ' + args.join(' ') + ' timed out');
-  if (truncated && args[0] === 'commit') {
-    throw new Error('git commit output was truncated; the commit result could not be verified');
-  }
   if (code !== 0 && !killState.killed) {
     throw new Error(execName + ' ' + args.join(' ') + ' failed: ' + stderr);
   }
@@ -177,4 +174,17 @@ export async function spawnGitStream(
     50 * 1024 * 1024,
   );
   return { text, truncated };
+}
+
+export function literalPathspec(path: string): string {
+  return `:(literal)${path}`;
+}
+
+export async function fileExists(path: string): Promise<boolean> {
+  try {
+    await Bun.file(path).stat();
+    return true;
+  } catch {
+    return false;
+  }
 }

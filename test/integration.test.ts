@@ -139,7 +139,7 @@ async function mockSpawnStreamImpl(args: string[]): Promise<{ text: string; trun
     return { text: '', truncated: false };
   }
   if (cmd.includes('diff --staged') && cmd.includes('--name-only')) {
-    return { text: 'file1.ts\nfile2.js', truncated: false };
+    return { text: 'file1.ts\0file2.js', truncated: false };
   }
   if (cmd.includes('diff --staged -w')) {
     return {
@@ -221,7 +221,7 @@ test('integration: should handle various file types', async () => {
       return { text: '', truncated: false };
     }
     if (cmd.includes('diff --staged') && cmd.includes('--name-only')) {
-      return { text: 'src/component.tsx\nstyles/main.css\nREADME.md', truncated: false };
+      return { text: 'src/component.tsx\0styles/main.css\0README.md', truncated: false };
     }
     if (cmd.includes('diff --staged -w')) {
       return { text: 'diff for multiple files', truncated: false };
@@ -281,7 +281,7 @@ test('integration: should not send whitespace-only staged changes to AI', async 
       return { text: '', truncated: false };
     }
     if (cmd.includes('diff --staged --name-only')) {
-      return { text: 'docs/README.md\ndocs/guide.md', truncated: false };
+      return { text: 'docs/README.md\0docs/guide.md', truncated: false };
     }
     if (cmd.includes('diff --staged -w')) {
       return { text: '', truncated: false };
@@ -324,7 +324,7 @@ test('integration: should handle real git repository state', async () => {
       return { text: '', truncated: false }; // Success
     }
     if (cmd.includes('diff --staged --name-only')) {
-      return { text: 'package.json\nsrc/main.ts', truncated: false };
+      return { text: 'package.json\0src/main.ts', truncated: false };
     }
     if (cmd.includes('diff --staged -w')) {
       return {

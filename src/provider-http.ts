@@ -3,13 +3,7 @@ import { retryDelayMs } from './retry-backoff.js';
 
 const LOOPBACK_HOSTNAMES = ['127.0.0.1', 'localhost', '[::1]'];
 
-/**
- * Parses a provider base URL and refuses anything that could reach a host the
- * user did not configure: credentials in the URL, a query or fragment, and
- * plaintext HTTP to anything but a literal loopback authority. The raw
- * authority is checked alongside the parsed hostname so obfuscated loopback
- * forms such as `http://2130706433` are rejected rather than normalised.
- */
+/** The raw authority is checked alongside the parsed hostname so obfuscated loopback forms such as `http://2130706433` are rejected rather than normalised. */
 export function parseProviderBaseUrl(
   baseUrl: string,
   label: string,
@@ -67,7 +61,6 @@ export interface RetryPolicy {
 export interface ProviderHttpResult {
   response: Response;
   body: string;
-  attempt: number;
 }
 
 function headerDelayMs(response: Response): number | null {
@@ -101,9 +94,6 @@ export async function requestProviderText(params: {
   retryNetworkErrors: boolean;
   fetchImpl?: ProviderFetch;
   sleep?: (milliseconds: number) => Promise<unknown>;
-  onAttempt?(attempt: number): void;
-  onResponse?(result: ProviderHttpResult): void;
-  onRetry?(status: number, attempt: number, delayMs: number): void;
 }): Promise<ProviderHttpResult> {
   const fetchImpl = params.fetchImpl ?? globalThis.fetch;
   const timeoutSignal = AbortSignal.timeout(params.timeoutMs);
@@ -114,7 +104,6 @@ export async function requestProviderText(params: {
     params.sleep ?? ((milliseconds: number) => wait(milliseconds, undefined, { signal }));
 
   for (let attempt = 1; ; attempt += 1) {
-    params.onAttempt?.(attempt);
     let response: Response;
     try {
       response = await fetchImpl(params.url, {
@@ -126,14 +115,12 @@ export async function requestProviderText(params: {
       const retry = params.retryNetworkErrors && !mustStopNetworkRetry(error);
       if (!retry || attempt > params.retry.maxRetries) throw error;
       const delayMs = retryDelayMs('', params.retry.retryBaseMs, params.retry.retryMaxMs, attempt);
-      params.onRetry?.(0, attempt, delayMs);
       await sleep(delayMs);
       continue;
     }
 
     const body = await readResponseBody(response);
-    const result = { response, body, attempt };
-    params.onResponse?.(result);
+    const result = { response, body };
     if (
       !isRetryableStatus(response.status, params.init?.method) ||
       attempt > params.retry.maxRetries
@@ -148,7 +135,6 @@ export async function requestProviderText(params: {
       attempt,
     );
     const delayMs = Math.min(params.retry.retryMaxMs, headerDelayMs(response) ?? fallbackMs);
-    params.onRetry?.(response.status, attempt, delayMs);
     await sleep(delayMs);
   }
 }

@@ -3,13 +3,9 @@ import {
   type LanguageModelGenerateParams,
   type LanguageModelResponse,
 } from './language-model-service.js';
-import {
-  redactSensitiveText,
-  redactSensitiveTextForPrompt,
-  stripTerminalControlSequences,
-} from './utils.js';
+import { redactSensitiveTextForPrompt, sanitizeTerminalText } from './utils.js';
 import { CONFIG } from '../gcm.config.js';
-import { requestProviderText, type ProviderFetch, type RetryPolicy } from './provider-http.js';
+import { requestProviderText, type ProviderFetch } from './provider-http.js';
 
 const MAX_ERROR_SNIPPET_BYTES = 4_096;
 
@@ -21,16 +17,30 @@ function readNonNegativeInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null;
 }
 
+function redactToken(text: string, token?: string): string {
+  return token ? text.split(token).join('[REDACTED-TOKEN]') : text;
+}
+
+export function isHeaderSafeToken(token: string): boolean {
+  return /^[\x21-\x7E]+$/.test(token);
+}
+
 export function sanitizeLanguageModelErrorText(text: string, token?: string): string {
-  const withoutToken = token ? text.split(token).join('[REDACTED-TOKEN]') : text;
-  return redactSensitiveText(stripTerminalControlSequences(withoutToken))
+  return sanitizeTerminalText(redactToken(text, token))
     .replace(/(["'](?:password|token|api[_-]?key)["']\s*:\s*)["'][^"']*["']/gi, '$1"[REDACTED]"')
     .replace(/\b(password|token|api[_-]?key)\s*[:=]\s*[^\s,}&]+/gi, '$1=[REDACTED]');
 }
 
-function sanitizePromptText(text: string, token?: string): string {
-  const withoutToken = token ? text.split(token).join('[REDACTED-TOKEN]') : text;
-  return redactSensitiveTextForPrompt(withoutToken);
+export function rejectUnsafeModelMetadata(
+  values: unknown[],
+  token: string | undefined,
+  message: string,
+): void {
+  for (const value of values) {
+    if (typeof value === 'string' && sanitizeLanguageModelErrorText(value, token) !== value) {
+      throw createLanguageModelApiError(message);
+    }
+  }
 }
 
 function requestFailureMessage(providerLabel: string, error: unknown): string {
@@ -51,25 +61,21 @@ export async function requestLanguageModelJson(params: {
   init?: RequestInit;
   timeoutMs: number;
   token?: string;
-  retry?: RetryPolicy;
-  sleep?: (milliseconds: number) => Promise<unknown>;
   fetchImpl?: ProviderFetch;
 }): Promise<unknown> {
   const { providerLabel, url, init, timeoutMs, token } = params;
-  const retry = params.retry ?? {
-    maxRetries: CONFIG.MAX_RETRIES,
-    retryBaseMs: CONFIG.RETRY_BASE_MS,
-    retryMaxMs: CONFIG.RETRY_MAX_MS,
-  };
   let result;
   try {
     result = await requestProviderText({
       url,
       init,
       timeoutMs,
-      retry,
+      retry: {
+        maxRetries: CONFIG.MAX_RETRIES,
+        retryBaseMs: CONFIG.RETRY_BASE_MS,
+        retryMaxMs: CONFIG.RETRY_MAX_MS,
+      },
       retryNetworkErrors: (init?.method ?? 'GET').toUpperCase() === 'GET',
-      sleep: params.sleep,
       fetchImpl: params.fetchImpl,
     });
   } catch (error) {
@@ -106,26 +112,16 @@ export async function generateOpenAiCompatibleChat(options: {
   providerLabel: string;
   url: URL;
   token?: string;
-  temperature?: number;
   params: LanguageModelGenerateParams;
   fetchImpl?: ProviderFetch;
 }): Promise<LanguageModelResponse | null> {
   const { providerLabel, params } = options;
-  const requestedTimeout = params.timeoutMs;
-  if (
-    requestedTimeout !== undefined &&
-    (!Number.isSafeInteger(requestedTimeout) ||
-      requestedTimeout <= 0 ||
-      requestedTimeout > 2_147_483_647)
-  ) {
-    throw createLanguageModelApiError(`Invalid ${providerLabel} timeout`);
-  }
   const headers = new Headers({ 'content-type': 'application/json' });
   if (options.token) headers.set('authorization', `Bearer ${options.token}`);
   const payload = await requestLanguageModelJson({
     providerLabel,
     url: options.url,
-    timeoutMs: requestedTimeout ?? 60_000,
+    timeoutMs: 60_000,
     token: options.token,
     fetchImpl: options.fetchImpl,
     init: {
@@ -134,10 +130,16 @@ export async function generateOpenAiCompatibleChat(options: {
       body: JSON.stringify({
         model: params.modelName,
         messages: [
-          { role: 'system', content: sanitizePromptText(params.systemPrompt, options.token) },
-          { role: 'user', content: sanitizePromptText(params.promptContext, options.token) },
+          {
+            role: 'system',
+            content: redactSensitiveTextForPrompt(redactToken(params.systemPrompt, options.token)),
+          },
+          {
+            role: 'user',
+            content: redactSensitiveTextForPrompt(redactToken(params.promptContext, options.token)),
+          },
         ],
-        temperature: options.temperature ?? 1,
+        temperature: CONFIG.TEMP,
         max_tokens: params.maxOutputTokens,
         stream: false,
       }),

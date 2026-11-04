@@ -1,4 +1,3 @@
-import type { Logger } from './logger.js';
 import type { ModelSpec } from './model-registry.js';
 import { buildAtomicSplitProposal, detectAtomicGroup } from './atomic-commit-planner.js';
 import { describeExcludedPaths } from './commit-action-service.js';
@@ -45,12 +44,11 @@ interface PromptOption {
   hint?: string;
 }
 
-export interface DialogueDependencies {
+interface DialogueDependencies {
   prompts: PromptAdapter;
   clipboard: { write(message: string): Promise<void> };
   models(): Promise<ModelSpec[]>;
   providers: Array<{ id: string; label: string }>;
-  logger: Pick<Logger, 'log'>;
 }
 
 export interface InteractiveGenerationDialogue {
@@ -76,7 +74,6 @@ function toModelOption(model: ModelSpec): PromptOption {
   return {
     value: model.name,
     label: stripTerminalControlSequences(model.label).replace(/[\r\n\t]/g, ' '),
-    hint: stripTerminalControlSequences(model.description ?? '').replace(/[\r\n\t]/g, ' '),
   };
 }
 
@@ -84,7 +81,6 @@ async function getModelSelectionOptions(
   dependencies: DialogueDependencies,
 ): Promise<PromptOption[]> {
   const models = await dependencies.models();
-  if (models.length === 0) throw new Error('Provider returned no compatible models');
   return models.map(toModelOption);
 }
 

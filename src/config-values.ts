@@ -45,13 +45,12 @@ export function numberInRange(
   minimum: number,
   maximum: number,
   fallback: number,
-  invalidName?: string,
+  invalidName: string,
 ): number {
   const parsed = parseNumber(value);
   if (value === undefined) return fallback;
   if (parsed === undefined || parsed < minimum || parsed > maximum) {
-    if (invalidName) throw new Error(`Invalid ${invalidName}`);
-    return fallback;
+    throw new Error(`Invalid ${invalidName}`);
   }
   return parsed;
 }
@@ -62,7 +61,7 @@ export function normalizeRetryConfig(
     retryBaseMs: NumericInput;
     retryMaxMs: NumericInput;
   },
-  names?: { maxRetries: string; retryBaseMs: string; retryMaxMs: string },
+  names: { maxRetries: string; retryBaseMs: string; retryMaxMs: string },
 ): {
   maxRetries: number;
   retryBaseMs: number;
@@ -73,7 +72,7 @@ export function normalizeRetryConfig(
     1,
     MAX_RETRY_MS,
     DEFAULT_RETRY_MAX_MS,
-    names?.retryMaxMs,
+    names.retryMaxMs,
   );
   return {
     maxRetries: integerInRange(
@@ -81,14 +80,14 @@ export function normalizeRetryConfig(
       0,
       MAX_RETRIES,
       DEFAULT_RETRIES,
-      names?.maxRetries,
+      names.maxRetries,
     ),
     retryBaseMs: integerInRange(
       values.retryBaseMs,
       1,
       retryMaxMs,
       Math.min(DEFAULT_RETRY_BASE_MS, retryMaxMs),
-      names?.retryBaseMs,
+      names.retryBaseMs,
     ),
     retryMaxMs,
   };

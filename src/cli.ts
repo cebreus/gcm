@@ -10,7 +10,6 @@ interface Args extends ParsedArgs {
   hint?: string | null;
   verbose?: boolean;
   debug?: boolean;
-  nonInteractive?: boolean;
   apply?: boolean;
   'list-models'?: boolean;
   'list-providers'?: boolean;
@@ -51,7 +50,6 @@ interface CliOptionDefinition {
   description: string;
   takesValue: boolean;
   allowsRepeat?: boolean;
-  validateValue?: (value: string) => void;
 }
 
 export const CLI_OPTION_DEFINITIONS = [
@@ -195,14 +193,9 @@ function validateValueFlag(
   }
 }
 
-function validateValueDefinition(
-  valueFlag: string,
-  value: string,
-  seenValueFlags: Set<string>,
-): void {
+function validateValueDefinition(valueFlag: string, seenValueFlags: Set<string>): void {
   const definition = flagsByAlias.get(valueFlag);
   if (!definition) return;
-  definition.validateValue?.(value);
   if (!definition.allowsRepeat && seenValueFlags.has(definition.name)) {
     throw createArgumentValidationError(`Flag may only be specified once: --${definition.name}`);
   }
@@ -232,7 +225,7 @@ function validateArgs(argv: string[]): void {
     if (!valueFlag) continue;
     const value = equalsIndex === -1 ? argv[index + 1] : argument.slice(equalsIndex + 1);
     validateValueFlag(flag, aliases, valueFlag, value);
-    validateValueDefinition(valueFlag, value, seenValueFlags);
+    validateValueDefinition(valueFlag, seenValueFlags);
     index += Number(equalsIndex === -1);
   }
   if (positionalCount > 0) throw createArgumentValidationError('Unexpected positional argument');

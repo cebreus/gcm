@@ -13,9 +13,10 @@ import {
 import { parseProviderBaseUrl } from './provider-http.js';
 import {
   generateOpenAiCompatibleChat,
+  isHeaderSafeToken,
   isRecord,
+  rejectUnsafeModelMetadata,
   requestLanguageModelJson,
-  sanitizeLanguageModelErrorText,
 } from './openai-compatible-client.js';
 
 const PREFERRED_LM_STUDIO_MODEL = 'gemma-4-e4b-it-mlx';
@@ -43,13 +44,6 @@ function parseModel(value: unknown): ModelSpec | null {
   };
 }
 
-function parseBaseUrl(baseUrl: string): URL {
-  return parseProviderBaseUrl(baseUrl, 'LM Studio', {
-    allowHttps: false,
-    loopbackError: 'LM Studio URL must use a loopback hostname',
-  });
-}
-
 async function discoverModels(
   url: URL,
   token?: string,
@@ -66,14 +60,11 @@ async function discoverModels(
   }
   for (const entry of payload.models) {
     if (!isRecord(entry) || entry.type !== 'llm') continue;
-    for (const metadata of [entry.key, entry.display_name]) {
-      if (
-        typeof metadata === 'string' &&
-        sanitizeLanguageModelErrorText(metadata, token) !== metadata
-      ) {
-        throw createLanguageModelApiError('Invalid LM Studio model metadata');
-      }
-    }
+    rejectUnsafeModelMetadata(
+      [entry.key, entry.display_name],
+      token,
+      'Invalid LM Studio model metadata',
+    );
   }
   const loadedModelIds = new Set<string>();
   for (const entry of payload.models) {
@@ -99,11 +90,13 @@ export async function createLmStudioProvider(options: {
   baseUrl: string;
   model?: string;
   token?: string;
-  temperature?: number;
   probeOnly?: boolean;
 }): Promise<LanguageModelProvider> {
-  const url = parseBaseUrl(options.baseUrl);
-  if (options.token && !/^[\x21-\x7E]+$/.test(options.token)) {
+  const url = parseProviderBaseUrl(options.baseUrl, 'LM Studio', {
+    allowHttps: false,
+    loopbackError: 'LM Studio URL must use a loopback hostname',
+  });
+  if (options.token && !isHeaderSafeToken(options.token)) {
     throw createLanguageModelApiError('Invalid LM Studio API token');
   }
   let { models, loadedModelIds } = await discoverModels(url, options.token);
@@ -145,12 +138,9 @@ export async function createLmStudioProvider(options: {
       selectedModel = undefined;
     }
   }
-  const firstModel = models[0];
-  if (!firstModel)
-    throw createLanguageModelApiError('LM Studio returned no compatible text models');
   const byName = new Map(models.map(model => [model.name, model]));
   const defaultModel =
-    selectedModel ?? models.find(model => loadedModelIds.has(model.name))?.name ?? firstModel.name;
+    selectedModel ?? models.find(model => loadedModelIds.has(model.name))?.name ?? models[0].name;
   if (!options.model && defaultModel !== PREFERRED_LM_STUDIO_MODEL) {
     selectionNotice = `${selectionNotice ?? `${PREFERRED_LM_STUDIO_MODEL} is unavailable`}; using ${defaultModel}`;
   }
@@ -163,7 +153,6 @@ export async function createLmStudioProvider(options: {
       providerLabel: 'LM Studio',
       url: new URL('/v1/chat/completions', url),
       token: options.token,
-      temperature: options.temperature,
       params,
     });
   }

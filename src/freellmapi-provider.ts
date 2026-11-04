@@ -3,14 +3,14 @@ import {
   isLanguageModelApiError,
   isLanguageModelName,
   type LanguageModelGenerateParams,
-  getModelSpecValidationError,
   type LanguageModelProvider,
 } from './language-model-service.js';
 import {
   generateOpenAiCompatibleChat,
+  isHeaderSafeToken,
   isRecord,
+  rejectUnsafeModelMetadata,
   requestLanguageModelJson,
-  sanitizeLanguageModelErrorText,
 } from './openai-compatible-client.js';
 import {
   collectSortedModels,
@@ -48,19 +48,7 @@ function parseModel(entry: unknown): ModelSpec | null {
   const contextWindowTokens =
     readPositiveTokenCount(record.context_window) ?? readPositiveTokenCount(record.context_length);
   if (contextWindowTokens === null) return null;
-  const model: ModelSpec = {
-    name,
-    label,
-    limits: { kind: 'shared-context', contextWindowTokens },
-  };
-  return getModelSpecValidationError(model) === null ? model : null;
-}
-
-function parseBaseUrl(baseUrl: string): URL {
-  return parseProviderBaseUrl(baseUrl, 'FreeLLMAPI', {
-    allowHttps: true,
-    loopbackError: 'FreeLLMAPI URL must use HTTPS or a loopback hostname',
-  });
+  return { name, label, limits: { kind: 'shared-context', contextWindowTokens } };
 }
 
 function resolveChatEndpoint(url: URL): URL {
@@ -71,9 +59,6 @@ function resolveChatEndpoint(url: URL): URL {
     pathname.endsWith('/models/chat')
   ) {
     return url;
-  }
-  if (pathname.endsWith('/v1')) {
-    return new URL(`${pathname}/chat/completions`, url);
   }
   if (pathname !== '') {
     return new URL(`${pathname}/chat/completions`, url);
@@ -145,14 +130,11 @@ async function discoverModels(url: URL, token?: string): Promise<{ models: Model
 
       for (const entry of rawList) {
         if (!isRecord(entry)) continue;
-        for (const metadata of [entry.id, entry.name, entry.key, entry.label, entry.display_name]) {
-          if (
-            typeof metadata === 'string' &&
-            sanitizeLanguageModelErrorText(metadata, token) !== metadata
-          ) {
-            throw createLanguageModelApiError('Invalid FreeLLMAPI model metadata');
-          }
-        }
+        rejectUnsafeModelMetadata(
+          [entry.id, entry.name, entry.key, entry.label, entry.display_name],
+          token,
+          'Invalid FreeLLMAPI model metadata',
+        );
       }
 
       const models = collectSortedModels(rawList, parseModel);
@@ -171,18 +153,19 @@ async function discoverModels(url: URL, token?: string): Promise<{ models: Model
     }
   }
 
-  if (lastError) throw lastError;
-  throw createLanguageModelApiError('FreeLLMAPI returned no compatible text models');
+  throw lastError;
 }
 
 export async function createFreeLlmApiProvider(options: {
   baseUrl: string;
   model?: string;
   token?: string;
-  temperature?: number;
 }): Promise<LanguageModelProvider> {
-  const url = parseBaseUrl(options.baseUrl);
-  if (options.token && !/^[\x21-\x7E]+$/.test(options.token)) {
+  const url = parseProviderBaseUrl(options.baseUrl, 'FreeLLMAPI', {
+    allowHttps: true,
+    loopbackError: 'FreeLLMAPI URL must use HTTPS or a loopback hostname',
+  });
+  if (options.token && !isHeaderSafeToken(options.token)) {
     throw createLanguageModelApiError('Invalid FreeLLMAPI API token');
   }
 
@@ -209,7 +192,6 @@ export async function createFreeLlmApiProvider(options: {
       providerLabel: 'FreeLLMAPI',
       url: resolveChatEndpoint(url),
       token: options.token,
-      temperature: options.temperature,
       params,
     });
   }

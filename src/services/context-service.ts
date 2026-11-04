@@ -33,7 +33,7 @@ interface ContextParams {
   targetCommit?: string;
 }
 
-export interface ContextResult {
+interface ContextResult {
   promptContext: string;
   processedDiffContent: string;
   tokens: number;

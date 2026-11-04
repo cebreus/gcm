@@ -1,4 +1,4 @@
-export interface CommitBatchResult {
+interface CommitBatchResult {
   completed: string[];
   skipped: string[];
   failed: string | null;
@@ -9,7 +9,7 @@ export async function runCommitBatch(params: {
   initialHead: string;
   getHead(): Promise<string>;
   hasAmendment(hash: string): Promise<boolean>;
-  runOne(hash: string, index: number, total: number): Promise<boolean>;
+  runOne(hash: string): Promise<boolean>;
   report(message: string): void;
 }): Promise<CommitBatchResult> {
   const { targets, initialHead, getHead, hasAmendment, runOne, report } = params;
@@ -18,7 +18,6 @@ export async function runCommitBatch(params: {
 
   for (let index = 0; index < targets.length; index += 1) {
     const hash = targets[index];
-    if (!hash) continue;
     const currentHead = await getHead();
     if (currentHead !== expectedHead) {
       report(`HEAD moved unexpectedly before ${hash}.`);
@@ -31,7 +30,7 @@ export async function runCommitBatch(params: {
       continue;
     }
     report(`[${index + 1}/${targets.length}] Processing ${hash}.`);
-    if (!(await runOne(hash, index, targets.length))) {
+    if (!(await runOne(hash))) {
       result.failed = hash;
       break;
     }

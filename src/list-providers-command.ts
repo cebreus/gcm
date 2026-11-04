@@ -9,13 +9,13 @@ function formatProbeError(error: unknown): string {
   if (/api key.*not set|environment variable .* not set/.test(message)) {
     return 'The API key is not set.';
   }
-  if (/no compatible|no supported|no models found/.test(message)) {
+  if (/no compatible|no models found/.test(message)) {
     return 'No supported models found.';
   }
-  if (/invalid provider|invalid .*model|factory identity|not configured/.test(message)) {
+  if (/invalid .*model/.test(message)) {
     return 'Provider setup is not valid.';
   }
-  if (/request failed|network|fetch|enotfound|econnrefused|cannot connect/.test(message)) {
+  if (/request failed|network|fetch|enotfound|econnrefused/.test(message)) {
     return 'Cannot connect to the provider.';
   }
   return 'Provider check failed.';
@@ -38,7 +38,6 @@ export async function runListProvidersCommand(options: {
         const provider = await factory.create({ probeOnly: true });
         if (provider.readinessError) throw new Error(provider.readinessError);
         const models = await provider.models();
-        if (models.length === 0) throw new Error('Provider returned no compatible models');
         if (!models.some(model => model.name === provider.defaultModel)) {
           throw new Error('Provider default model is not in its catalogue');
         }

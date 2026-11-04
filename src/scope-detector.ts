@@ -9,9 +9,11 @@ export interface CommitContextFacts {
   repoType: 'monorepo' | 'single';
 }
 
+export const WORKSPACE_PATH_PATTERN = /^(apps|packages|sites|tools)\/([^/]+)/;
+
 function getPathScope(file: string, repoType: CommitContextFacts['repoType']): string | null {
   if (repoType === 'monorepo') {
-    const workspace = /^(apps|packages|sites|tools)\/([^/]+)/.exec(file);
+    const workspace = WORKSPACE_PATH_PATTERN.exec(file);
     if (workspace?.[2]) return workspace[2];
   }
   if (file.startsWith('.github/')) return 'ci';
