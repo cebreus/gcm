@@ -38,9 +38,9 @@ async function readConfig(env: Record<string, string>): Promise<unknown> {
   return config;
 }
 
-async function runCli(env: Record<string, string>) {
+async function runCli(env: Record<string, string>, args: string[] = ['--version']) {
   const child = Bun.spawn({
-    cmd: ['bun', 'run', './gcm.ts', '--version'],
+    cmd: ['bun', 'run', './gcm.ts', ...args],
     cwd: process.cwd(),
     env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', ...env },
     stdout: 'pipe',
@@ -136,32 +136,41 @@ test('CLI names an invalid GCM_MAX_RETRIES setting', async () => {
   expect(result.stderr).toContain('Invalid GCM_MAX_RETRIES');
 });
 
+const UNSAFE_MODEL = { GCM_MODEL: 'bad\u001b[2Jmodel' };
+
 test('an unsafe GCM_MODEL still lets the CLI answer --version', async function () {
-  const child = Bun.spawn({
-    cmd: ['bun', 'run', './gcm.ts', '--version'],
-    cwd: process.cwd(),
-    env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', GCM_MODEL: 'bad\u001b[2Jmodel' },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [stdout, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-  expect(exitCode).toBe(0);
-  expect(stdout).toContain('gcm ');
+  const result = await runCli(UNSAFE_MODEL, ['--version']);
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain('gcm ');
 });
 
 test('an unsafe GCM_MODEL stops --list-providers with the real reason', async function () {
-  const child = Bun.spawn({
-    cmd: ['bun', 'run', './gcm.ts', '--list-providers'],
-    cwd: process.cwd(),
-    env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', GCM_MODEL: 'bad\u001b[2Jmodel' },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  expect(exitCode).not.toBe(0);
-  expect(stdout + stderr).toContain('Invalid GCM_MODEL');
+  const result = await runCli(UNSAFE_MODEL, ['--list-providers']);
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stdout + result.stderr).toContain('Invalid GCM_MODEL');
+});
+
+test('an unsafe GCM_MODEL still lets the CLI answer --help', async function () {
+  const result = await runCli(UNSAFE_MODEL, ['--help']);
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain('Usage');
+  expect(result.stdout + result.stderr).not.toContain('Invalid GCM_MODEL');
+});
+
+test('--help wins over --list-models', async function () {
+  const result = await runCli({}, ['--help', '--list-models']);
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain('Usage');
+});
+
+test('--version wins over --list-providers', async function () {
+  const result = await runCli({}, ['--version', '--list-providers']);
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.trim()).toMatch(/^gcm \S+$/);
+});
+
+test('--version wins over --list-models', async function () {
+  const result = await runCli({}, ['--version', '--list-models']);
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.trim()).toMatch(/^gcm \S+$/);
 });
