@@ -26,7 +26,7 @@ test('listModels: returns validated metadata and sends the API key only as a hea
     });
   } as unknown as typeof fetch;
 
-  const { listGeminiModels } = await import('../../src/gemini-client/listModels.js');
+  const { listGeminiModels } = await import('../src/gemini-models.js');
 
   await expect(listGeminiModels(apiKey)).resolves.toEqual([
     {
@@ -47,7 +47,7 @@ test('listModels: maps request cancellation to its timeout error', async functio
     throw new DOMException('Aborted', 'AbortError');
   } as unknown as typeof fetch;
 
-  const { listGeminiModels } = await import('../../src/gemini-client/listModels.js');
+  const { listGeminiModels } = await import('../src/gemini-models.js');
   await expect(listGeminiModels('test-key')).rejects.toThrow('Gemini model discovery timed out');
 
   expect(signal).toBeInstanceOf(AbortSignal);
@@ -89,7 +89,7 @@ test('listModels: follows pagination and skips malformed model limits', async fu
     });
   } as typeof fetch;
 
-  const { listGeminiModels } = await import('../../src/gemini-client/listModels.js');
+  const { listGeminiModels } = await import('../src/gemini-models.js');
   const models = await listGeminiModels('test-key');
 
   expect(models.map(model => model.name)).toEqual(['models/gemini-first', 'models/gemini-second']);
@@ -104,6 +104,6 @@ test('listModels: rejects an oversized response body', async function () {
     return new Response('{"models":[' + '"x"'.repeat(400_000) + ']}');
   } as unknown as typeof fetch;
 
-  const { listGeminiModels } = await import('../../src/gemini-client/listModels.js');
+  const { listGeminiModels } = await import('../src/gemini-models.js');
   await expect(listGeminiModels('test-key')).rejects.toThrow('response body is too large');
 });

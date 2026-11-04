@@ -6,11 +6,10 @@ function createGenerateParams(timeoutMs?: number) {
   return {
     promptContext: 'diff content',
     systemPrompt: 'system rules',
-    reduceForRetry: async function () {
-      return { mode: 'unreducible' as const };
-    },
     meta: {},
-    opts: { modelOverride: 'local-model', timeoutMs },
+    modelName: 'local-model',
+    maxOutputTokens: 8_192,
+    timeoutMs,
   };
 }
 
@@ -275,7 +274,7 @@ test('LM Studio maps chat requests and responses without putting its token in th
           {
             message: {
               content:
-                'COMMIT_MESSAGE: test: use LM Studio local-secret-token sk-abcdefghijklmnopqrstuvwxyz1234567890 token=opaque-value',
+                'test: use LM Studio local-secret-token sk-abcdefghijklmnopqrstuvwxyz1234567890 token=opaque-value',
             },
             finish_reason: 'length',
           },
@@ -312,7 +311,7 @@ test('LM Studio maps chat requests and responses without putting its token in th
       },
     });
     expect(response).toEqual({
-      text: 'COMMIT_MESSAGE: test: use LM Studio [REDACTED-TOKEN] [REDACTED-KEY] token=[REDACTED]',
+      text: 'test: use LM Studio [REDACTED-TOKEN] [REDACTED-KEY] token=[REDACTED]',
       usage: { promptTokens: 0, outputTokens: 0 },
       truncated: true,
     });
@@ -636,28 +635,13 @@ test('LM Studio returns truncated output without speculative retry', async funct
     },
   });
   try {
-    const provider = await createLmStudioProvider({
-      baseUrl: server.url.origin,
-      maxOutputTokens: 1_024,
-    });
+    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
     const response = await provider.service.generate({
       promptContext: 'large diff',
-      promptParts: { prefix: '', diffHeading: '', diffBody: 'large diff', suffix: '' },
-      summaryAttempted: false,
       systemPrompt: 'rules',
-      reduceForRetry: async function () {
-        return {
-          mode: 'truncation',
-          promptContext: 'smaller diff',
-          promptParts: { prefix: '', diffHeading: '', diffBody: 'smaller diff', suffix: '' },
-          summaryAttempted: false,
-          summaryUsed: false,
-        };
-      },
       meta: {},
-      opts: {
-        modelOverride: 'local-model',
-      },
+      modelName: 'local-model',
+      maxOutputTokens: 1_024,
     });
 
     expect(userPrompts).toEqual(['large diff']);

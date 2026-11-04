@@ -8,10 +8,7 @@ afterAll(async function (): Promise<void> {
 });
 
 test('session: rejects persisted values outside its provider-scoped schema', async function () {
-  await Bun.write(
-    `${directory}/.gcm-session.json`,
-    JSON.stringify({ modelName: 'gemini-old', outputMode: 'commit-only' }),
-  );
+  await Bun.write(`${directory}/.gcm-session.json`, JSON.stringify({ modelName: 'gemini-old' }));
   const child = Bun.spawn({
     cmd: [
       'bun',
@@ -31,13 +28,13 @@ test('session: rejects persisted values outside its provider-scoped schema', asy
 
   expect(exitCode).toBe(0);
   expect(stderr).toBe('');
-  expect(JSON.parse(stdout)).toEqual({ providerId: null, modelName: null, outputMode: null });
+  expect(JSON.parse(stdout)).toEqual({ providerId: null, modelName: null });
 });
 
 test('session: restores a validated non-Gemini provider model', async function () {
   await Bun.write(
     `${directory}/.gcm-session.json`,
-    JSON.stringify({ providerId: 'lm-studio', modelName: 'qwen/qwen3-8b', outputMode: 'full' }),
+    JSON.stringify({ providerId: 'lm-studio', modelName: 'qwen/qwen3-8b' }),
   );
   const child = Bun.spawn({
     cmd: [
@@ -60,6 +57,5 @@ test('session: restores a validated non-Gemini provider model', async function (
   expect(JSON.parse(stdout)).toEqual({
     providerId: 'lm-studio',
     modelName: 'qwen/qwen3-8b',
-    outputMode: 'full',
   });
 });

@@ -3,7 +3,6 @@ import {
   type LanguageModelGenerateParams,
   type LanguageModelResponse,
 } from './language-model-service.js';
-import { DEFAULT_MAX_OUTPUT_TOKENS, type ModelSpec } from './model-registry.js';
 import {
   redactSensitiveText,
   redactSensitiveTextForPrompt,
@@ -93,18 +92,26 @@ export async function requestLanguageModelJson(params: {
   }
 }
 
+// Providers disagree on the marker for hitting the output cap: OpenAI sends
+// 'length', Gemini's compatible layer can send 'MAX_TOKENS'. Servers that send
+// no marker at all are covered by the token count instead, because a reply that
+// spent the entire cap was almost certainly cut off.
+const TRUNCATION_FINISH_REASONS = new Set(['length', 'max_tokens']);
+
+function isTruncatedFinishReason(value: unknown): boolean {
+  return typeof value === 'string' && TRUNCATION_FINISH_REASONS.has(value.toLowerCase());
+}
+
 export async function generateOpenAiCompatibleChat(options: {
   providerLabel: string;
   url: URL;
   token?: string;
   temperature?: number;
-  maxOutputTokens?: number;
-  modelName: string;
-  model: ModelSpec;
   params: LanguageModelGenerateParams;
+  fetchImpl?: ProviderFetch;
 }): Promise<LanguageModelResponse | null> {
-  const { providerLabel, model, modelName, params } = options;
-  const requestedTimeout = params.opts?.timeoutMs;
+  const { providerLabel, params } = options;
+  const requestedTimeout = params.timeoutMs;
   if (
     requestedTimeout !== undefined &&
     (!Number.isSafeInteger(requestedTimeout) ||
@@ -115,36 +122,23 @@ export async function generateOpenAiCompatibleChat(options: {
   }
   const headers = new Headers({ 'content-type': 'application/json' });
   if (options.token) headers.set('authorization', `Bearer ${options.token}`);
-  const configuredOutputCap =
-    Number.isSafeInteger(options.maxOutputTokens) && Number(options.maxOutputTokens) > 0
-      ? Number(options.maxOutputTokens)
-      : DEFAULT_MAX_OUTPUT_TOKENS;
-  const requestOutputCap =
-    Number.isSafeInteger(params.opts?.maxOutputTokensLimit) &&
-    Number(params.opts?.maxOutputTokensLimit) > 0
-      ? Number(params.opts?.maxOutputTokensLimit)
-      : configuredOutputCap;
-  const authoritativeOutputCap =
-    model.limits.kind === 'separate'
-      ? Math.min(model.limits.maxOutputTokens, requestOutputCap)
-      : Math.min(model.limits.contextWindowTokens, requestOutputCap);
-  const maxOutputTokens = Math.min(configuredOutputCap, authoritativeOutputCap);
   const payload = await requestLanguageModelJson({
     providerLabel,
     url: options.url,
     timeoutMs: requestedTimeout ?? 60_000,
     token: options.token,
+    fetchImpl: options.fetchImpl,
     init: {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: modelName,
+        model: params.modelName,
         messages: [
           { role: 'system', content: sanitizePromptText(params.systemPrompt, options.token) },
           { role: 'user', content: sanitizePromptText(params.promptContext, options.token) },
         ],
         temperature: options.temperature ?? 1,
-        max_tokens: maxOutputTokens,
+        max_tokens: params.maxOutputTokens,
         stream: false,
       }),
     },
@@ -162,12 +156,14 @@ export async function generateOpenAiCompatibleChat(options: {
     throw createLanguageModelApiError(`Invalid ${providerLabel} response`);
   }
   const usage = isRecord(payload.usage) ? payload.usage : {};
+  const outputTokens = readNonNegativeInteger(usage.completion_tokens);
+  const spentWholeOutputCap = outputTokens !== null && outputTokens >= params.maxOutputTokens;
   return {
     text: sanitizeLanguageModelErrorText(choice.message.content, options.token),
     usage: {
       promptTokens: readNonNegativeInteger(usage.prompt_tokens) ?? undefined,
-      outputTokens: readNonNegativeInteger(usage.completion_tokens) ?? undefined,
+      outputTokens: outputTokens ?? undefined,
     },
-    truncated: choice.finish_reason === 'length',
+    truncated: isTruncatedFinishReason(choice.finish_reason) || spentWholeOutputCap,
   };
 }

@@ -5,7 +5,7 @@ import { parseArgs } from '../src/cli.js';
 import packageJson from '../package.json';
 import type { Logger } from '../src/logger.js';
 import { CONFIG } from '../gcm.config.js';
-import { estimateTokenCount } from '../src/runner-utils.js';
+import { estimateTokenCount } from '../src/utils.js';
 
 // Mock @clack/prompts
 const mockIntro = mock();
@@ -41,7 +41,6 @@ const mockLoadSession = mock(() =>
   Promise.resolve({
     providerId: null as string | null,
     modelName: null as string | null,
-    outputMode: null as 'full' | 'commit-only' | null,
   }),
 );
 const mockSaveSession = mock(() => Promise.resolve());
@@ -73,26 +72,7 @@ const mockGitService = {
   getIndexEntries: mock(),
   getRepositoryState: mock(),
 };
-const mockContextService = {
-  constructLLMPromptContext: mock(),
-  reduceForRetry: mock(
-    async (params: {
-      promptParts: { prefix: string; diffHeading: string; diffBody: string; suffix: string };
-      stagedFiles?: string[];
-      summaryAttempted: boolean;
-    }) => ({
-      promptContext:
-        params.promptParts.prefix +
-        params.promptParts.diffHeading +
-        params.promptParts.diffBody +
-        params.promptParts.suffix,
-      promptParts: params.promptParts,
-      mode: 'truncation' as const,
-      summaryAttempted: params.summaryAttempted,
-      summaryUsed: false,
-    }),
-  ),
-};
+const mockContextService = { constructLLMPromptContext: mock() };
 const mockGeminiService = { generate: mock() };
 const mockListModels = mock(() =>
   Promise.resolve([
@@ -134,7 +114,7 @@ describe('Refactored Runner', () => {
   });
 
   test('Should scope restored models to their provider', () => {
-    const session = { providerId: 'gemini', modelName: 'gemini-model', outputMode: null } as const;
+    const session = { providerId: 'gemini', modelName: 'gemini-model' } as const;
     expect(
       createGenerationState(parseArgs([]), session, 'local-model', 'local').state.modelName,
     ).toBe('local-model');
@@ -144,7 +124,7 @@ describe('Refactored Runner', () => {
   });
 
   test('Should seed generation with a CLI hint', () => {
-    const session = { providerId: null, modelName: null, outputMode: null } as const;
+    const session = { providerId: null, modelName: null } as const;
     const state = createGenerationState(
       parseArgs(['--hint', 'emphasize migration']),
       session,
@@ -300,13 +280,11 @@ describe('Refactored Runner', () => {
     });
     mockContextService.constructLLMPromptContext.mockResolvedValue({
       promptContext: 'ctx',
-      promptParts: { prefix: 'prefix', diffHeading: 'Diff:\n', diffBody: 'diff', suffix: 'suffix' },
       processedDiffContent: 'diff',
       tokens: 10,
-      summaryAttempted: true,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'BRANCH: feat/test\nCOMMIT_MESSAGE: test: message',
+      text: 'BRANCH: feat/test\ntest: message',
       usage: {},
     });
 
@@ -341,7 +319,6 @@ describe('Refactored Runner', () => {
     );
     expect(mockGeminiService.generate).toHaveBeenCalledWith(
       expect.objectContaining({
-        summaryAttempted: true,
         systemPrompt: expect.stringContaining(
           'Body is optional. Use it only when the change cannot be described faithfully in the subject alone.',
         ) as unknown,
@@ -376,20 +353,17 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: fix(scope): generated message',
+      text: 'fix(scope): generated message',
       usage: {},
     });
 
-    await executeCommitMessageGeneration(
-      ['--non-interactive', '--mode', 'commit-only', '--model', 'gemini-3.7-flash'],
-      {
-        logger: mockLogger,
-        gitService: mockGitService,
-        contextService: mockContextService,
-        geminiService: mockGeminiService,
-        geminiModelLister: mockListModels,
-      },
-    );
+    await executeCommitMessageGeneration(['--non-interactive', '--model', 'gemini-3.7-flash'], {
+      logger: mockLogger,
+      gitService: mockGitService,
+      contextService: mockContextService,
+      geminiService: mockGeminiService,
+      geminiModelLister: mockListModels,
+    });
 
     expect(mockSelect).not.toHaveBeenCalled();
     expect(mockNote).toHaveBeenCalledWith(
@@ -413,12 +387,12 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: fix(scope): generated message',
+      text: 'fix(scope): generated message',
       usage: {},
     });
 
     await executeCommitMessageGeneration(
-      ['--non-interactive', '--apply', '--mode', 'commit-only', '--model', 'gemini-3.7-flash'],
+      ['--non-interactive', '--apply', '--model', 'gemini-3.7-flash'],
       {
         logger: mockLogger,
         gitService: mockGitService,
@@ -434,6 +408,106 @@ describe('Refactored Runner', () => {
       mockLogger,
       expect.anything(),
     );
+  });
+
+  test('non-interactive --apply refuses to commit a truncated message', async () => {
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
+      snapshot: { tree: 'index-tree', entries: [] },
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.generate.mockResolvedValue({
+      text: 'fix(scope): generated message',
+      usage: {},
+      truncated: true,
+    });
+
+    await executeCommitMessageGeneration(
+      ['--non-interactive', '--apply', '--model', 'gemini-3.7-flash'],
+      {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        geminiModelLister: mockListModels,
+      },
+    );
+
+    expect(mockGitService.commitChanges).not.toHaveBeenCalled();
+    expect(mockCancel).toHaveBeenCalledWith(expect.stringContaining('truncated'));
+  });
+
+  test('commit range refuses to rewrite history from a truncated message', async () => {
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    const currentHead = 'c'.repeat(40);
+    mockGitService.listCommitHashes.mockResolvedValue(['a'.repeat(40)]);
+    mockGitService.hasAmendment.mockResolvedValue(false);
+    mockGitService.getHeadHash.mockResolvedValue(currentHead);
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
+      snapshot: { tree: 'index-tree', entries: [] },
+    });
+    mockGitService.getRepositoryState.mockResolvedValue({
+      hasStagedChanges: false,
+      hasUnstagedChanges: false,
+      hasUntrackedFiles: false,
+      hasUnmergedPaths: false,
+      inProgressOperation: null,
+      changedFiles: [],
+    });
+    mockGitService.inspectCommitTarget.mockImplementation(async (hash: string) => ({
+      hash,
+      headHash: currentHead,
+      subject: 'feat: original',
+      isHead: false,
+      isPublished: false,
+      isAncestorOfHead: true,
+      isHeadDetached: false,
+      hasParent: true,
+      hasAmbiguousSubject: false,
+    }));
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.generate.mockResolvedValue({
+      text: 'fix(scope): generated message',
+      usage: {},
+      truncated: true,
+    });
+
+    await executeCommitMessageGeneration(
+      [
+        '--commit-range',
+        'base^..HEAD',
+        '--non-interactive',
+        '--apply',
+        '--model',
+        'gemini-3.7-flash',
+      ],
+      {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        geminiModelLister: mockListModels,
+      },
+    );
+
+    expect(mockGeminiService.generate).toHaveBeenCalled();
+    expect(mockCancel).toHaveBeenCalledWith(expect.stringContaining('truncated'));
+    expect(mockGitService.rewordCommit).not.toHaveBeenCalled();
+    expect(mockGitService.amendCommit).not.toHaveBeenCalled();
   });
 
   test('commit range applies one amend! action per frozen target without prompting', async () => {
@@ -479,7 +553,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: fix(scope): generated message',
+      text: 'fix(scope): generated message',
       usage: {},
     });
 
@@ -489,8 +563,6 @@ describe('Refactored Runner', () => {
         'base^..HEAD',
         '--non-interactive',
         '--apply',
-        '--mode',
-        'commit-only',
         '--model',
         'gemini-3.7-flash',
       ],
@@ -539,7 +611,7 @@ describe('Refactored Runner', () => {
 
   test('Should run a keyless provider through the complete generation seam', async () => {
     const generate = mock(async () => ({
-      text: 'COMMIT_MESSAGE: test: local result',
+      text: 'test: local result',
       usage: {},
     }));
     mockGitService.retrieveStagedChanges.mockResolvedValue({
@@ -549,7 +621,6 @@ describe('Refactored Runner', () => {
     });
     mockContextService.constructLLMPromptContext.mockResolvedValue({
       promptContext: 'ctx',
-      promptParts: { prefix: '', diffHeading: '', diffBody: 'diff', suffix: '' },
       processedDiffContent: 'diff',
       tokens: 10,
       summaryAttempted: false,
@@ -578,7 +649,7 @@ describe('Refactored Runner', () => {
       service: { generate },
     };
 
-    await executeCommitMessageGeneration(['--mode', 'commit-only'], {
+    await executeCommitMessageGeneration([], {
       logger: mockLogger as unknown as Logger,
       gitService: mockGitService,
       contextService: mockContextService,
@@ -615,9 +686,9 @@ describe('Refactored Runner', () => {
   });
 
   test('Should recompose services after selecting another provider', async () => {
-    const geminiGenerate = mock(async () => ({ text: 'COMMIT_MESSAGE: test: wrong', usage: {} }));
+    const geminiGenerate = mock(async () => ({ text: 'test: wrong', usage: {} }));
     const localGenerate = mock(async () => ({
-      text: 'COMMIT_MESSAGE: test: local result',
+      text: 'test: local result',
       usage: {},
     }));
     mockGitService.retrieveStagedChanges.mockResolvedValue({
@@ -627,7 +698,6 @@ describe('Refactored Runner', () => {
     });
     mockContextService.constructLLMPromptContext.mockResolvedValue({
       promptContext: 'ctx',
-      promptParts: { prefix: '', diffHeading: '', diffBody: 'diff', suffix: '' },
       processedDiffContent: 'diff',
       tokens: 10,
       summaryAttempted: false,
@@ -656,7 +726,7 @@ describe('Refactored Runner', () => {
       };
     }
 
-    await executeCommitMessageGeneration(['--mode', 'commit-only'], {
+    await executeCommitMessageGeneration([], {
       isInteractive: true,
       logger: mockLogger,
       gitService: mockGitService,
@@ -688,7 +758,7 @@ describe('Refactored Runner', () => {
 
   test('Should allow switching away from a provider that is not ready', async () => {
     const localGenerate = mock(async () => ({
-      text: 'COMMIT_MESSAGE: test: local result',
+      text: 'test: local result',
       usage: {},
     }));
     mockGitService.retrieveStagedChanges.mockResolvedValue({
@@ -698,7 +768,6 @@ describe('Refactored Runner', () => {
     });
     mockContextService.constructLLMPromptContext.mockResolvedValue({
       promptContext: 'ctx',
-      promptParts: { prefix: '', diffHeading: '', diffBody: 'diff', suffix: '' },
       processedDiffContent: 'diff',
       tokens: 10,
       summaryAttempted: false,
@@ -714,7 +783,7 @@ describe('Refactored Runner', () => {
       label: 'Model',
       limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
     };
-    await executeCommitMessageGeneration(['--mode', 'commit-only'], {
+    await executeCommitMessageGeneration([], {
       isInteractive: true,
       logger: mockLogger,
       gitService: mockGitService,
@@ -821,7 +890,6 @@ describe('Refactored Runner', () => {
     mockLoadSession.mockResolvedValueOnce({
       providerId: 'lm-studio',
       modelName: 'local-model',
-      outputMode: null,
     });
     try {
       await executeCommitMessageGeneration(['--help'], { logger: mockLogger });
@@ -849,7 +917,7 @@ describe('Refactored Runner', () => {
       },
       service: { generate: mock() },
     };
-    await executeCommitMessageGeneration(['--model', 'gemini-3.7-flash', '--mode', 'commit-only'], {
+    await executeCommitMessageGeneration(['--model', 'gemini-3.7-flash'], {
       isInteractive: true,
       logger: mockLogger,
       gitService: mockGitService,
@@ -873,83 +941,6 @@ describe('Refactored Runner', () => {
     expect(
       mockSelect.mock.calls.some(call => String(call[0]?.message).startsWith('Settings:')),
     ).toBe(false);
-  });
-
-  test('Should reject a provider factory identity mismatch', async () => {
-    await executeCommitMessageGeneration([], {
-      logger: mockLogger,
-      languageModelProviderFactories: [
-        {
-          id: 'advertised',
-          label: 'Advertised',
-          create: async function () {
-            return {
-              id: 'different',
-              label: 'Different',
-              defaultModel: 'model',
-              models: async function () {
-                return [
-                  {
-                    name: 'model',
-                    label: 'Model',
-                    limits: {
-                      kind: 'separate' as const,
-                      maxInputTokens: 8_192,
-                      maxOutputTokens: 1_024,
-                    },
-                  },
-                ];
-              },
-              service: { generate: mock() },
-            };
-          },
-        },
-      ],
-    });
-    expect(mockCancel).toHaveBeenCalledWith(expect.stringContaining('provider factory identity'));
-  });
-
-  test('Should reject an invalid live model spec before generation', async () => {
-    const generate = mock(async () => null);
-    mockGitService.retrieveStagedChanges.mockResolvedValue({
-      stagedDiff: 'diff',
-      stagedFiles: ['a.ts'],
-      truncated: false,
-    });
-    mockContextService.constructLLMPromptContext.mockResolvedValue({
-      promptContext: 'ctx',
-      processedDiffContent: 'diff',
-      tokens: 10,
-    });
-
-    await executeCommitMessageGeneration(['--model', 'live-model', '--mode', 'commit-only'], {
-      logger: mockLogger as unknown as Logger,
-      gitService: mockGitService,
-      contextService: mockContextService,
-      languageModelProvider: {
-        id: 'local',
-        label: 'Local',
-        defaultModel: 'default-model',
-        models: async function () {
-          return [
-            {
-              name: 'default-model',
-              label: 'Default',
-              limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
-            },
-            {
-              name: 'live-model',
-              label: 'Live',
-              limits: { kind: 'separate' as const, maxInputTokens: 1_000, maxOutputTokens: 0 },
-            },
-          ];
-        },
-        service: { generate },
-      },
-    });
-
-    expect(mockCancel).toHaveBeenCalledWith('Error: Invalid model token limits.');
-    expect(generate).not.toHaveBeenCalled();
   });
 
   test('Should print package version and exit on --version', async () => {
@@ -1185,7 +1176,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'BRANCH: branch\nCOMMIT_MESSAGE: test: initial message',
+      text: 'BRANCH: branch\ntest: initial message',
       usage: {},
     });
 
@@ -1240,7 +1231,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: test: initial message',
+      text: 'test: initial message',
       usage: {},
     });
     mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
@@ -1323,16 +1314,17 @@ describe('Refactored Runner', () => {
 
   for (const inputCase of [
     {
-      args: ['--model', 'gemini-3.1-pro-preview'],
-      message:
-        'Settings: [Provider: Gemini] [Model: gemini-3.1-pro-preview] [Mode: Commit Msg Only]',
+      name: 'only --hint is provided',
+      args: ['--hint', 'emphasise refactoring'],
+      expectSettings: 'Settings: [Provider: Gemini] [Model: gemini-3.7-flash]',
     },
     {
-      args: ['--mode', 'full'],
-      message: 'Settings: [Provider: Gemini] [Model: gemini-3.7-flash] [Mode: Full Report]',
+      name: '--model selects the single remaining setting',
+      args: ['--model', 'gemini-3.1-pro-preview'],
+      expectSettings: null,
     },
   ]) {
-    test(`Should still offer settings when only ${inputCase.args[0]} is provided`, async () => {
+    test(`Should offer settings unless ${inputCase.name}`, async () => {
       const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
       process.env.GOOGLE_GEMINI_API_KEY = 'test';
       mockGitService.retrieveStagedChanges.mockResolvedValue({
@@ -1351,10 +1343,23 @@ describe('Refactored Runner', () => {
           geminiModelLister: mockListModels,
         });
 
-        expect(mockSelect).toHaveBeenCalledWith(
-          expect.objectContaining({ message: inputCase.message }),
-        );
-        expect(mockGeminiService.generate).not.toHaveBeenCalled();
+        if (inputCase.expectSettings === null) {
+          const settingsPrompts = mockSelect.mock.calls.filter(function (call) {
+            const options: unknown = call[0];
+            return (
+              typeof options === 'object' &&
+              options !== null &&
+              typeof (options as { message?: unknown }).message === 'string' &&
+              (options as { message: string }).message.startsWith('Settings:')
+            );
+          });
+          expect(settingsPrompts).toEqual([]);
+        } else {
+          expect(mockSelect).toHaveBeenCalledWith(
+            expect.objectContaining({ message: inputCase.expectSettings }),
+          );
+          expect(mockGeminiService.generate).not.toHaveBeenCalled();
+        }
       } finally {
         if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
         else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
@@ -1445,22 +1450,19 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: test: message',
+      text: 'test: message',
       usage: {},
     });
     mockSelect.mockResolvedValueOnce('cancel');
 
     try {
-      await executeCommitMessageGeneration(
-        ['--mode', 'commit-only', '--model', 'gemini-3.7-flash'],
-        {
-          logger: mockLogger,
-          gitService: mockGitService,
-          contextService: mockContextService,
-          geminiService: mockGeminiService,
-          geminiModelLister: mockListModels,
-        },
-      );
+      await executeCommitMessageGeneration(['--model', 'gemini-3.7-flash'], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        geminiModelLister: mockListModels,
+      });
 
       expect(mockGeminiService.generate).toHaveBeenCalledTimes(1);
       expect(mockNote).toHaveBeenCalledWith(
@@ -1532,12 +1534,12 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: missing branch',
+      text: 'missing branch',
       usage: {},
     });
 
     try {
-      await executeCommitMessageGeneration(['--mode', 'full', '--model', 'gemini-3.7-flash'], {
+      await executeCommitMessageGeneration(['--model', 'gemini-3.7-flash'], {
         logger: mockLogger,
         gitService: mockGitService,
         contextService: mockContextService,
@@ -1575,7 +1577,7 @@ describe('Refactored Runner', () => {
     });
 
     try {
-      await executeCommitMessageGeneration(['--mode', 'full', '--model', 'gemini-3.7-flash'], {
+      await executeCommitMessageGeneration(['--model', 'gemini-3.7-flash'], {
         logger: mockLogger,
         gitService: mockGitService,
         contextService: mockContextService,
@@ -1607,23 +1609,20 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: test: message',
+      text: 'test: message',
       usage: {},
     });
     mockGitService.commitChanges.mockRejectedValueOnce(new Error('git commit failed'));
     mockSelect.mockResolvedValueOnce('commit');
 
     try {
-      await executeCommitMessageGeneration(
-        ['--mode', 'commit-only', '--model', 'gemini-3.7-flash'],
-        {
-          logger: mockLogger,
-          gitService: mockGitService,
-          contextService: mockContextService,
-          geminiService: mockGeminiService,
-          geminiModelLister: mockListModels,
-        },
-      );
+      await executeCommitMessageGeneration(['--model', 'gemini-3.7-flash'], {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        geminiModelLister: mockListModels,
+      });
 
       expect(mockCancel).toHaveBeenCalledWith('Failed to apply commit action: git commit failed');
       expect(Number(process.exitCode)).toBe(1);
@@ -1646,7 +1645,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: test: message',
+      text: 'test: message',
       usage: {},
     });
 
@@ -1685,7 +1684,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: test: msg',
+      text: 'test: msg',
       usage: {},
     });
 
@@ -1729,7 +1728,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: test: msg',
+      text: 'test: msg',
       usage: {},
     });
 
@@ -1769,7 +1768,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: test: msg',
+      text: 'test: msg',
       usage: {},
     });
 
@@ -1793,7 +1792,6 @@ describe('Refactored Runner', () => {
     mockLoadSession.mockResolvedValueOnce({
       providerId: 'gemini',
       modelName: 'gemini-special',
-      outputMode: null,
     });
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
@@ -1806,7 +1804,7 @@ describe('Refactored Runner', () => {
       tokens: 10,
     });
     mockGeminiService.generate.mockResolvedValue({
-      text: 'COMMIT_MESSAGE: test: msg',
+      text: 'test: msg',
       usage: {},
     });
     mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
@@ -1821,7 +1819,7 @@ describe('Refactored Runner', () => {
 
     expect(mockGeminiService.generate).toHaveBeenCalledWith(
       expect.objectContaining({
-        opts: expect.objectContaining({ modelOverride: 'gemini-special' }) as unknown,
+        modelName: 'gemini-special',
       }),
     );
   });
@@ -1840,7 +1838,7 @@ describe('Refactored Runner', () => {
 
     // First call returns full (internal retry logic is handled by the client/service)
     mockGeminiService.generate.mockResolvedValueOnce({
-      text: 'COMMIT_MESSAGE: test: full message',
+      text: 'test: full message',
       truncated: false,
       usage: { outputTokens: 20, promptTokens: 10 },
     });
@@ -1859,7 +1857,7 @@ describe('Refactored Runner', () => {
     expect(mockGeminiService.generate).toHaveBeenCalledTimes(1);
     expect(mockGeminiService.generate).toHaveBeenCalledWith(
       expect.objectContaining({
-        opts: expect.objectContaining({ maxOutputTokensLimit: 8192 }) as unknown,
+        maxOutputTokens: 8192,
       }),
     );
     expect(mockNote).toHaveBeenCalledWith(

@@ -1,7 +1,7 @@
-import type { ModelSpec } from '../model-registry.js';
-import { createLanguageModelApiError, isLanguageModelName } from '../language-model-service.js';
-import { requestProviderText } from '../provider-http.js';
-import { CONFIG } from '../../gcm.config.js';
+import type { ModelSpec } from './model-registry.js';
+import { createLanguageModelApiError, isLanguageModelName } from './language-model-service.js';
+import { requestProviderText } from './provider-http.js';
+import { CONFIG } from '../gcm.config.js';
 
 const MODELS_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 const MAX_MODEL_PAGES = 20;

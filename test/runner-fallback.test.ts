@@ -42,6 +42,9 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
   // Provide a git service that returns staged changes
   function createGitServiceFake(): GitService {
     return {
+      listCommitHashes: async () => [],
+      hasAmendment: async () => false,
+      getHeadHash: async () => 'head',
       retrieveStagedChanges: async (
         commitHash: string | null,
         _logger: Parameters<GitService['retrieveStagedChanges']>[1],

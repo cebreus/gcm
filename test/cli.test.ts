@@ -27,7 +27,6 @@ test('cli: should parse default arguments with empty argv', () => {
     model: null,
     provider: null,
     hint: null,
-    mode: null,
     verbose: false,
     debug: false,
     listModels: false,
@@ -127,12 +126,9 @@ test('cli: should handle --model flag with a model name', () => {
   expect(result.model).toBe(model);
 });
 
-test('cli: accepts supported --mode values and rejects unsupported ones', () => {
-  expect(parseArgs(['--mode', 'full']).mode).toBe('full');
-  expect(parseArgs(['--mode', 'commit-only']).mode).toBe('commit-only');
-  expect(() => parseArgs(['--mode', 'garbage'])).toThrow(
-    'Invalid value for --mode: garbage. Expected one of: full, commit-only',
-  );
+test('cli: rejects the removed --mode flag', () => {
+  expect(() => parseArgs(['--mode', 'full'])).toThrow('Unknown flag: --mode');
+  expect(() => parseArgs(['-m', 'commit-only'])).toThrow('Unknown flag: -m');
 });
 
 test('cli: rejects repeated single-value flags', () => {
@@ -141,9 +137,6 @@ test('cli: rejects repeated single-value flags', () => {
   );
   expect(() => parseArgs(['--model', 'gemini-pro', '--model', 'gemini-flash'])).toThrow(
     'Flag may only be specified once: --model',
-  );
-  expect(() => parseArgs(['--mode', 'full', '--mode', 'commit-only'])).toThrow(
-    'Flag may only be specified once: --mode',
   );
 });
 
@@ -272,13 +265,6 @@ const valueTakingFlagCases = [
     option: 'model',
     value: 'gemini-pro',
     expected: 'gemini-pro',
-  },
-  {
-    aliases: ['--mode', '-m'],
-    longAlias: '--mode',
-    option: 'mode',
-    value: 'commit-only',
-    expected: 'commit-only',
   },
 ] as const;
 

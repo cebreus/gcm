@@ -6,6 +6,12 @@ import {
   FILE_IMPORTANCE_WEIGHTS,
 } from './constants.js';
 
+const encoder = new TextEncoder();
+
+export function estimateTokenCount(text: string, tokenBytesRatio: number): number {
+  return Math.ceil(encoder.encode(text).length / tokenBytesRatio);
+}
+
 export interface Hunk {
   file: string;
   header: string;
@@ -128,62 +134,14 @@ export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void 
   if (hunk.score > array[minIdx].score) array[minIdx] = hunk;
 }
 
-export function unescapeNewlinesInText(obj: unknown, maxDepth = 20): unknown {
-  return recurseUnescapeNewlines(obj, 0, maxDepth);
-}
-
-function recurseUnescapeNewlines(current: unknown, depth: number, maxDepth: number): unknown {
-  if (depth >= maxDepth) {
-    return '[REDACTED-MAX-DEPTH]';
-  }
-  if (typeof current === 'string') {
-    return current;
-  }
-  if (Array.isArray(current)) {
-    return current.map(item => recurseUnescapeNewlines(item, depth + 1, maxDepth));
-  }
-  if (typeof current === 'object' && current !== null) {
-    const newObj: Record<string, unknown> = {};
-    for (const key in current as Record<string, unknown>) {
-      if (Object.prototype.hasOwnProperty.call(current, key)) {
-        const val = (current as Record<string, unknown>)[key];
-        if (key === 'text' && typeof val === 'string') {
-          newObj[key] = val.replace(/\\n/g, '\n');
-        } else {
-          newObj[key] = recurseUnescapeNewlines(val, depth + 1, maxDepth);
-        }
-      }
-    }
-    return newObj;
-  }
-  return current;
-}
-
 /**
  * Sanitizes text for display or clipboard operations by removing non-printable
  * ASCII characters and internal control markers.
  */
 export function sanitizeForDisplay(text: string): string {
   if (!text || typeof text !== 'string') return text;
-
-  // Remove protocol markers, but preserve likely natural-language mentions like
-  // "what <<END>> marker means".
-  let cleaned = text.replace(
-    /`?\.?<<(START|END|END_TRUNCATED)>>`?/g,
-    function (match: string, _marker: string, offset: number, fullText: string): string {
-      const prevChar = offset > 0 ? fullText[offset - 1] : '';
-      const nextIndex = offset + match.length;
-      const nextChar = nextIndex < fullText.length ? fullText[nextIndex] : '';
-      const tail = fullText.slice(nextIndex);
-      const looksLikeNarrativeMention =
-        /\s/.test(prevChar) && /\s/.test(nextChar) && /^\s+[a-z]/i.test(tail);
-      return looksLikeNarrativeMention ? match : '';
-    },
-  );
-  cleaned = cleaned.replace(/^[ \t]+/, '').replace(/[ \t]+$/, '');
-
-  // Allow printable ASCII and all UTF-8 characters. Remove non-printable control characters (0-31) except tab, newline, CR.
-  return stripTerminalControlSequences(cleaned);
+  // Allow printable ASCII and all UTF-8. Remove non-printable control characters.
+  return stripTerminalControlSequences(text.replace(/^[ \t]+/, '').replace(/[ \t]+$/, ''));
 }
 
 /**

@@ -160,12 +160,12 @@ beforeAll(async () => {
   await Bun.write(
     providerPreload,
     `globalThis.fetch = async function (input) {
-      if (!String(input).includes('generateContent')) {
+      if (!String(input).includes('/chat/completions')) {
         return Response.json({ models: [{ name: 'models/gemini-3.7-flash', displayName: 'Gemini 3.7 Flash', supportedGenerationMethods: ['generateContent'], inputTokenLimit: 1048576, outputTokenLimit: 65536 }] });
       }
       return new Response(JSON.stringify({
-        candidates: [{ content: { parts: [{ text: '<<START>>fix: corrected message<<END>>' }] } }],
-        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 4 }
+        choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'fix: corrected message' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 4 }
       }));
     } as typeof fetch;`,
   );
@@ -251,7 +251,7 @@ test.skipIf(expectPath === null)(
       await runCommand(['git', 'rev-parse', 'HEAD~1'], rewordRepository)
     ).stdout.trim();
     const result = await runInteractiveBinary(
-      ['--commit', target, '--model', 'gemini-3.7-flash', '--mode', 'commit-only'],
+      ['--commit', target, '--model', 'gemini-3.7-flash'],
       rewordRepository,
     );
 
@@ -292,7 +292,6 @@ test('binary contract: shows documented help', async () => {
     '--verbose',
     '--debug',
     '--exclude',
-    '--mode',
     '--model',
     '--provider',
     '--hint',
@@ -310,7 +309,7 @@ test('binary contract: shows documented help', async () => {
 });
 
 test('binary contract: reports no staged changes without calling Gemini', async () => {
-  const result = await runBinary(['--mode', 'commit-only'], gitRepository, 'not-a-real-key');
+  const result = await runBinary([], gitRepository, 'not-a-real-key');
 
   expect(result.exitCode).not.toBe(0);
   expect(result.stdout).toContain('No staged changes found');
@@ -337,18 +336,16 @@ test('binary contract: reports conflicts before showing settings', async () => {
   expect(result.stderr).toBe('');
 });
 
-test('binary contract: one generation setting still shows configuration', async () => {
-  const result = await runBinary(['--mode', 'full'], excludeRepository, 'not-a-real-key');
+test('binary contract: an unconfigured run still shows configuration', async () => {
+  const result = await runBinary([], excludeRepository, 'not-a-real-key');
 
   expect(result.exitCode).toBe(0);
-  expect(result.stdout).toContain(
-    'Settings: [Provider: Gemini] [Model: gemini-3.7-flash] [Mode: Full Report]',
-  );
+  expect(result.stdout).toContain('Settings: [Provider: Gemini] [Model: gemini-3.7-flash]');
   expect(result.stderr).toBe('');
 });
 
 test('binary contract: refuses whitespace-only staged changes without an API key', async () => {
-  const result = await runBinary(['--mode', 'commit-only'], whitespaceRepository);
+  const result = await runBinary([], whitespaceRepository);
 
   expect(result.exitCode).not.toBe(0);
   expect(result.stdout).toContain('Only whitespace-only staged changes detected in 1 file(s).');
@@ -357,7 +354,7 @@ test('binary contract: refuses whitespace-only staged changes without an API key
 });
 
 test('binary contract: reports when the working directory is not a git repository', async () => {
-  const result = await runBinary(['--mode', 'commit-only'], nonRepository, 'not-a-real-key');
+  const result = await runBinary([], nonRepository, 'not-a-real-key');
 
   expect(result.exitCode).not.toBe(0);
   expect(result.stdout).toContain('Not inside a git repository');
@@ -371,8 +368,8 @@ for (const inputCase of [
   { args: ['--commit'], message: 'Missing value for flag: --commit' },
   { args: ['--commit='], message: 'Missing value for flag: --commit' },
   {
-    args: ['--mode', 'invalid'],
-    message: 'Invalid value for --mode: invalid. Expected one of: full, commit-only',
+    args: ['--mode', 'commit-only'],
+    message: 'Unknown flag: --mode',
   },
   {
     args: ['--commit', 'abc', '--commit', 'def'],
@@ -409,10 +406,7 @@ test('binary contract: rejects positional arguments after --', async () => {
 });
 
 test('binary contract: excludes a dash-prefixed sentinel from the changed-file set', async () => {
-  const result = await runBinary(
-    ['--mode', 'commit-only', '--exclude', '-generated/*'],
-    excludeRepository,
-  );
+  const result = await runBinary(['--exclude', '-generated/*'], excludeRepository);
 
   expect(result.exitCode).not.toBe(0);
   expect(result.stdout).toContain('Excluded 1 file(s) matching patterns: -generated/*');

@@ -8,7 +8,6 @@ const DEFAULT_CONFIG = {
   perFileBuffer: 1024 * 1024,
   tokenRatio: 3.5,
   maxOutputTokens: 8192,
-  debugBytes: 32768,
   retries: 3,
   retryBase: 1000,
   retryMax: 60000,
@@ -22,7 +21,7 @@ async function readConfig(env: Record<string, string>): Promise<unknown> {
     cmd: [
       'bun',
       '-e',
-      "import { CONFIG } from './gcm.config.ts'; console.log(JSON.stringify({ model: CONFIG.MODEL, temp: CONFIG.TEMP, maxBuffer: CONFIG.CHILD_PROCESS_MAX_BUFFER, maxHunks: CONFIG.MAX_HUNKS, perFileBuffer: CONFIG.PER_FILE_BUFFER, tokenRatio: CONFIG.TOKEN_BYTES_RATIO, maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS, debugBytes: CONFIG.DEBUG_MAX_BODY_LOG_BYTES, retries: CONFIG.MAX_RETRIES, retryBase: CONFIG.RETRY_BASE_MS, retryMax: CONFIG.RETRY_MAX_MS, freeLlmApiUrl: CONFIG.FREELLMAPI_URL, freeLlmApiModel: CONFIG.FREELLMAPI_MODEL, freeLlmApiToken: CONFIG.FREELLMAPI_TOKEN ?? null }));",
+      "import { CONFIG } from './gcm.config.ts'; console.log(JSON.stringify({ model: CONFIG.MODEL, temp: CONFIG.TEMP, maxBuffer: CONFIG.CHILD_PROCESS_MAX_BUFFER, maxHunks: CONFIG.MAX_HUNKS, perFileBuffer: CONFIG.PER_FILE_BUFFER, tokenRatio: CONFIG.TOKEN_BYTES_RATIO, maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS, retries: CONFIG.MAX_RETRIES, retryBase: CONFIG.RETRY_BASE_MS, retryMax: CONFIG.RETRY_MAX_MS, freeLlmApiUrl: CONFIG.FREELLMAPI_URL, freeLlmApiModel: CONFIG.FREELLMAPI_MODEL, freeLlmApiToken: CONFIG.FREELLMAPI_TOKEN ?? null }));",
     ],
     cwd: process.cwd(),
     env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', ...env },
@@ -135,4 +134,34 @@ test('CLI names an invalid GCM_MAX_RETRIES setting', async () => {
   const result = await runCli({ GCM_MAX_RETRIES: '20' });
   expect(result.exitCode).not.toBe(0);
   expect(result.stderr).toContain('Invalid GCM_MAX_RETRIES');
+});
+
+test('an unsafe GCM_MODEL still lets the CLI answer --version', async function () {
+  const child = Bun.spawn({
+    cmd: ['bun', 'run', './gcm.ts', '--version'],
+    cwd: process.cwd(),
+    env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', GCM_MODEL: 'bad\u001b[2Jmodel' },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain('gcm ');
+});
+
+test('an unsafe GCM_MODEL stops --list-providers with the real reason', async function () {
+  const child = Bun.spawn({
+    cmd: ['bun', 'run', './gcm.ts', '--list-providers'],
+    cwd: process.cwd(),
+    env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', GCM_MODEL: 'bad\u001b[2Jmodel' },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  expect(exitCode).not.toBe(0);
+  expect(stdout + stderr).toContain('Invalid GCM_MODEL');
 });

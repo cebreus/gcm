@@ -84,7 +84,7 @@ test('createFreeLlmApiProvider fetches models and generates text', async functio
               index: 0,
               message: {
                 role: 'assistant',
-                content: 'COMMIT_MESSAGE: feat: add freellmapi provider',
+                content: 'feat: add freellmapi provider',
               },
               finish_reason: 'stop',
             },
@@ -121,13 +121,14 @@ test('createFreeLlmApiProvider fetches models and generates text', async functio
     const response = await provider.service.generate({
       promptContext: 'Diff snippet',
       systemPrompt: 'System instructions',
-      reduceForRetry: async () => ({ mode: 'unreducible' }),
       meta: { scope: 'test' },
+      modelName: 'auto',
+      maxOutputTokens: 1_024,
     });
 
     expect(receivedAuthHeader).toBe('Bearer test-secret-token');
     expect(receivedChatBody.model).toBe('auto');
-    expect(response?.text).toBe('COMMIT_MESSAGE: feat: add freellmapi provider');
+    expect(response?.text).toBe('feat: add freellmapi provider');
     expect(response?.usage.promptTokens).toBe(15);
     expect(response?.usage.outputTokens).toBe(8);
   } finally {
@@ -166,7 +167,7 @@ test('createFreeLlmApiProvider handles custom baseUrl endings', async function (
         return Response.json({
           choices: [
             {
-              message: { content: 'COMMIT_MESSAGE: feat: custom path chat' },
+              message: { content: 'feat: custom path chat' },
               finish_reason: 'stop',
             },
           ],
@@ -185,13 +186,13 @@ test('createFreeLlmApiProvider handles custom baseUrl endings', async function (
     const response = await provider.service.generate({
       promptContext: 'Diff snippet',
       systemPrompt: 'System instructions',
-      reduceForRetry: async () => ({ mode: 'unreducible' }),
       meta: { scope: 'test' },
-      opts: { modelOverride: 'gemini-2.5-flash' },
+      modelName: 'gemini-2.5-flash',
+      maxOutputTokens: 1_024,
     });
 
     expect(chatCalled).toBe(true);
-    expect(response?.text).toBe('COMMIT_MESSAGE: feat: custom path chat');
+    expect(response?.text).toBe('feat: custom path chat');
   } finally {
     await server.stop(true);
   }
@@ -216,7 +217,7 @@ test('createFreeLlmApiProvider preserves a custom base path', async function () 
       if (request.method === 'POST' && url.pathname === '/proxy/chat/completions') {
         chatCalled = true;
         return Response.json({
-          choices: [{ message: { content: 'COMMIT_MESSAGE: fix: preserve path' } }],
+          choices: [{ message: { content: 'fix: preserve path' } }],
         });
       }
       return new Response('Not Found', { status: 404 });
@@ -228,8 +229,9 @@ test('createFreeLlmApiProvider preserves a custom base path', async function () 
     await provider.service.generate({
       promptContext: 'Diff snippet',
       systemPrompt: 'System instructions',
-      reduceForRetry: async () => ({ mode: 'unreducible' }),
       meta: { scope: 'test' },
+      modelName: 'auto',
+      maxOutputTokens: 1_024,
     });
     expect(chatCalled).toBe(true);
   } finally {
@@ -253,7 +255,7 @@ test('createFreeLlmApiProvider derives model discovery from a full chat endpoint
           ],
         });
       }
-      return Response.json({ choices: [{ message: { content: 'COMMIT_MESSAGE: fix: proxy' } }] });
+      return Response.json({ choices: [{ message: { content: 'fix: proxy' } }] });
     },
   });
   try {
@@ -312,9 +314,9 @@ test('createFreeLlmApiProvider rejects unknown model overrides', async function 
       provider.service.generate({
         promptContext: 'Diff',
         systemPrompt: 'System',
-        reduceForRetry: async () => ({ mode: 'unreducible' }),
         meta: { scope: 'test' },
-        opts: { modelOverride: 'missing-model' },
+        modelName: 'missing-model',
+        maxOutputTokens: 1_024,
       }),
     ).rejects.toThrow('Unknown FreeLLMAPI model');
   } finally {

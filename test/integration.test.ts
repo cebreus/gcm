@@ -1,9 +1,8 @@
 import { test, expect, mock, afterAll, afterEach, beforeEach } from 'bun:test';
 import { executeCommitMessageGeneration as runnerRun } from '../src/runner.js';
 import { createGitService } from '../src/services/git-service.js';
-import { createGeminiService } from '../src/services/gemini-service.js';
 import { createContextService } from '../src/services/context-service.js';
-import type { GeminiClient } from '../src/gemini-client.js';
+import type { LanguageModelService } from '../src/language-model-service.js';
 import type { Logger } from '../src/logger.js';
 
 // Mock @clack/prompts
@@ -22,7 +21,7 @@ async function selectIntegrationPrompt(options: {
   });
   if (
     options.message.startsWith('Settings:') &&
-    values.join(',') === 'generate,provider,model,mode,exit'
+    values.join(',') === 'generate,provider,model,exit'
   ) {
     return 'generate';
   }
@@ -66,11 +65,10 @@ await mock.module('@clack/prompts', () => ({
 
 // Mock high-level application modules - using dependency injection instead of global mocks
 const mockCallGemini = mock(async () => ({
-  text: 'BRANCH: feat/test\nCOMMIT_MESSAGE: feat(test): initial commit\nPR_TITLE: Feat: initial commit\nPR_DESCRIPTION: Initial commit description.',
-  usage: { promptTokens: 100, outputTokens: 50, thinkingTokens: 0 },
+  text: 'feat(test): initial commit',
+  usage: { promptTokens: 100, outputTokens: 50 },
 }));
-const mockGeminiClient = { callGemini: mockCallGemini } satisfies GeminiClient;
-const mockCreateGeminiClient = mock(() => mockGeminiClient);
+const geminiService: LanguageModelService = { generate: mockCallGemini };
 const mockListModels = mock(async function () {
   return [
     {
@@ -105,7 +103,6 @@ const mockSummarizeLargeDiff = mock(async () => ({
   numHunks: 1,
   totalTruncated: 0,
 }));
-await mock.module('../src/summarizer', () => ({ summarizeLargeDiff: mockSummarizeLargeDiff }));
 
 // DO NOT mock CLI or Logger globally - that causes issues in other tests.
 // Instead, we'll pass mocks through dependency injection where needed.
@@ -121,7 +118,6 @@ afterAll(() => {
 
 afterEach(() => {
   mockCallGemini.mockClear();
-  mockCreateGeminiClient.mockClear();
   mockLoggerInstance.log.mockClear();
   mockGetCommitContextHints.mockClear();
 
@@ -164,14 +160,9 @@ async function mockSpawnStreamImpl(args: string[]): Promise<{ text: string; trun
 test('integration: end-to-end - stage files -> generate commit message', async () => {
   process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
   const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl });
-  const geminiService = createGeminiService({
-    client: mockGeminiClient,
-    logger: mockLoggerInstance,
-    apiKey: 'test-key',
-  });
   const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
-  await runnerRun(['--model', 'gemini-3.7-flash', '--mode', 'commit-only'], {
+  await runnerRun(['--model', 'gemini-3.7-flash'], {
     logger: mockLoggerInstance,
     gitService,
     geminiService,
@@ -188,14 +179,9 @@ test('integration: end-to-end - stage files -> generate commit message', async (
 
 test('integration: end-to-end - analyze specific commit', async () => {
   const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl });
-  const geminiService = createGeminiService({
-    client: mockGeminiClient,
-    logger: mockLoggerInstance,
-    apiKey: 'test-key',
-  });
   const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
-  await runnerRun(['-c', 'a1b2c3d', '--model', 'gemini-3.7-flash', '--mode', 'commit-only'], {
+  await runnerRun(['-c', 'a1b2c3d', '--model', 'gemini-3.7-flash'], {
     logger: mockLoggerInstance,
     gitService,
     geminiService,
@@ -207,30 +193,23 @@ test('integration: end-to-end - analyze specific commit', async () => {
   expect(mockGetCommitContextHints).toHaveBeenCalledWith(['src/index.js'], expect.any(Object));
 });
 
-test('integration: token limit scenario - should trigger fallback', async () => {
-  mockCallGemini.mockRejectedValueOnce(new Error('MAX_TOKENS')); // First call fails
-  mockCallGemini.mockResolvedValueOnce({
-    text: 'BRANCH: feat/success\nCOMMIT_MESSAGE: feat(success): it worked\nPR_TITLE: Success\nPR_DESCRIPTION: It worked.',
-    usage: { promptTokens: 10, outputTokens: 5, thinkingTokens: 0 },
-  }); // Second call succeeds
+test('integration: a token-limit failure surfaces instead of retrying silently', async () => {
+  mockCallGemini.mockRejectedValueOnce(new Error('MAX_TOKENS'));
 
   const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl });
-  const geminiService = createGeminiService({
-    client: mockGeminiClient,
-    logger: mockLoggerInstance,
-    apiKey: 'test-key',
-  });
   const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
-  await runnerRun(['--model', 'gemini-3.7-flash', '--mode', 'commit-only'], {
-    logger: mockLoggerInstance,
-    gitService,
-    geminiService,
-    contextService,
-    geminiModelLister: mockListModels,
-  });
+  await expect(
+    runnerRun(['--model', 'gemini-3.7-flash'], {
+      logger: mockLoggerInstance,
+      gitService,
+      geminiService,
+      contextService,
+      geminiModelLister: mockListModels,
+    }),
+  ).rejects.toThrow('MAX_TOKENS');
 
-  expect(mockCallGemini).toHaveBeenCalledTimes(2);
+  expect(mockCallGemini).toHaveBeenCalledTimes(1);
 });
 
 test('integration: should handle various file types', async () => {
@@ -251,14 +230,9 @@ test('integration: should handle various file types', async () => {
   }
 
   const gitService = createGitService({ gitCommandRunner: customSpawnStreamImpl });
-  const geminiService = createGeminiService({
-    client: mockGeminiClient,
-    logger: mockLoggerInstance,
-    apiKey: 'test-key',
-  });
   const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
-  await runnerRun(['--model', 'gemini-3.7-flash', '--mode', 'commit-only'], {
+  await runnerRun(['--model', 'gemini-3.7-flash'], {
     logger: mockLoggerInstance,
     gitService,
     geminiService,
@@ -275,22 +249,17 @@ test('integration: should handle various file types', async () => {
 
 test('integration: should handle concurrent execution safety', async () => {
   const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl });
-  const geminiService = createGeminiService({
-    client: mockGeminiClient,
-    logger: mockLoggerInstance,
-    apiKey: 'test-key',
-  });
   const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
   const results = await Promise.all([
-    runnerRun(['--model', 'gemini-3.7-flash', '--mode', 'commit-only'], {
+    runnerRun(['--model', 'gemini-3.7-flash'], {
       logger: mockLoggerInstance,
       gitService,
       geminiService,
       contextService,
       geminiModelLister: mockListModels,
     }),
-    runnerRun(['--model', 'gemini-3.7-flash', '--mode', 'commit-only'], {
+    runnerRun(['--model', 'gemini-3.7-flash'], {
       logger: mockLoggerInstance,
       gitService,
       geminiService,
@@ -321,11 +290,6 @@ test('integration: should not send whitespace-only staged changes to AI', async 
   }
 
   const gitService = createGitService({ gitCommandRunner: whitespaceOnlyStagedSpawn });
-  const geminiService = createGeminiService({
-    client: mockGeminiClient,
-    logger: mockLoggerInstance,
-    apiKey: 'test-key',
-  });
   const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
   const originalExitCode = process.exitCode;
   process.exitCode = undefined;
@@ -372,14 +336,9 @@ test('integration: should handle real git repository state', async () => {
   }
 
   const gitService = createGitService({ gitCommandRunner: realGitSpawnStreamImpl });
-  const geminiService = createGeminiService({
-    client: mockGeminiClient,
-    logger: mockLoggerInstance,
-    apiKey: 'test-key',
-  });
   const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
-  await runnerRun(['--model', 'gemini-3.7-flash', '--mode', 'commit-only'], {
+  await runnerRun(['--model', 'gemini-3.7-flash'], {
     logger: mockLoggerInstance,
     gitService,
     geminiService,

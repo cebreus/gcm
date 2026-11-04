@@ -28,8 +28,8 @@ export function buildAtomicSplitProposal(
               'Suggested commands:',
               'git reset',
               `git add -- ${escapedFiles}`,
-              `git commit -m $'${escapeForAnsiCString(commitSubject)}' \\`,
-              `  -m $'- ${escapeForAnsiCString(commitBodyBullet)}'`,
+              `git commit -m $'${escapeAnsiCString(commitSubject)}' \\`,
+              `  -m $'- ${escapeAnsiCString(commitBodyBullet)}'`,
             ]
           : ['Commands omitted: staged and unstaged changes cannot be split safely by path.']),
       ].join('\n'),
@@ -122,10 +122,6 @@ function buildSuggestedSplitCommitBody(scope: string, files: string[]): string {
   if (scope === 'tests') return 'keep test coverage aligned with related code updates';
   if (files.length === 1) return `isolate ${files[0]} changes into one atomic unit`;
   return `group ${scope} changes into one atomic unit`;
-}
-
-function escapeForAnsiCString(value: string): string {
-  return escapeAnsiCString(value);
 }
 
 function escapeShellArg(value: string): string {

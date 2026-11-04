@@ -56,6 +56,15 @@ function createFakeGitService(params: {
   let targetIndex = 0;
   const writes: string[] = [];
   const service: GitService = {
+    listCommitHashes: async function () {
+      return [];
+    },
+    hasAmendment: async function () {
+      return false;
+    },
+    getHeadHash: async function () {
+      return 'head';
+    },
     retrieveStagedChanges: async function () {
       return null;
     },

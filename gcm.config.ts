@@ -1,8 +1,4 @@
-import {
-  DEFAULT_MAX_DEBUG_LOG_BYTES,
-  MAX_CHILD_OUTPUT_BYTES,
-  MAX_DEBUG_LOG_BYTES,
-} from './src/constants.js';
+import { MAX_CHILD_OUTPUT_BYTES } from './src/constants.js';
 import {
   integerInRange,
   normalizeRetryConfig,
@@ -59,14 +55,6 @@ export const CONFIG = {
   ENABLE_HUNK_WEIGHTS: process.env.GCM_ENABLE_HUNK_WEIGHTS === 'true',
   LOG_LEVEL: stringOrDefault(process.env.GCM_LOG_LEVEL, 'info'),
   DEBUG_API: process.env.GCM_DEBUG_API === 'true',
-  DEBUG_FILE: stringOrDefault(process.env.GCM_DEBUG_FILE, '.debug.log'),
-  DEBUG_MAX_BODY_LOG_BYTES: integerInRange(
-    process.env.GCM_DEBUG_MAX_BODY_LOG_BYTES,
-    1,
-    MAX_DEBUG_LOG_BYTES,
-    DEFAULT_MAX_DEBUG_LOG_BYTES,
-    'GCM_DEBUG_MAX_BODY_LOG_BYTES',
-  ),
   MAX_RETRIES: retry.maxRetries,
   RETRY_BASE_MS: retry.retryBaseMs,
   RETRY_MAX_MS: retry.retryMaxMs,

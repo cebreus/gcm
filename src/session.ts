@@ -1,15 +1,13 @@
 import { homedir } from 'os';
 import { join } from 'path';
 import { isLanguageModelName, isLanguageModelProviderId } from './language-model-service.js';
-import { isOutputMode, type OutputMode } from './output-mode.js';
 
 export interface GCMSession {
   providerId: string | null;
   modelName: string | null;
-  outputMode: OutputMode | null;
 }
 
-const EMPTY_SESSION: GCMSession = { providerId: null, modelName: null, outputMode: null };
+const EMPTY_SESSION: GCMSession = { providerId: null, modelName: null };
 const SESSION_FILE = join(homedir(), '.gcm-session.json');
 
 function isModelName(value: unknown): value is string | null {
@@ -20,8 +18,7 @@ function isSession(value: unknown): value is GCMSession {
   if (typeof value !== 'object' || value === null) return false;
   const session = value as Record<string, unknown>;
   if (!isLanguageModelProviderId(session.providerId)) return false;
-  if (!isModelName(session.modelName)) return false;
-  return session.outputMode === null || isOutputMode(session.outputMode);
+  return isModelName(session.modelName);
 }
 
 export async function loadSession(): Promise<GCMSession> {

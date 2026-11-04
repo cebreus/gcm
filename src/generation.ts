@@ -1,20 +1,15 @@
 import { CONFIG } from '../gcm.config.js';
 import type { ParsedOptions } from './cli.js';
-import type { OutputMode } from './output-mode.js';
 import {
   isCommitActionRefusal,
   type CommitActionService,
   type CommitCapability,
 } from './commit-action-service.js';
 import type { Logger, LogMetadata } from './logger.js';
-import {
-  getModelSpecValidationError,
-  isLanguageModelApiError,
-  type ModelSpec,
-} from './language-model-service.js';
-import { DEFAULT_MAX_OUTPUT_TOKENS } from './model-registry.js';
-import { parseLanguageModelOutput, type Labels } from './parser.js';
-import { estimateTokenCount } from './runner-utils.js';
+import { isLanguageModelApiError, type ModelSpec } from './language-model-service.js';
+import { resolveTokenBudget } from './model-registry.js';
+import { parseLanguageModelOutput } from './parser.js';
+import { estimateTokenCount } from './utils.js';
 import type { CommitContextHints } from './scope-detector.js';
 import type { ContextService } from './services/context-service.js';
 import type { LanguageModelService } from './language-model-service.js';
@@ -47,11 +42,8 @@ export type GenerationServices = {
     sanitizeGeneratedText(message: string): string;
     sanitizeTerminalText(message: string): string;
     style: {
-      bright(message: string): string;
       cyan(message: string): string;
-      cyanBright(message: string): string;
       dim(message: string): string;
-      magentaBright(message: string): string;
       yellow(message: string): string;
     };
   };
@@ -74,7 +66,6 @@ export function createGenerationState(
       providerId,
       baselineModelName: initialModelName,
       modelName: initialModelName,
-      outputMode: parsedArgs.mode ?? session.outputMode ?? 'commit-only',
       nonInteractive: parsedArgs.nonInteractive,
       apply: parsedArgs.apply,
       userHint: parsedArgs.hint ?? undefined,
@@ -158,33 +149,19 @@ export async function runGenerationCommand(params: {
   }
 }
 
-function displayResultStructured(
-  output: GenerationServices['output'],
-  logger: Logger,
-  res: Labels,
-): void {
-  const branchText = `\n${output.style.cyanBright('BRANCH:')}\n${res.BRANCH || ''}\n`;
-  const commitText = `\n${output.style.cyanBright('COMMIT_MESSAGE:')}\n${res.COMMIT_MESSAGE ?? ''}\n`;
-  const titleText = `\n${output.style.magentaBright('PR_TITLE:')}\n${res.PR_TITLE ?? ''}\n`;
-  const descText = `\n${output.style.magentaBright('PR_DESCRIPTION:')}\n${res.PR_DESCRIPTION ?? ''}\n`;
-  logger.log('info', `${branchText}${commitText}${titleText}${descText}`);
-}
-
 function reportStats(
   output: GenerationServices['output'],
   logger: Logger,
   modelName: string,
-  usage: { promptTokens?: number; outputTokens?: number; thinkingTokens?: number } = {},
+  usage: { promptTokens?: number; outputTokens?: number } = {},
   outputLength: number,
 ): void {
-  let thinking = '';
-  if (usage.thinkingTokens) thinking = ` | thinking: ${usage.thinkingTokens}`;
   logger.log(
     'info',
     output.style.dim(
       `${modelName} | actual usage -> input: ${usage.promptTokens ?? 0} tokens | output: ${
         usage.outputTokens ?? 0
-      } tokens (${outputLength.toLocaleString()} chars)${thinking}`,
+      } tokens (${outputLength.toLocaleString()} chars)`,
     ) + '\n',
   );
 }
@@ -222,9 +199,7 @@ Style alignment:
 - Use recent commit examples only to align type, scope, and wording style.
 - Do not copy unrelated content from history.`;
 
-const SYSTEM_INSTRUCTIONS_FULL = `You generate concise, evidence-grounded Conventional Commit metadata from git diffs.\n\nOutput format (follow exactly):\n\nBRANCH: [Generated branch name]\nCOMMIT_MESSAGE: [Generated conventional commit message]\nPR_TITLE: [Generated pull request title]\nPR_DESCRIPTION: [Generated pull request description]\n\nBranch rules:\n- Format: type/short-description\n- Allowed branch types: feat, fix, refactor, chore, docs\n\n${COMMIT_MESSAGE_RULES}\n\nPR rules:\n- PR title must match the commit subject and be at most 60 characters.\n- PR description must use GitHub-flavoured Markdown and stay to 2-3 short paragraphs or bullets.`;
-
-const SYSTEM_INSTRUCTIONS_COMMIT_ONLY = `You generate concise, evidence-grounded Conventional Commit messages from git diffs.\n\nOutput only the commit message.\n\n${COMMIT_MESSAGE_RULES}`;
+const SYSTEM_INSTRUCTIONS = `You generate concise, evidence-grounded Conventional Commit messages from git diffs.\n\nOutput only the commit message.\n\n${COMMIT_MESSAGE_RULES}`;
 
 function logTokenInfo(params: {
   modelName: string;
@@ -239,39 +214,13 @@ function logTokenInfo(params: {
   );
 }
 
-function buildNoteContent(
-  output: GenerationServices['output'],
-  outputMode: OutputMode,
-  parsedOut: Labels,
-): string {
-  if (outputMode === 'commit-only') return parsedOut.COMMIT_MESSAGE;
-
-  return [
-    `${output.style.cyanBright('BRANCH:')} ${parsedOut.BRANCH ?? 'N/A'}`,
-    `${output.style.cyanBright('PR_TITLE:')} ${parsedOut.PR_TITLE ?? 'N/A'}`,
-    '',
-    output.style.bright('COMMIT MESSAGE:'),
-    parsedOut.COMMIT_MESSAGE,
-    '',
-    output.style.magentaBright('PR DESCRIPTION:'),
-    parsedOut.PR_DESCRIPTION ?? 'N/A',
-  ].join('\n');
-}
-
 function parseAndSanitizeResponse(
   output: GenerationServices['output'],
   responseText: string,
-  outputMode: OutputMode,
   logger: Logger,
-): Labels | null {
+): string | null {
   try {
-    const rawParsed = parseLanguageModelOutput(responseText, outputMode);
-    return {
-      BRANCH: output.sanitizeGeneratedText(rawParsed.BRANCH),
-      COMMIT_MESSAGE: output.sanitizeGeneratedText(rawParsed.COMMIT_MESSAGE),
-      PR_TITLE: output.sanitizeGeneratedText(rawParsed.PR_TITLE),
-      PR_DESCRIPTION: output.sanitizeGeneratedText(rawParsed.PR_DESCRIPTION),
-    };
+    return output.sanitizeGeneratedText(parseLanguageModelOutput(responseText));
   } catch (error) {
     logger.log('error', `Parse failed: ${error}`);
     return null;
@@ -297,7 +246,7 @@ async function runGenerationWorkflow(params: {
     state,
   } = params;
   logTargetCommitInfo(services.output, logger, targetCommit);
-  if (canSwitchProvider && (!(parsedArgs.model && parsedArgs.mode) || providerReadinessError)) {
+  if (canSwitchProvider && (!parsedArgs.model || providerReadinessError)) {
     const providerConfiguration = await services.dialogue.configure(state);
     if (providerConfiguration === 'exit') return 'success';
     if (typeof providerConfiguration === 'object') return providerConfiguration;
@@ -345,7 +294,7 @@ async function runGenerationWorkflow(params: {
     services.output,
   );
   const preflight =
-    state.nonInteractive || canSwitchProvider || (parsedArgs.model && parsedArgs.mode)
+    state.nonInteractive || canSwitchProvider || parsedArgs.model
       ? 'continue'
       : await services.dialogue.configure(state);
   if (preflight === 'exit') return 'success';
@@ -593,37 +542,19 @@ async function runSingleGenerationAttempt(params: {
     services.output.cancel('Error: Unknown ' + services.providerLabel + ' model.');
     return 'failure';
   }
-  const modelSpecError = getModelSpecValidationError(modelSpec, state.modelName);
-  if (modelSpecError) {
-    services.output.cancel(`Error: ${modelSpecError}.`);
-    return 'failure';
-  }
-  const configuredMaxOutputTokens =
-    Number.isSafeInteger(CONFIG.MAX_OUTPUT_TOKENS) && CONFIG.MAX_OUTPUT_TOKENS > 0
-      ? CONFIG.MAX_OUTPUT_TOKENS
-      : DEFAULT_MAX_OUTPUT_TOKENS;
-  const maxOutputTokens =
-    modelSpec.limits.kind === 'separate'
-      ? Math.min(configuredMaxOutputTokens, modelSpec.limits.maxOutputTokens)
-      : Math.min(configuredMaxOutputTokens, Math.floor(modelSpec.limits.contextWindowTokens / 2));
-  const systemPrompt =
-    state.outputMode === 'full' ? SYSTEM_INSTRUCTIONS_FULL : SYSTEM_INSTRUCTIONS_COMMIT_ONLY;
-  const systemPromptTokens = estimateTokenCount(systemPrompt, CONFIG.TOKEN_BYTES_RATIO);
-  const promptCapacity =
-    modelSpec.limits.kind === 'separate'
-      ? modelSpec.limits.maxInputTokens
-      : modelSpec.limits.contextWindowTokens - maxOutputTokens;
-  const maxAvailableTokens = promptCapacity - systemPromptTokens;
+  const systemPrompt = SYSTEM_INSTRUCTIONS;
+  const { maxOutputTokens, maxAvailableTokens } = resolveTokenBudget(
+    modelSpec.limits,
+    CONFIG.MAX_OUTPUT_TOKENS,
+    estimateTokenCount(systemPrompt, CONFIG.TOKEN_BYTES_RATIO),
+  );
   if (maxAvailableTokens <= 0) {
     services.output.cancel(
       'Error: ' + services.providerLabel + ' model has no capacity for the configured output.',
     );
     return 'failure';
   }
-  const customHeader =
-    state.outputMode === 'full'
-      ? 'Generate a branch name, pull request title, pull request description, and a conventional commit message based on the following'
-      : 'Generate a professional conventional commit message based on the following';
+  const customHeader = 'Generate a professional conventional commit message based on the following';
   const contextResult = await services.contextService.constructLLMPromptContext({
     diffContent: staged.stagedDiff,
     promptSuffix: staged.truncated ? 'truncated diff' : 'diff',
@@ -649,21 +580,10 @@ async function runSingleGenerationAttempt(params: {
   services.output.startProgress(`Generating commit message with ${state.modelName}...`);
   const response = await services.languageModelService.generate({
     promptContext: contextResult.promptContext,
-    promptParts: contextResult.promptParts,
-    summaryAttempted: contextResult.summaryAttempted,
     systemPrompt,
-    reduceForRetry: function (params) {
-      return services.contextService.reduceForRetry({
-        ...params,
-        stagedFiles: staged.stagedFiles,
-        targetCommit: targetCommit ?? undefined,
-      });
-    },
     meta,
-    opts: {
-      modelOverride: state.modelName,
-      maxOutputTokensLimit: maxOutputTokens,
-    },
+    modelName: state.modelName,
+    maxOutputTokens,
   });
   if (!response) {
     services.output.stopProgress(services.providerLabel + ' returned no usable response');
@@ -698,27 +618,25 @@ async function handleSuccessfulGeneration(params: {
     outputTokens: response.usage.outputTokens,
     ...meta,
   });
-  const parsedOut = parseAndSanitizeResponse(
-    services.output,
-    response.text,
-    state.outputMode,
-    logger,
-  );
+  const parsedOut = parseAndSanitizeResponse(services.output, response.text, logger);
   if (!parsedOut) {
     logger.log('info', services.output.sanitizeTerminalText(response.text));
     services.output.outro('Failed to parse structured output.');
     return 'failure';
   }
   const warningIcon = response.truncated ? ` ${services.output.style.yellow('[⚠ TRUNCATED]')}` : '';
-  services.output.note(
-    buildNoteContent(services.output, state.outputMode, parsedOut),
-    (state.outputMode === 'full' ? 'Generated Report' : 'Generated Commit Message') + warningIcon,
-  );
+  services.output.note(parsedOut, 'Generated Commit Message' + warningIcon);
   reportStats(services.output, logger, state.modelName, response.usage, response.text.length);
   if (state.nonInteractive) {
     if (!state.apply) return 'success';
+    if (response.truncated) {
+      services.output.cancel(
+        'The generated message was truncated by the output limit. Refusing to commit it. Reduce the staged diff or raise GCM_MAX_OUTPUT_TOKENS.',
+      );
+      return 'failure';
+    }
     return commitGeneratedMessage({
-      commitMessage: parsedOut.COMMIT_MESSAGE,
+      commitMessage: parsedOut,
       commitCapability,
       services,
       state,
@@ -727,7 +645,7 @@ async function handleSuccessfulGeneration(params: {
   }
   const actionResult: ActionMenuResult = await services.dialogue.review({
     state,
-    result: parsedOut,
+    commitMessage: parsedOut,
     commitCapability,
   });
   if (actionResult.type === 'cancel') return 'success';
@@ -736,7 +654,7 @@ async function handleSuccessfulGeneration(params: {
   state.userHint = actionResult.userHint;
   if (actionResult.type === 'regenerate') return 'regenerate';
   return commitGeneratedMessage({
-    commitMessage: parsedOut.COMMIT_MESSAGE,
+    commitMessage: actionResult.commitMessage,
     commitCapability: {
       ...commitCapability,
       exclusionsAcknowledged: actionResult.exclusionsAcknowledged,
@@ -762,7 +680,6 @@ async function commitGeneratedMessage(params: {
     await services.saveSession({
       providerId: services.providerId,
       modelName: state.baselineModelName,
-      outputMode: state.outputMode,
     });
     services.output.stopProgress('Done');
     services.output.outro(services.output.style.cyan(summary));

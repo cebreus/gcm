@@ -3,14 +3,11 @@ import type { ModelSpec } from './model-registry.js';
 import { buildAtomicSplitProposal, detectAtomicGroup } from './atomic-commit-planner.js';
 import { describeExcludedPaths } from './commit-action-service.js';
 import { stripTerminalControlSequences } from './utils.js';
-import { isLanguageModelName } from './language-model-service.js';
-import type { OutputMode } from './output-mode.js';
 
 export interface GenerationState {
   providerId: string;
   baselineModelName: string;
   modelName: string;
-  outputMode: OutputMode;
   nonInteractive?: boolean;
   apply?: boolean;
   userHint?: string;
@@ -19,6 +16,7 @@ export interface GenerationState {
 export interface ActionMenuResult {
   type: 'commit' | 'regenerate' | 'cancel';
   modelName: string;
+  commitMessage: string;
   userHint?: string;
   exclusionsAcknowledged?: boolean;
 }
@@ -55,10 +53,6 @@ export interface DialogueDependencies {
   logger: Pick<Logger, 'log'>;
 }
 
-interface CommitMessageResult {
-  COMMIT_MESSAGE: string;
-}
-
 export interface InteractiveGenerationDialogue {
   configure(
     state: GenerationState,
@@ -69,7 +63,7 @@ export interface InteractiveGenerationDialogue {
   ): Promise<'retry' | 'cancel'>;
   review(params: {
     state: GenerationState;
-    result: CommitMessageResult;
+    commitMessage: string;
     commitCapability: ReviewCommitCapability;
   }): Promise<ActionMenuResult>;
   confirmAtomicity(stagedFiles: string[], targetCommit: string | null): Promise<boolean>;
@@ -173,12 +167,18 @@ async function confirmExcludedPathCommit(
 async function chooseRegeneration(
   action: 'regenerate' | 'regenerate-hint' | 'switch',
   state: GenerationState,
+  message: string,
   dependencies: DialogueDependencies,
 ): Promise<ReviewActionResult> {
   if (action === 'regenerate') {
     return {
       type: 'return',
-      result: { type: 'regenerate', modelName: state.modelName, userHint: undefined },
+      result: {
+        type: 'regenerate',
+        modelName: state.modelName,
+        commitMessage: message,
+        userHint: undefined,
+      },
     };
   }
   if (action === 'regenerate-hint') {
@@ -189,7 +189,12 @@ async function chooseRegeneration(
     if (dependencies.prompts.isCancel(hint)) return { type: 'continue' };
     return {
       type: 'return',
-      result: { type: 'regenerate', modelName: state.modelName, userHint: String(hint) },
+      result: {
+        type: 'regenerate',
+        modelName: state.modelName,
+        commitMessage: message,
+        userHint: String(hint),
+      },
     };
   }
   const modelOptions = await getModelSelectionOptions(dependencies);
@@ -200,33 +205,42 @@ async function chooseRegeneration(
   if (dependencies.prompts.isCancel(selectedModel)) return { type: 'continue' };
   return {
     type: 'return',
-    result: { type: 'regenerate', modelName: String(selectedModel), userHint: undefined },
+    result: {
+      type: 'regenerate',
+      modelName: String(selectedModel),
+      commitMessage: message,
+      userHint: undefined,
+    },
   };
 }
 
 async function handleActionChoice(params: {
   action: ActionChoice;
   message: string;
-  result: CommitMessageResult;
   state: GenerationState;
   dependencies: DialogueDependencies;
   excludedPaths: string[];
 }): Promise<ReviewActionResult> {
-  const { action, message, result, state, dependencies, excludedPaths } = params;
+  const { action, message, state, dependencies, excludedPaths } = params;
   if (action === 'commit') {
     if (!(await confirmExcludedPathCommit(dependencies.prompts, excludedPaths))) {
       dependencies.prompts.outro('Commit cancelled.');
       return {
         type: 'return',
-        result: { type: 'cancel', modelName: state.modelName, userHint: state.userHint },
+        result: {
+          type: 'cancel',
+          modelName: state.modelName,
+          commitMessage: message,
+          userHint: state.userHint,
+        },
       };
     }
-    result.COMMIT_MESSAGE = message;
     return {
       type: 'return',
       result: {
         type: 'commit',
         modelName: state.modelName,
+        commitMessage: message,
         userHint: state.userHint,
         ...(excludedPaths.length > 0 ? { exclusionsAcknowledged: true } : {}),
       },
@@ -239,7 +253,7 @@ async function handleActionChoice(params: {
   if (action === 'edit')
     return { type: 'update-message', message: await editMessage(dependencies.prompts, message) };
   if (action === 'regenerate' || action === 'regenerate-hint' || action === 'switch') {
-    return chooseRegeneration(action, state, dependencies);
+    return chooseRegeneration(action, state, message, dependencies);
   }
   return { type: 'continue' };
 }
@@ -289,12 +303,11 @@ export function createInteractiveGenerationDialogue(
     },
     configure: async function (state) {
       for (;;) {
-        const modeLabel = state.outputMode === 'full' ? 'Full Report' : 'Commit Msg Only';
         const providerLabel =
           dependencies.providers.find(provider => provider.id === state.providerId)?.label ??
           state.providerId;
         const action = await prompts.select({
-          message: `Settings: [Provider: ${providerLabel}] [Model: ${state.modelName}] [Mode: ${modeLabel}]`,
+          message: `Settings: [Provider: ${providerLabel}] [Model: ${state.modelName}]`,
           options: [
             { value: 'generate', label: 'Generate' },
             ...(dependencies.providers.length > 1
@@ -306,7 +319,6 @@ export function createInteractiveGenerationDialogue(
                 ]
               : []),
             { value: 'model', label: `Change Model (Current: ${state.modelName})` },
-            { value: 'mode', label: `Change Mode (Current: ${state.outputMode})` },
             { value: 'exit', label: 'Exit' },
           ],
         });
@@ -337,25 +349,11 @@ export function createInteractiveGenerationDialogue(
             state.baselineModelName = String(selectedModel);
             state.modelName = state.baselineModelName;
           }
-        } else if (action === 'mode') {
-          const selectedMode = await prompts.select({
-            message: 'Select Output Mode',
-            options: [
-              {
-                value: 'commit-only',
-                label: 'Commit Message Only (Default)',
-                hint: 'Faster, concise',
-              },
-              { value: 'full', label: 'Full Report (Branch, PR)', hint: 'Detailed' },
-            ],
-          });
-          if (!prompts.isCancel(selectedMode))
-            state.outputMode = selectedMode as GenerationState['outputMode'];
         }
       }
     },
-    review: async function ({ state, result, commitCapability }) {
-      let finalMessage = result.COMMIT_MESSAGE;
+    review: async function ({ state, commitMessage, commitCapability }) {
+      let finalMessage = commitMessage;
       if (!commitCapability.allowed && commitCapability.reason) {
         prompts.note(commitCapability.reason, 'Commit unavailable');
       }
@@ -367,12 +365,16 @@ export function createInteractiveGenerationDialogue(
         const action = await selectAction(prompts, commitCapability);
         if (action === null || action === 'cancel') {
           prompts.outro('Commit cancelled.');
-          return { type: 'cancel', modelName: state.modelName, userHint: state.userHint };
+          return {
+            type: 'cancel',
+            modelName: state.modelName,
+            commitMessage: finalMessage,
+            userHint: state.userHint,
+          };
         }
         const actionResult = await handleActionChoice({
           action,
           message: finalMessage,
-          result,
           state,
           dependencies,
           excludedPaths: commitCapability.excludedPaths ?? [],

@@ -40,9 +40,9 @@ export interface CommitWriteSafety {
 }
 
 export interface GitService {
-  listCommitHashes?(range: string, logger: Logger | null): Promise<string[]>;
-  hasAmendment?(hash: string, logger: Logger | null): Promise<boolean>;
-  getHeadHash?(logger: Logger | null): Promise<string>;
+  listCommitHashes(range: string, logger: Logger | null): Promise<string[]>;
+  hasAmendment(hash: string, logger: Logger | null): Promise<boolean>;
+  getHeadHash(logger: Logger | null): Promise<string>;
   retrieveStagedChanges(
     commitHash: string | null,
     logger: Logger | null,
@@ -66,10 +66,6 @@ export type GitCommandRunner = typeof spawnGitStream;
 
 export interface GitServiceOptions {
   gitCommandRunner?: GitCommandRunner;
-}
-
-interface GitServiceDeps {
-  gitCommandRunner: GitCommandRunner;
 }
 
 export interface RepositoryState {
@@ -159,77 +155,32 @@ function logNoChanges(logger: Logger | null, commitHash: string | null): void {
  * Creates a GitService instance
  */
 export function createGitService(opts: GitServiceOptions = {}): GitService {
-  const deps: GitServiceDeps = { gitCommandRunner: opts.gitCommandRunner ?? spawnGitStream };
+  const runGit: GitCommandRunner = opts.gitCommandRunner ?? spawnGitStream;
   return {
-    listCommitHashes: function (range: string, logger: Logger | null = null): Promise<string[]> {
-      return listCommitHashesWithDeps({ deps, range, logger });
-    },
-    hasAmendment: function (hash: string, logger: Logger | null = null): Promise<boolean> {
-      return hasAmendmentWithDeps({ deps, hash, logger });
-    },
-    getHeadHash: function (logger: Logger | null = null): Promise<string> {
-      return getHeadHashWithDeps({ deps, logger });
-    },
-    retrieveStagedChanges: function (
-      commitHash: string | null,
-      logger: Logger | null = null,
-      excludePatterns: string[] = [],
-    ): Promise<StagedChangesResult | null> {
-      return retrieveStagedChangesWithDeps({
-        deps,
-        commitHash,
-        logger,
-        excludePatterns,
-      });
-    },
-    commitChanges: function (
-      message: string,
-      logger: Logger | null = null,
-      safety?: CommitWriteSafety,
-    ): Promise<void> {
-      return commitChangesWithDeps({ deps, message, logger, safety });
-    },
-    amendCommit: function (
-      message: string,
-      logger: Logger | null = null,
-      safety?: CommitWriteSafety,
-    ): Promise<void> {
-      return amendCommitWithDeps({ deps, message, logger, safety });
-    },
-    rewordCommit: function (
-      target: CommitTarget,
-      message: string,
-      logger: Logger | null = null,
-      safety?: CommitWriteSafety,
-    ): Promise<void> {
-      return rewordCommitWithDeps({ deps, target, message, logger, safety });
-    },
-    inspectCommitTarget: function (
-      hash: string,
-      logger: Logger | null = null,
-    ): Promise<CommitTarget> {
-      return inspectCommitTargetWithDeps({ deps, hash, logger });
-    },
-    getIndexTree: function (logger: Logger | null = null): Promise<string> {
-      return getIndexTreeWithDeps({ deps, logger });
-    },
-    getIndexEntries: function (logger: Logger | null = null): Promise<IndexEntry[]> {
-      return getIndexEntriesWithDeps({ deps, logger });
-    },
-    getRepositoryState: function (logger: Logger | null = null): Promise<RepositoryState> {
-      return getRepositoryStateWithDeps({ deps, logger });
-    },
+    listCommitHashes: (range, logger = null) => listCommitHashes(runGit, range, logger),
+    hasAmendment: (hash, logger = null) => hasAmendment(runGit, hash, logger),
+    getHeadHash: (logger = null) => getHeadHash(runGit, logger),
+    retrieveStagedChanges: (commitHash, logger = null, excludePatterns = []) =>
+      retrieveStagedChanges(runGit, commitHash, logger, excludePatterns),
+    commitChanges: (message, logger = null, safety) =>
+      commitChanges(runGit, message, logger, safety),
+    amendCommit: (message, logger = null, safety) => amendCommit(runGit, message, logger, safety),
+    rewordCommit: (target, message, logger = null, safety) =>
+      rewordCommit(runGit, target, message, logger, safety),
+    inspectCommitTarget: (hash, logger = null) => inspectCommitTarget(runGit, hash, logger),
+    getIndexTree: (logger = null) => getIndexTree(runGit, logger),
+    getIndexEntries: (logger = null) => getIndexEntries(runGit, logger),
+    getRepositoryState: (logger = null) => getRepositoryState(runGit, logger),
   };
 }
 
-async function listCommitHashesWithDeps(params: {
-  deps: GitServiceDeps;
-  range: string;
-  logger: Logger | null;
-}): Promise<string[]> {
-  const { deps, range, logger } = params;
+async function listCommitHashes(
+  runGit: GitCommandRunner,
+  range: string,
+  logger: Logger | null,
+): Promise<string[]> {
   logger?.log('debug', `Resolving commit range ${range}`);
-  const result = await deps.gitCommandRunner([
+  const result = await runGit([
     'log',
     '--reverse',
     '--first-parent',
@@ -248,14 +199,13 @@ async function listCommitHashesWithDeps(params: {
   return hashes;
 }
 
-async function hasAmendmentWithDeps(params: {
-  deps: GitServiceDeps;
-  hash: string;
-  logger: Logger | null;
-}): Promise<boolean> {
-  const { deps, hash, logger } = params;
+async function hasAmendment(
+  runGit: GitCommandRunner,
+  hash: string,
+  logger: Logger | null,
+): Promise<boolean> {
   logger?.log('debug', `Checking for an existing amend! commit for ${hash}`);
-  const result = await deps.gitCommandRunner([
+  const result = await runGit([
     'log',
     '--format=%s',
     '--fixed-strings',
@@ -265,25 +215,20 @@ async function hasAmendmentWithDeps(params: {
   return result.text.split('\n').some(subject => subject.trim() === `amend! ${hash}`);
 }
 
-async function getHeadHashWithDeps(params: {
-  deps: GitServiceDeps;
-  logger: Logger | null;
-}): Promise<string> {
-  const { deps, logger } = params;
+async function getHeadHash(runGit: GitCommandRunner, logger: Logger | null): Promise<string> {
   logger?.log('debug', 'Reading HEAD');
-  return (await deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^{commit}'])).text.trim();
+  return (await runGit(['rev-parse', '--verify', 'HEAD^{commit}'])).text.trim();
 }
 
-async function retrieveStagedChangesWithDeps(params: {
-  deps: GitServiceDeps;
-  commitHash: string | null;
-  logger: Logger | null;
-  excludePatterns: string[];
-}): Promise<StagedChangesResult | null> {
-  const { deps, commitHash, logger, excludePatterns } = params;
+async function retrieveStagedChanges(
+  runGit: GitCommandRunner,
+  commitHash: string | null,
+  logger: Logger | null,
+  excludePatterns: string[],
+): Promise<StagedChangesResult | null> {
   const analysisExcludePatterns = [...DEFAULT_ANALYSIS_EXCLUDE_PATTERNS, ...excludePatterns];
   logger?.log('debug', 'Checking git status');
-  const fileListRes = await deps.gitCommandRunner(buildFileListArgs(commitHash));
+  const fileListRes = await runGit(buildFileListArgs(commitHash));
   if (fileListRes.truncated) {
     throw new Error('File list output was truncated. Reduce the change set, then try again.');
   }
@@ -304,12 +249,11 @@ async function retrieveStagedChangesWithDeps(params: {
   }
   const diff = commitHash
     ? {
-        result: await deps.gitCommandRunner(
-          [...buildDiffArgs(commitHash), '--', ...files.map(literalPathspec)],
-          { allowTruncated: true },
-        ),
+        result: await runGit([...buildDiffArgs(commitHash), '--', ...files.map(literalPathspec)], {
+          allowTruncated: true,
+        }),
       }
-    : await readStableStagedDiff({ deps, files, logger });
+    : await readStableStagedDiff(runGit, files, logger);
   const diffRes = diff.result;
   if (diffRes.truncated) logger?.log('warn', 'Diff output was truncated due to size limits.');
   return {
@@ -321,22 +265,20 @@ async function retrieveStagedChangesWithDeps(params: {
   };
 }
 
-async function readStableStagedDiff(params: {
-  deps: GitServiceDeps;
-  files: string[];
-  logger: Logger | null;
-}): Promise<{ result: Awaited<ReturnType<GitCommandRunner>>; snapshot: IndexSnapshot }> {
-  const { deps, files, logger } = params;
+async function readStableStagedDiff(
+  runGit: GitCommandRunner,
+  files: string[],
+  logger: Logger | null,
+): Promise<{ result: Awaited<ReturnType<GitCommandRunner>>; snapshot: IndexSnapshot }> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const beforeEntries = await getIndexTreeWithDeps({ deps, logger });
-    const entries = await getIndexEntriesWithDeps({ deps, logger });
-    const beforeDiff = await getIndexTreeWithDeps({ deps, logger });
+    const beforeEntries = await getIndexTree(runGit, logger);
+    const entries = await getIndexEntries(runGit, logger);
+    const beforeDiff = await getIndexTree(runGit, logger);
     if (beforeEntries !== beforeDiff) continue;
-    const result = await deps.gitCommandRunner(
-      [...buildDiffArgs(null), '--', ...files.map(literalPathspec)],
-      { allowTruncated: true },
-    );
-    const afterDiff = await getIndexTreeWithDeps({ deps, logger });
+    const result = await runGit([...buildDiffArgs(null), '--', ...files.map(literalPathspec)], {
+      allowTruncated: true,
+    });
+    const afterDiff = await getIndexTree(runGit, logger);
     if (beforeDiff === afterDiff) return { result, snapshot: { tree: afterDiff, entries } };
   }
   throw new Error(
@@ -344,26 +286,21 @@ async function readStableStagedDiff(params: {
   );
 }
 
-async function commitChangesWithDeps(params: {
-  deps: GitServiceDeps;
-  message: string;
-  logger: Logger | null;
-  safety?: CommitWriteSafety;
-}): Promise<void> {
-  const { deps, message, logger, safety } = params;
-  await assertCommitWriteSafety({ deps, logger, safety });
+async function commitChanges(
+  runGit: GitCommandRunner,
+  message: string,
+  logger: Logger | null,
+  safety?: CommitWriteSafety,
+): Promise<void> {
+  await assertCommitWriteSafety(runGit, logger, safety);
   if (logger) logger.log('debug', 'Executing git commit');
-  await deps.gitCommandRunner(['commit', '-m', message]);
-  await warnIfCommittedTreeChanged({ deps, logger, safety });
+  await runGit(['commit', '-m', message]);
+  await warnIfCommittedTreeChanged(runGit, logger, safety);
 }
 
-async function getIndexTreeWithDeps(params: {
-  deps: GitServiceDeps;
-  logger: Logger | null;
-}): Promise<string> {
-  const { deps, logger } = params;
+async function getIndexTree(runGit: GitCommandRunner, logger: Logger | null): Promise<string> {
   logger?.log('debug', 'Capturing git index tree');
-  const result = await deps.gitCommandRunner(['write-tree']);
+  const result = await runGit(['write-tree']);
   return result.text.trim();
 }
 
@@ -381,75 +318,65 @@ function parseIndexEntries(text: string): IndexEntry[] {
     });
 }
 
-async function getIndexEntriesWithDeps(params: {
-  deps: GitServiceDeps;
-  logger: Logger | null;
-}): Promise<IndexEntry[]> {
-  const { deps, logger } = params;
+async function getIndexEntries(
+  runGit: GitCommandRunner,
+  logger: Logger | null,
+): Promise<IndexEntry[]> {
   logger?.log('debug', 'Capturing git index entries');
-  const result = await deps.gitCommandRunner(['ls-files', '--stage', '-z']);
+  const result = await runGit(['ls-files', '--stage', '-z']);
   return parseIndexEntries(result.text);
 }
 
-async function amendCommitWithDeps(params: {
-  deps: GitServiceDeps;
-  message: string;
-  logger: Logger | null;
-  safety?: CommitWriteSafety;
-}): Promise<void> {
-  const { deps, message, logger, safety } = params;
-  await assertCommitWriteSafety({ deps, logger, safety });
+async function amendCommit(
+  runGit: GitCommandRunner,
+  message: string,
+  logger: Logger | null,
+  safety?: CommitWriteSafety,
+): Promise<void> {
+  await assertCommitWriteSafety(runGit, logger, safety);
   logger?.log('debug', 'Executing git commit --amend');
-  await deps.gitCommandRunner(['commit', '--amend', '-m', message]);
-  await warnIfCommittedTreeChanged({ deps, logger, safety });
+  await runGit(['commit', '--amend', '-m', message]);
+  await warnIfCommittedTreeChanged(runGit, logger, safety);
 }
 
 // An `amend!` commit carries the replacement message as an ordinary commit, so
 // nothing is rewritten here. `git rebase --autosquash` folds it into the target
 // later, when the user asks for it. Hash targeting remains unambiguous when
 // multiple commits share a subject.
-async function rewordCommitWithDeps(params: {
-  deps: GitServiceDeps;
-  target: CommitTarget;
-  message: string;
-  logger: Logger | null;
-  safety?: CommitWriteSafety;
-}): Promise<void> {
-  const { deps, target, message, logger, safety } = params;
-  await assertCommitWriteSafety({ deps, logger, safety });
+async function rewordCommit(
+  runGit: GitCommandRunner,
+  target: CommitTarget,
+  message: string,
+  logger: Logger | null,
+  safety?: CommitWriteSafety,
+): Promise<void> {
+  await assertCommitWriteSafety(runGit, logger, safety);
   logger?.log('debug', `Creating amend! commit for ${target.hash}`);
-  const previousHead = (await deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD'])).text.trim();
-  await deps.gitCommandRunner([
-    'commit',
-    '--allow-empty',
-    '-m',
-    `amend! ${target.hash}`,
-    '-m',
-    message,
-  ]);
+  const previousHead = (await runGit(['rev-parse', '--verify', 'HEAD'])).text.trim();
+  await runGit(['commit', '--allow-empty', '-m', `amend! ${target.hash}`, '-m', message]);
   try {
-    await assertAmendCommitIsEmpty(deps);
+    await assertAmendCommitIsEmpty(runGit);
   } catch (error) {
-    await rollBackUnsafeAmendCommit(deps, previousHead);
+    await rollBackUnsafeAmendCommit(runGit, previousHead);
     throw error;
   }
 }
 
 async function rollBackUnsafeAmendCommit(
-  deps: GitServiceDeps,
+  runGit: GitCommandRunner,
   previousHead: string,
 ): Promise<void> {
   let createdHead = 'HEAD';
   try {
     const [head, parent] = await Promise.all([
-      deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD']),
-      deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^']),
+      runGit(['rev-parse', '--verify', 'HEAD']),
+      runGit(['rev-parse', '--verify', 'HEAD^']),
     ]);
     createdHead = head.text.trim();
     if (parent.text.trim() !== previousHead) {
       throw new Error('HEAD parent does not match the pre-write HEAD');
     }
-    await deps.gitCommandRunner(['reset', '--soft', previousHead]);
+    await runGit(['reset', '--soft', previousHead]);
   } catch {
     throw commitSafetyRefusal(
       `The unsafe amend! commit ${createdHead} could not be rolled back automatically. ` +
@@ -458,11 +385,11 @@ async function rollBackUnsafeAmendCommit(
   }
 }
 
-async function assertAmendCommitIsEmpty(deps: GitServiceDeps): Promise<void> {
+async function assertAmendCommitIsEmpty(runGit: GitCommandRunner): Promise<void> {
   try {
     const [committed, parent] = await Promise.all([
-      deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^{tree}']),
-      deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^1^{tree}']),
+      runGit(['rev-parse', '--verify', 'HEAD^{tree}']),
+      runGit(['rev-parse', '--verify', 'HEAD^1^{tree}']),
     ]);
     if (committed.text.trim() === parent.text.trim()) return;
   } catch {
@@ -475,28 +402,17 @@ async function assertAmendCommitIsEmpty(deps: GitServiceDeps): Promise<void> {
   );
 }
 
-async function warnIfCommittedTreeChanged(params: {
-  deps: GitServiceDeps;
-  logger: Logger | null;
-  safety?: CommitWriteSafety;
-}): Promise<void> {
-  const { deps, logger, safety } = params;
+async function warnIfCommittedTreeChanged(
+  runGit: GitCommandRunner,
+  logger: Logger | null,
+  safety?: CommitWriteSafety,
+): Promise<void> {
   if (!safety) return;
   try {
-    const committedTree = (
-      await deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^{tree}'])
-    ).text.trim();
+    const committedTree = (await runGit(['rev-parse', '--verify', 'HEAD^{tree}'])).text.trim();
     if (committedTree === safety.snapshot.tree) return;
     const changedPaths = parseFileList(
-      (
-        await deps.gitCommandRunner([
-          'diff',
-          '--name-only',
-          '-z',
-          safety.snapshot.tree,
-          committedTree,
-        ])
-      ).text,
+      (await runGit(['diff', '--name-only', '-z', safety.snapshot.tree, committedTree])).text,
     ).map(function (path) {
       return JSON.stringify(path);
     });
@@ -520,21 +436,20 @@ function commitSafetyRefusal(message: string): Error {
   return error;
 }
 
-async function assertCommitWriteSafety(params: {
-  deps: GitServiceDeps;
-  logger: Logger | null;
-  safety?: CommitWriteSafety;
-}): Promise<void> {
-  const { deps, logger, safety } = params;
+async function assertCommitWriteSafety(
+  runGit: GitCommandRunner,
+  logger: Logger | null,
+  safety?: CommitWriteSafety,
+): Promise<void> {
   if (!safety) return;
-  const tree = await getIndexTreeWithDeps({ deps, logger });
+  const tree = await getIndexTree(runGit, logger);
   if (tree !== safety.snapshot.tree) {
     throw commitSafetyRefusal(
       'Staged changes changed before the commit could be written. Regenerate the message, then try again.',
     );
   }
   if (!safety.target) return;
-  const target = await inspectCommitTargetWithDeps({ deps, hash: safety.target.hash, logger });
+  const target = await inspectCommitTarget(runGit, safety.target.hash, logger);
   if (target.hash !== safety.target.hash || target.headHash !== safety.target.headHash) {
     throw commitSafetyRefusal(
       'HEAD or target commit moved before the commit could be written. Regenerate the message, then try again.',
@@ -548,17 +463,13 @@ async function assertCommitWriteSafety(params: {
 // indistinguishable from a real failure. This also covers every remote, not
 // just the tracked upstream. An unanswerable question resolves to published,
 // so the additive path is taken.
-async function isPublishedCommit(deps: GitServiceDeps, hash: string): Promise<boolean> {
+async function isPublishedCommit(runGit: GitCommandRunner, hash: string): Promise<boolean> {
   try {
-    const remotes = await deps.gitCommandRunner(['branch', '--remotes', '--contains', hash]);
+    const remotes = await runGit(['branch', '--remotes', '--contains', hash]);
     if (remotes.text.trim().length > 0) return true;
-    const configuredRemotes = await deps.gitCommandRunner(['remote']);
+    const configuredRemotes = await runGit(['remote']);
     if (configuredRemotes.text.trim().length === 0) return false;
-    const trackingRefs = await deps.gitCommandRunner([
-      'for-each-ref',
-      '--format=%(refname)',
-      'refs/remotes',
-    ]);
+    const trackingRefs = await runGit(['for-each-ref', '--format=%(refname)', 'refs/remotes']);
     return trackingRefs.text.trim().length === 0;
   } catch {
     return true;
@@ -569,9 +480,9 @@ async function isPublishedCommit(deps: GitServiceDeps, hash: string): Promise<bo
 // reachable from HEAD the rebase that would fold it never sees it, so the
 // commit stays behind as litter and the target keeps its old message. Compared
 // through merge-base, whose answer arrives as output rather than an exit code.
-async function isAncestorOfHead(deps: GitServiceDeps, hash: string): Promise<boolean> {
+async function isAncestorOfHead(runGit: GitCommandRunner, hash: string): Promise<boolean> {
   try {
-    const base = await deps.gitCommandRunner(['merge-base', 'HEAD', hash]);
+    const base = await runGit(['merge-base', 'HEAD', hash]);
     return base.text.trim() === hash;
   } catch {
     return false;
@@ -581,9 +492,9 @@ async function isAncestorOfHead(deps: GitServiceDeps, hash: string): Promise<boo
 // A commit made on a detached HEAD is orphaned the moment another branch is
 // checked out. Both amend and an `amend!` commit would be lost that way, while
 // the tool reports success.
-async function isHeadDetached(deps: GitServiceDeps): Promise<boolean> {
+async function isHeadDetached(runGit: GitCommandRunner): Promise<boolean> {
   try {
-    await deps.gitCommandRunner(['symbolic-ref', '--quiet', 'HEAD']);
+    await runGit(['symbolic-ref', '--quiet', 'HEAD']);
     return false;
   } catch {
     return true;
@@ -595,12 +506,12 @@ async function isHeadDetached(deps: GitServiceDeps): Promise<boolean> {
 // rewrite when the user widens the base. A missing parent means the target is
 // the root commit, which changes the rebase command it needs.
 async function readSubjectAmbiguity(
-  deps: GitServiceDeps,
+  runGit: GitCommandRunner,
   hash: string,
   subject: string,
 ): Promise<{ hasParent: boolean; hasAmbiguousSubject: boolean }> {
   try {
-    const ancestors = await deps.gitCommandRunner(['log', '--format=%s', `${hash}^`]);
+    const ancestors = await runGit(['log', '--format=%s', `${hash}^`]);
     const twins = ancestors.text.split('\n').filter(line => line.trimEnd() === subject);
     return { hasParent: true, hasAmbiguousSubject: twins.length > 0 };
   } catch {
@@ -608,27 +519,24 @@ async function readSubjectAmbiguity(
   }
 }
 
-async function inspectCommitTargetWithDeps(params: {
-  deps: GitServiceDeps;
-  hash: string;
-  logger: Logger | null;
-}): Promise<CommitTarget> {
-  const { deps, hash, logger } = params;
-  const resolved = (
-    await deps.gitCommandRunner(['rev-parse', '--verify', `${hash}^{commit}`])
-  ).text.trim();
+async function inspectCommitTarget(
+  runGit: GitCommandRunner,
+  hash: string,
+  logger: Logger | null,
+): Promise<CommitTarget> {
+  const resolved = (await runGit(['rev-parse', '--verify', `${hash}^{commit}`])).text.trim();
   const [headResult, subjectResult] = await Promise.all([
-    deps.gitCommandRunner(['rev-parse', '--verify', 'HEAD^{commit}']),
-    deps.gitCommandRunner(['log', '-1', '--format=%s', resolved]),
+    runGit(['rev-parse', '--verify', 'HEAD^{commit}']),
+    runGit(['log', '-1', '--format=%s', resolved]),
   ]);
   const head = headResult.text.trim();
   const subject = subjectResult.text.trim();
   const isHead = resolved === head;
   const [ambiguity, isPublished, isAncestor, headDetached] = await Promise.all([
-    readSubjectAmbiguity(deps, resolved, subject),
-    isPublishedCommit(deps, resolved),
-    isHead ? Promise.resolve(true) : isAncestorOfHead(deps, resolved),
-    isHeadDetached(deps),
+    readSubjectAmbiguity(runGit, resolved, subject),
+    isPublishedCommit(runGit, resolved),
+    isHead ? Promise.resolve(true) : isAncestorOfHead(runGit, resolved),
+    isHeadDetached(runGit),
   ]);
   const target: CommitTarget = {
     hash: resolved,
@@ -718,9 +626,9 @@ function addChangedPath(rawPathInput: string, changedFiles: Set<string>): void {
 }
 
 async function detectInProgressOperation(
-  deps: GitServiceDeps,
+  runGit: GitCommandRunner,
 ): Promise<RepositoryState['inProgressOperation']> {
-  const gitDir = (await deps.gitCommandRunner(['rev-parse', '--git-dir'])).text.trim();
+  const gitDir = (await runGit(['rev-parse', '--git-dir'])).text.trim();
   const checks: Array<{ name: RepositoryState['inProgressOperation']; path: string }> = [
     { name: 'merge', path: `${gitDir}/MERGE_HEAD` },
     { name: 'rebase', path: `${gitDir}/rebase-merge` },
@@ -735,19 +643,18 @@ async function detectInProgressOperation(
   return null;
 }
 
-async function getRepositoryStateWithDeps(params: {
-  deps: GitServiceDeps;
-  logger: Logger | null;
-}): Promise<RepositoryState> {
-  const { deps, logger } = params;
-  const status = await deps.gitCommandRunner(['status', '--porcelain=v1', '-z']);
+async function getRepositoryState(
+  runGit: GitCommandRunner,
+  logger: Logger | null,
+): Promise<RepositoryState> {
+  const status = await runGit(['status', '--porcelain=v1', '-z']);
   if (status.truncated) {
     throw new Error(
       'Repository status output was truncated. Reduce the worktree size, then try again.',
     );
   }
   const parsed = parsePorcelainStatus(status.text);
-  const inProgressOperation = await detectInProgressOperation(deps);
+  const inProgressOperation = await detectInProgressOperation(runGit);
   const result: RepositoryState = { ...parsed, inProgressOperation };
   logger?.log('debug', 'Repository state', { ...result });
   return result;

@@ -1,11 +1,10 @@
 import { CONFIG } from '../gcm.config.js';
 import { createFreeLlmApiProvider } from './freellmapi-provider.js';
 import { createGeminiProvider } from './gemini-provider.js';
-import {
-  isLanguageModelProviderId,
-  type LanguageModelProvider,
-  type LanguageModelProviderFactory,
-  type LanguageModelService,
+import type {
+  LanguageModelProvider,
+  LanguageModelProviderFactory,
+  LanguageModelService,
 } from './language-model-service.js';
 import { createLmStudioProvider } from './lm-studio-provider.js';
 import type { Logger } from './logger.js';
@@ -58,7 +57,6 @@ export function createProviderFactories(
             model: CONFIG.FREELLMAPI_MODEL,
             token: CONFIG.FREELLMAPI_TOKEN,
             temperature: CONFIG.TEMP,
-            maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS,
           });
         },
       },
@@ -71,27 +69,10 @@ export function createProviderFactories(
             model: process.env.GCM_LM_STUDIO_MODEL,
             token: process.env.LM_API_TOKEN,
             temperature: CONFIG.TEMP,
-            maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS,
             probeOnly: factoryOptions?.probeOnly,
           });
         },
       },
     ]
   );
-}
-
-export function getProviderFactoriesValidationError(
-  factories: LanguageModelProviderFactory[],
-): string | null {
-  if (factories.length === 0) return 'No language model provider available';
-  const ids = new Set<string>();
-  for (const factory of factories) {
-    if (!isLanguageModelProviderId(factory.id)) return 'Invalid language model provider id';
-    if (!/^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$/u.test(factory.label)) {
-      return 'Invalid language model provider label';
-    }
-    if (ids.has(factory.id)) return 'Duplicate language model provider id';
-    ids.add(factory.id);
-  }
-  return null;
 }

@@ -1,6 +1,5 @@
 import type { LogMetadata } from './logger.js';
 import type { ModelSpec } from './model-registry.js';
-import type { PromptContextParts, RetryReductionResult } from './services/context-service.js';
 import { stripTerminalControlSequences } from './utils.js';
 
 export type { ModelSpec } from './model-registry.js';
@@ -10,7 +9,6 @@ export interface LanguageModelResponse {
   usage: {
     promptTokens?: number;
     outputTokens?: number;
-    thinkingTokens?: number;
   };
   truncated?: boolean;
 }
@@ -82,18 +80,6 @@ export function getModelSpecValidationError(
   return null;
 }
 
-export function getLanguageModelProviderValidationError(
-  provider: LanguageModelProvider,
-): string | null {
-  if (!isLanguageModelProviderId(provider.id)) return 'Invalid language model provider id';
-  if (!/^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$/u.test(provider.label)) {
-    return 'Invalid language model provider label';
-  }
-  if (!isLanguageModelName(provider.defaultModel)) return 'Invalid default model name';
-  if (typeof provider.models !== 'function') return 'Provider requires a model catalogue';
-  return null;
-}
-
 export interface LanguageModelService {
   generate(params: LanguageModelGenerateParams): Promise<LanguageModelResponse | null>;
 }
@@ -117,57 +103,10 @@ export interface LanguageModelProviderFactory {
 
 export interface LanguageModelGenerateParams {
   promptContext: string;
-  promptParts?: PromptContextParts;
-  summaryAttempted?: boolean;
   systemPrompt: string;
-  reduceForRetry(params: {
-    promptParts: PromptContextParts;
-    summaryAttempted: boolean;
-  }): Promise<RetryReductionResult>;
   meta: LogMetadata;
-  opts?: {
-    timeoutMs?: number;
-    modelOverride?: string;
-    maxOutputTokensLimit?: number;
-  };
-}
-
-export interface GenerationAttemptState {
-  promptContext: string;
-  promptParts: PromptContextParts;
-  summaryAttempted: boolean;
+  /** Authoritative per-request output cap, already clamped to the model limits. */
   maxOutputTokens: number;
-}
-
-export async function generateWithContextRecovery<T extends LanguageModelResponse>(options: {
-  params: LanguageModelGenerateParams;
-  initialMaxOutputTokens: number;
-  generateOnce(state: GenerationAttemptState): Promise<T | null>;
-  recoverError(
-    error: unknown,
-    state: GenerationAttemptState,
-  ): Promise<GenerationAttemptState | null>;
-}): Promise<T | null> {
-  const { params } = options;
-  let state: GenerationAttemptState = {
-    promptContext: params.promptContext,
-    promptParts: params.promptParts ?? {
-      prefix: '',
-      diffHeading: '',
-      diffBody: params.promptContext,
-      suffix: '',
-    },
-    summaryAttempted: params.summaryAttempted ?? false,
-    maxOutputTokens: options.initialMaxOutputTokens,
-  };
-
-  for (;;) {
-    try {
-      return await options.generateOnce(state);
-    } catch (error) {
-      const recovered = await options.recoverError(error, state);
-      if (!recovered) throw error;
-      state = recovered;
-    }
-  }
+  modelName: string;
+  timeoutMs?: number;
 }

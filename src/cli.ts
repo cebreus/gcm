@@ -1,7 +1,4 @@
 import minimist, { type ParsedArgs } from 'minimist';
-import { OUTPUT_MODES, isOutputMode, type OutputMode } from './output-mode.js';
-
-export type { OutputMode } from './output-mode.js';
 
 interface Args extends ParsedArgs {
   commit?: string | null;
@@ -11,7 +8,6 @@ interface Args extends ParsedArgs {
   model?: string | null;
   provider?: string | null;
   hint?: string | null;
-  mode?: OutputMode | null;
   verbose?: boolean;
   debug?: boolean;
   nonInteractive?: boolean;
@@ -29,7 +25,6 @@ export interface ParsedOptions {
   model: string | null;
   provider: string | null;
   hint: string | null;
-  mode: OutputMode | null;
   verbose: boolean;
   debug: boolean;
   nonInteractive: boolean;
@@ -47,14 +42,6 @@ function createArgumentValidationError(message: string): Error {
 
 export function isArgumentValidationError(error: unknown): error is Error {
   return error instanceof Error && error.name === 'ArgumentValidationError';
-}
-
-function validateOutputMode(value: string): void {
-  if (!isOutputMode(value)) {
-    throw createArgumentValidationError(
-      `Invalid value for --mode: ${value}. Expected one of: ${OUTPUT_MODES.join(', ')}`,
-    );
-  }
 }
 
 interface CliOptionDefinition {
@@ -118,14 +105,6 @@ export const CLI_OPTION_DEFINITIONS = [
     takesValue: true,
   },
   {
-    name: 'mode',
-    aliases: ['--mode', '-m'],
-    usage: '-m, --mode <mode>',
-    description: "Output 'commit-only' or 'full'.",
-    takesValue: true,
-    validateValue: validateOutputMode,
-  },
-  {
     name: 'verbose',
     aliases: ['--verbose', '-v'],
     usage: '-v, --verbose',
@@ -136,7 +115,7 @@ export const CLI_OPTION_DEFINITIONS = [
     name: 'debug',
     aliases: ['--debug', '-d'],
     usage: '-d, --debug',
-    description: "Save bounded API traces to '.debug.log'.",
+    description: 'Log redacted API request and response bodies.',
     takesValue: false,
   },
   {
@@ -281,7 +260,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
   const parsed: Args = minimist(
     optionTerminator === -1 ? normalisedArgv : normalisedArgv.slice(0, optionTerminator),
     {
-      alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug', e: 'exclude', m: 'mode' },
+      alias: { c: 'commit', h: 'help', v: 'verbose', d: 'debug', e: 'exclude' },
       boolean: [
         'help',
         'version',
@@ -292,7 +271,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
         'list-models',
         'list-providers',
       ],
-      string: ['commit', 'commit-range', 'model', 'provider', 'hint', 'mode', 'exclude'],
+      string: ['commit', 'commit-range', 'model', 'provider', 'hint', 'exclude'],
     },
   );
 
@@ -311,7 +290,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     }
   }
 
-  const finalMode = parsed.mode && isOutputMode(parsed.mode) ? parsed.mode : null;
   const nonInteractive = Boolean(parsed['non-interactive']);
   const apply = Boolean(parsed.apply);
   const commitRange = parsed['commit-range'] ?? null;
@@ -336,7 +314,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     model: parsed.model ?? null,
     provider: parsed.provider ?? null,
     hint: parsed.hint ?? null,
-    mode: finalMode,
     verbose: Boolean(parsed.verbose),
     debug: Boolean(parsed.debug),
     nonInteractive,

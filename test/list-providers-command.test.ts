@@ -83,20 +83,12 @@ test('list providers rejects unusable providers and returns 2', async function (
           });
         },
       },
-      {
-        id: 'expected',
-        label: 'Expected',
-        create: async function () {
-          return createProvider({ id: 'unexpected', label: 'Expected' });
-        },
-      },
     ],
     output: { note, outro: function () {} },
   });
 
   expect(exitCode).toBe(2);
   expect(note.mock.calls[0]?.[0]).toContain('No supported models found.');
-  expect(note.mock.calls[0]?.[0]).toContain('Provider setup is not valid.');
 });
 
 test.each([

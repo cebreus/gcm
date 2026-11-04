@@ -107,7 +107,7 @@ test('FreeLLMAPI provider runs end to end without Gemini API key', async functio
       return Response.json({
         choices: [
           {
-            message: { content: 'COMMIT_MESSAGE: feat: support freellmapi' },
+            message: { content: 'feat: support freellmapi' },
             finish_reason: 'stop',
           },
         ],
@@ -126,7 +126,7 @@ test('FreeLLMAPI provider runs end to end without Gemini API key', async functio
     process.env.GCM_FREELLMAPI_URL = server.url.origin;
     const { executeCommitMessageGeneration } = await import('../src/runner.js');
 
-    await executeCommitMessageGeneration(['--model', 'gemini-2.5-flash', '--mode', 'commit-only'], {
+    await executeCommitMessageGeneration(['--model', 'gemini-2.5-flash'], {
       isInteractive: false,
       logger: { log: function () {} },
     });

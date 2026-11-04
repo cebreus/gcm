@@ -30,7 +30,7 @@ const listMock = mock(() =>
     },
   ]),
 );
-await mock.module('../src/gemini-client/listModels', () => ({ listGeminiModels: listMock }));
+await mock.module('../src/gemini-models', () => ({ listGeminiModels: listMock }));
 
 test('cli: --list-models prints available models', async () => {
   const { executeCommitMessageGeneration } = await import('../src/runner.js'); // Use named export

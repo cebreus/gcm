@@ -4,7 +4,8 @@ import {
   type LanguageModelGenerateParams,
   type LanguageModelProvider,
 } from './language-model-service.js';
-import type { ModelSpec } from './model-registry.js';
+import { readPositiveTokenCount, requireDistinctModels, type ModelSpec } from './model-registry.js';
+import { parseProviderBaseUrl } from './provider-http.js';
 import {
   generateOpenAiCompatibleChat,
   isRecord,
@@ -14,23 +15,19 @@ import {
 
 const PREFERRED_LM_STUDIO_MODEL = 'gemma-4-e4b-it-mlx';
 
-function readPositiveInteger(value: unknown): number | null {
-  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
-}
-
 function parseModel(value: unknown): ModelSpec | null {
   if (!isRecord(value) || value.type !== 'llm' || !isLanguageModelName(value.key)) return null;
   const loadedContexts = Array.isArray(value.loaded_instances)
     ? value.loaded_instances
         .map(function (instance) {
           if (!isRecord(instance) || !isRecord(instance.config)) return null;
-          return readPositiveInteger(instance.config.context_length);
+          return readPositiveTokenCount(instance.config.context_length);
         })
         .filter(function (context): context is number {
           return context !== null;
         })
     : [];
-  const catalogContext = readPositiveInteger(value.max_context_length);
+  const catalogContext = readPositiveTokenCount(value.max_context_length);
   const contextWindowTokens =
     loadedContexts.length > 0 ? Math.min(...loadedContexts) : catalogContext;
   if (contextWindowTokens === null) return null;
@@ -44,34 +41,10 @@ function parseModel(value: unknown): ModelSpec | null {
 }
 
 function parseBaseUrl(baseUrl: string): URL {
-  let url: URL;
-  try {
-    url = new URL(baseUrl);
-  } catch {
-    throw new Error('Invalid LM Studio URL');
-  }
-  const authority = baseUrl.startsWith('http://')
-    ? (baseUrl.slice('http://'.length).split(/[/?#]/, 1)[0] ?? '')
-    : '';
-  const rawHostname = authority.startsWith('[')
-    ? authority.slice(0, authority.indexOf(']') + 1)
-    : (authority.split(':', 1)[0] ?? '');
-  if (
-    url.protocol !== 'http:' ||
-    url.username !== '' ||
-    url.password !== '' ||
-    baseUrl.includes('?') ||
-    baseUrl.includes('#')
-  ) {
-    throw new Error('Invalid LM Studio URL');
-  }
-  if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) {
-    throw new Error('LM Studio URL must use a loopback hostname');
-  }
-  if (!['127.0.0.1', 'localhost', '[::1]'].includes(rawHostname)) {
-    throw new Error('Invalid LM Studio URL');
-  }
-  return url;
+  return parseProviderBaseUrl(baseUrl, 'LM Studio', {
+    allowHttps: false,
+    loopbackError: 'LM Studio URL must use a loopback hostname',
+  });
 }
 
 async function discoverModels(
@@ -108,7 +81,7 @@ async function discoverModels(
         return (
           isRecord(instance) &&
           isRecord(instance.config) &&
-          (readPositiveInteger(instance.config.context_length) ?? 0) > 0
+          (readPositiveTokenCount(instance.config.context_length) ?? 0) > 0
         );
       })
     ) {
@@ -123,16 +96,7 @@ async function discoverModels(
     .sort(function (left, right) {
       return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
     });
-  const modelIds = new Set<string>();
-  for (const model of models) {
-    if (modelIds.has(model.name)) {
-      throw createLanguageModelApiError('Duplicate LM Studio model identifier');
-    }
-    modelIds.add(model.name);
-  }
-  if (models.length === 0) {
-    throw createLanguageModelApiError('LM Studio returned no compatible text models');
-  }
+  requireDistinctModels(models, 'LM Studio', createLanguageModelApiError);
   return { models, loadedModelIds };
 }
 
@@ -141,7 +105,6 @@ export async function createLmStudioProvider(options: {
   model?: string;
   token?: string;
   temperature?: number;
-  maxOutputTokens?: number;
   probeOnly?: boolean;
 }): Promise<LanguageModelProvider> {
   const url = parseBaseUrl(options.baseUrl);
@@ -215,17 +178,13 @@ export async function createLmStudioProvider(options: {
   if (!byName.has(defaultModel)) throw new Error('Configured LM Studio model is not available');
 
   async function generate(params: LanguageModelGenerateParams) {
-    const modelName = params.opts?.modelOverride ?? defaultModel;
-    const model = byName.get(modelName);
+    const model = byName.get(params.modelName);
     if (!model) throw new Error('Unknown LM Studio model');
     return generateOpenAiCompatibleChat({
       providerLabel: 'LM Studio',
       url: new URL('/v1/chat/completions', url),
       token: options.token,
       temperature: options.temperature,
-      maxOutputTokens: options.maxOutputTokens,
-      modelName,
-      model,
       params,
     });
   }

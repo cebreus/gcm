@@ -87,7 +87,7 @@ test('LM Studio runs end to end without a Gemini API key and cancellation create
       return Response.json({
         choices: [
           {
-            message: { content: 'COMMIT_MESSAGE: test: use local model' },
+            message: { content: 'test: use local model' },
             finish_reason: 'stop',
           },
         ],
@@ -104,7 +104,7 @@ test('LM Studio runs end to end without a Gemini API key and cancellation create
     process.env.GCM_LM_STUDIO_URL = server.url.origin;
     process.env.GCM_LM_STUDIO_MODEL = 'local-model';
 
-    await executeCommitMessageGeneration(['--model', 'local-model', '--mode', 'commit-only'], {
+    await executeCommitMessageGeneration(['--model', 'local-model'], {
       isInteractive: false,
       logger: { log: function () {} },
     });

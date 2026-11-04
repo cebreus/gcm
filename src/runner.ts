@@ -14,15 +14,8 @@ import { summarizeRepositoryDiff } from './services/repository-summary.js';
 import { createContextService } from './services/context-service.js';
 import type { ContextService } from './services/context-service.js';
 import type { LanguageModelProvider } from './language-model-service.js';
-import {
-  getLanguageModelProviderValidationError,
-  isLanguageModelName,
-} from './language-model-service.js';
-import {
-  createProviderFactories,
-  getProviderFactoriesValidationError,
-  type ProviderFactoryOptions,
-} from './provider-factories.js';
+import { isLanguageModelName } from './language-model-service.js';
+import { createProviderFactories, type ProviderFactoryOptions } from './provider-factories.js';
 import { loadSession, saveSession } from './session.js';
 import {
   intro,
@@ -48,6 +41,12 @@ import {
   type GenerationServices,
 } from './generation.js';
 import { runCommitBatch } from './batch-generation.js';
+
+function paint(code: string): (message: string) => string {
+  return function (message) {
+    return `${code}${message}${C.reset}`;
+  };
+}
 
 const C = {
   reset: '\x1b[0m',
@@ -79,7 +78,7 @@ function showHelp(providerLabel: string) {
     ${C.bright}${providerLabel} Commit Message Helper${C.reset}
     Version: ${packageInfo.version}
 
-    Automatically generates professional commit messages, branch names, and PR descriptions using ${providerLabel} AI.
+    Automatically generates professional Conventional Commit messages using ${providerLabel} AI.
 
     ${C.bright}Usage:${C.reset}
       gcm [options]
@@ -129,15 +128,9 @@ function createRunnerDialogue(
 ): InteractiveGenerationDialogue {
   return createInteractiveGenerationDialogue({
     prompts: {
-      select: async function (options) {
-        return select(options);
-      },
-      text: async function (options) {
-        return text(options);
-      },
-      confirm: async function (options) {
-        return confirm(options);
-      },
+      select,
+      text,
+      confirm,
       note,
       outro,
       cancel,
@@ -207,24 +200,9 @@ function createRunnerOutput(
       return redactSensitiveText(stripTerminalControlSequences(message));
     },
     style: {
-      bright: function (message) {
-        return `${C.bright}${message}${C.reset}`;
-      },
-      cyan: function (message) {
-        return `${C.cyan}${message}${C.reset}`;
-      },
-      cyanBright: function (message) {
-        return `${C.cyan}${C.bright}${message}${C.reset}`;
-      },
-      dim: function (message) {
-        return `${C.dim}${message}${C.reset}`;
-      },
-      magentaBright: function (message) {
-        return `${C.magenta}${C.bright}${message}${C.reset}`;
-      },
-      yellow: function (message) {
-        return `${C.yellow}${message}${C.reset}`;
-      },
+      cyan: paint(C.cyan),
+      dim: paint(C.dim),
+      yellow: paint(C.yellow),
     },
   };
 }
@@ -282,13 +260,6 @@ async function runCommitRangeCommand(params: {
     state,
     output,
   } = params;
-  if (!gitService.listCommitHashes || !gitService.hasAmendment || !gitService.getHeadHash) {
-    output.cancel('The configured Git adapter does not support commit ranges.');
-    return 'failure';
-  }
-  const listCommitHashes = gitService.listCommitHashes.bind(gitService);
-  const hasAmendment = gitService.hasAmendment.bind(gitService);
-  const getHeadHash = gitService.getHeadHash.bind(gitService);
   try {
     const repositoryState = await gitService.getRepositoryState(logger);
     if (
@@ -300,20 +271,20 @@ async function runCommitRangeCommand(params: {
       output.cancel('Commit range apply requires a clean index with no Git operation in progress.');
       return 'failure';
     }
-    const targets = await listCommitHashes(range, logger);
+    const targets = await gitService.listCommitHashes(range, logger);
     if (targets.length === 0) {
       output.cancel(`Commit range ${range} contains no commits.`);
       return 'failure';
     }
-    const initialHead = await getHeadHash(logger);
+    const initialHead = await gitService.getHeadHash(logger);
     const result = await runCommitBatch({
       targets,
       initialHead,
       getHead: function () {
-        return getHeadHash(logger);
+        return gitService.getHeadHash(logger);
       },
       hasAmendment: function (hash) {
-        return parsedArgs.apply ? hasAmendment(hash, logger) : Promise.resolve(false);
+        return parsedArgs.apply ? gitService.hasAmendment(hash, logger) : Promise.resolve(false);
       },
       runOne: async function (hash) {
         try {
@@ -373,13 +344,16 @@ export async function executeCommitMessageGeneration(
       process.exitCode = 0;
       return;
     }
-    const factories = createProviderFactories(opts, logger, parsedArgs.debug);
-    const factoriesError = getProviderFactoriesValidationError(factories);
-    if (factoriesError) {
-      cancel(`Error: ${factoriesError}.`);
+    // Checked before any provider is built, because GCM_MODEL becomes a
+    // provider's default model and would otherwise surface as "unavailable".
+    // --help never resolves a model, so it stays usable; a throw in gcm.config
+    // would not, since that runs before the entrypoint can report it.
+    if (!parsedArgs.help && !isLanguageModelName(CONFIG.MODEL)) {
+      cancel('Error: Invalid GCM_MODEL.');
       process.exitCode = 1;
       return;
     }
+    const factories = createProviderFactories(opts, logger, parsedArgs.debug);
     if (parsedArgs.listProviders && !parsedArgs.help) {
       process.exitCode = await runListProvidersCommand({
         factories,
@@ -466,17 +440,6 @@ export async function executeCommitMessageGeneration(
         exitCode = 1;
         break;
       }
-      if (provider.id !== factory.id || provider.label !== factory.label) {
-        cancel('Error: Invalid provider factory identity.');
-        exitCode = 1;
-        break;
-      }
-      const providerError = getLanguageModelProviderValidationError(provider);
-      if (providerError) {
-        cancel(`Error: ${providerError}.`);
-        exitCode = 1;
-        break;
-      }
       intro(`${C.bright}${provider.label} Commit Message Helper v${packageInfo.version}${C.reset}`);
       if (provider.selectionNotice) note(provider.selectionNotice, 'Model fallback');
       const earlyExitCode = await maybeHandleListModels(parsedArgs, provider);
@@ -525,7 +488,6 @@ export async function executeCommitMessageGeneration(
         previousProviderId = providerId;
         providerId = outcome.providerId;
         providerSwitched = true;
-        session.outputMode = state.outputMode;
         continue;
       }
       exitCode = outcome === 'failure' ? 1 : 0;

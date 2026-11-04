@@ -1,8 +1,8 @@
 import { test, expect } from 'bun:test';
 import {
+  estimateTokenCount,
   fileImportanceWeight,
   pushHunkToTop,
-  unescapeNewlinesInText,
   formatCommitMessage,
   shouldExcludeFile,
   filterExcludedFiles,
@@ -91,21 +91,6 @@ test('utils: pushHunkToTop - ignores zero capacity', () => {
   const array: Hunk[] = [];
   pushHunkToTop(array, createHunk('f1', 10), 0);
   expect(array).toEqual([]);
-});
-
-// --- Tests for unescapeNewlinesInText ---
-test('utils: unescapeNewlinesInText - should unescape newlines in text fields', () => {
-  const obj = { a: 1, data: { text: 'hello\\nworld' } };
-  const result = unescapeNewlinesInText(obj);
-  expect((result as { data: { text: string } }).data.text).toBe('hello\nworld');
-});
-
-test('utils: unescapeNewlinesInText - should handle nested objects and arrays', () => {
-  const obj = { a: [{ text: 'a\\nb' }, { c: { text: 'c\\nd' } }] };
-  const result = unescapeNewlinesInText(obj);
-  const typed = result as { a: Array<{ text?: string; c?: { text: string } }> };
-  expect(typed.a[0].text).toBe('a\nb');
-  expect(typed.a[1].c?.text).toBe('c\nd');
 });
 
 // --- Tests for formatCommitMessage ---
@@ -260,43 +245,7 @@ test('utils: filterExcludedFiles - should return empty array when all excluded',
 });
 
 // --- Tests for sanitizeForDisplay ---
-test('utils: sanitizeForDisplay - should remove <<START>> marker', () => {
-  const input = '<<START>> content';
-  const result = sanitizeForDisplay(input);
-  expect(result).toBe('content');
-});
-
-test('utils: sanitizeForDisplay - should remove <<END>> marker', () => {
-  const input = 'content <<END>>';
-  const result = sanitizeForDisplay(input);
-  expect(result).toBe('content');
-});
-
-test('utils: sanitizeForDisplay - should remove backticked .<<END>> marker', () => {
-  const input = 'feat: add feature\n\nDescription text`.<<END>>`';
-  const result = sanitizeForDisplay(input);
-  expect(result).toBe('feat: add feature\n\nDescription text');
-});
-
-test('utils: sanitizeForDisplay - should remove .<<END>> marker without backticks', () => {
-  const input = 'feat: add feature\n\nDescription text.<<END>>';
-  const result = sanitizeForDisplay(input);
-  expect(result).toBe('feat: add feature\n\nDescription text');
-});
-
-test('utils: sanitizeForDisplay - should remove <<END_TRUNCATED>> marker', () => {
-  const input = 'content <<END_TRUNCATED>>';
-  const result = sanitizeForDisplay(input);
-  expect(result).toBe('content');
-});
-
-test('utils: sanitizeForDisplay - should remove all markers in single text', () => {
-  const input = '<<START>> content with markers and more.<<END_TRUNCATED>>';
-  const result = sanitizeForDisplay(input);
-  expect(result).toBe('content with markers and more');
-});
-
-test('utils: sanitizeForDisplay - should preserve marker-like literals inside text', () => {
+test('utils: sanitizeForDisplay - should pass marker-like literals through unchanged', () => {
   const input = 'Docs: explain what <<END>> marker means for parser behavior';
   const result = sanitizeForDisplay(input);
   expect(result).toBe(input);
@@ -329,18 +278,6 @@ test('utils: sanitizeForDisplay - should handle empty string', () => {
   expect(result).toBe('');
 });
 
-test('utils: sanitizeForDisplay - should handle variant with backtick prefix', () => {
-  const input = 'commit message`<<END>>';
-  const result = sanitizeForDisplay(input);
-  expect(result).toBe('commit message');
-});
-
-test('utils: sanitizeForDisplay - should handle multiple occurrences', () => {
-  const input = '<<START>>text1<<END>> middle <<START>>text2<<END>>';
-  const result = sanitizeForDisplay(input);
-  expect(result).toBe('text1 middle text2');
-});
-
 test('utils: stripTerminalControlSequences removes ANSI and controls but keeps newlines and tabs', () => {
   expect(
     stripTerminalControlSequences(
@@ -369,4 +306,20 @@ test('utils: secret redaction removes Authorization credentials', () => {
 
   expect(redactSensitiveText(input)).toBe(expected);
   expect(redactSensitiveTextForPrompt(input)).toBe(expected);
+});
+
+// --- Tests for estimateTokenCount ---
+test('utils: estimateTokenCount - should estimate tokens for various lengths', () => {
+  const ratio = 4; // Simple ratio for testing
+  expect(estimateTokenCount('', ratio)).toBe(0);
+  expect(estimateTokenCount('hello', ratio)).toBe(2); // 5 bytes / 4 -> ceil(1.25) = 2
+  expect(estimateTokenCount('a b c d', ratio)).toBe(2); // 7 bytes / 4 -> ceil(1.75) = 2
+});
+
+test('utils: estimateTokenCount - should handle unicode characters', () => {
+  const ratio = 4;
+  // '你好' is 6 bytes
+  expect(estimateTokenCount('你好', ratio)).toBe(2); // 6 bytes / 4 -> ceil(1.5) = 2
+  // 'a你好b' is 8 bytes
+  expect(estimateTokenCount('a你好b', ratio)).toBe(2); // 8 bytes / 4 -> ceil(2) = 2
 });

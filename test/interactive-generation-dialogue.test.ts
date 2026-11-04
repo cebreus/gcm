@@ -14,7 +14,6 @@ function createState(): GenerationState {
     providerId: 'gemini',
     baselineModelName: 'gemini-3.7-flash',
     modelName: 'gemini-3.7-flash',
-    outputMode: 'commit-only',
   };
 }
 
@@ -132,27 +131,35 @@ describe('interactive generation dialogue', () => {
 
   test('returns the unchanged state when review selects the visible Cancel option', async () => {
     const state = createState();
-    const result = { COMMIT_MESSAGE: 'keep this message' };
+    const commitMessage = 'keep this message';
     const { dialogue, outros } = createScriptedDialogue(['cancel']);
 
     await expect(
-      dialogue.review({ state, result, commitCapability: createCapability() }),
-    ).resolves.toEqual({ type: 'cancel', modelName: state.modelName, userHint: undefined });
+      dialogue.review({ state, commitMessage, commitCapability: createCapability() }),
+    ).resolves.toEqual({
+      type: 'cancel',
+      modelName: state.modelName,
+      userHint: undefined,
+      commitMessage: 'keep this message',
+    });
     expect(state).toEqual(createState());
-    expect(result.COMMIT_MESSAGE).toBe('keep this message');
     expect(outros).toEqual(['Commit cancelled.']);
   });
 
   test('returns the unchanged state when review receives escape', async () => {
     const state = createState();
-    const result = { COMMIT_MESSAGE: 'keep this message' };
+    const commitMessage = 'keep this message';
     const { dialogue, outros } = createScriptedDialogue([escape]);
 
     await expect(
-      dialogue.review({ state, result, commitCapability: createCapability() }),
-    ).resolves.toEqual({ type: 'cancel', modelName: state.modelName, userHint: undefined });
+      dialogue.review({ state, commitMessage, commitCapability: createCapability() }),
+    ).resolves.toEqual({
+      type: 'cancel',
+      modelName: state.modelName,
+      userHint: undefined,
+      commitMessage: 'keep this message',
+    });
     expect(state).toEqual(createState());
-    expect(result.COMMIT_MESSAGE).toBe('keep this message');
     expect(outros).toEqual(['Commit cancelled.']);
   });
 
@@ -161,7 +168,7 @@ describe('interactive generation dialogue', () => {
 
     await dialogue.review({
       state: createState(),
-      result: { COMMIT_MESSAGE: 'message' },
+      commitMessage: 'message',
       commitCapability: createCapability({ allowed: false, reason: 'No staged changes.' }),
     });
 
@@ -185,7 +192,7 @@ describe('interactive generation dialogue', () => {
 
     await dialogue.review({
       state: createState(),
-      result: { COMMIT_MESSAGE: 'message' },
+      commitMessage: 'message',
       commitCapability: createCapability({
         mode: 'amend',
         target: { subject: 'feat: safe\u001B[2J subject\u0000' },
@@ -200,7 +207,7 @@ describe('interactive generation dialogue', () => {
 
     await dialogue.review({
       state: createState(),
-      result: { COMMIT_MESSAGE: 'message' },
+      commitMessage: 'message',
       commitCapability: createCapability({
         mode: 'reword',
         target: { subject: 'fix: target message' },
@@ -219,7 +226,7 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state: createState(),
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability({ excludedPaths: ['secrets.txt', excludedPath] }),
       }),
     ).resolves.toEqual({
@@ -227,6 +234,7 @@ describe('interactive generation dialogue', () => {
       modelName: 'gemini-3.7-flash',
       userHint: undefined,
       exclusionsAcknowledged: true,
+      commitMessage: 'message',
     });
     expect(notes[0]).toEqual([
       '2 staged paths were excluded from analysis and WILL still be committed:\n"secrets.txt", "later\\nWILL still be committed: forged\\u001b[2J.txt".',
@@ -241,10 +249,15 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state: createState(),
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability({ excludedPaths: ['secrets.txt'] }),
       }),
-    ).resolves.toEqual({ type: 'cancel', modelName: 'gemini-3.7-flash', userHint: undefined });
+    ).resolves.toEqual({
+      type: 'cancel',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      commitMessage: 'message',
+    });
     expect(outros).toEqual(['Commit cancelled.']);
   });
 
@@ -254,10 +267,15 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state: createState(),
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability({ excludedPaths: ['secrets.txt'] }),
       }),
-    ).resolves.toEqual({ type: 'cancel', modelName: 'gemini-3.7-flash', userHint: undefined });
+    ).resolves.toEqual({
+      type: 'cancel',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      commitMessage: 'message',
+    });
     expect(outros).toEqual(['Commit cancelled.']);
   });
 
@@ -266,7 +284,7 @@ describe('interactive generation dialogue', () => {
 
     await dialogue.review({
       state: createState(),
-      result: { COMMIT_MESSAGE: 'message' },
+      commitMessage: 'message',
       commitCapability: createCapability(),
     });
 
@@ -274,18 +292,22 @@ describe('interactive generation dialogue', () => {
   });
 
   test('copies the original message and returns to the menu', async () => {
-    const result = { COMMIT_MESSAGE: 'original message' };
+    const commitMessage = 'original message';
     const { dialogue, copied, notes, selectOptions } = createScriptedDialogue(['copy', 'commit']);
 
     await expect(
       dialogue.review({
         state: createState(),
-        result,
+        commitMessage,
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
+    ).resolves.toEqual({
+      type: 'commit',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      commitMessage: 'original message',
+    });
     expect(copied).toEqual(['original message']);
-    expect(result.COMMIT_MESSAGE).toBe('original message');
     expect(notes).toEqual([['Commit message copied to clipboard!', 'Success']]);
     expect(selectOptions).toHaveLength(2);
   });
@@ -302,16 +324,21 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state: createState(),
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
+    ).resolves.toEqual({
+      type: 'commit',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      commitMessage: 'message',
+    });
     expect(notes).toEqual([['Failed to copy to clipboard: Error: denied', 'Error']]);
     expect(selectOptions).toHaveLength(2);
   });
 
   test('edits the message and returns to the menu', async () => {
-    const result = { COMMIT_MESSAGE: 'original message' };
+    const commitMessage = 'original message';
     const { dialogue, selectOptions } = createScriptedDialogue([
       'edit',
       'edited message',
@@ -321,26 +348,34 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state: createState(),
-        result,
+        commitMessage,
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
-    expect(result.COMMIT_MESSAGE).toBe('edited message');
+    ).resolves.toEqual({
+      type: 'commit',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      commitMessage: 'edited message',
+    });
     expect(selectOptions).toHaveLength(2);
   });
 
   test('rejects an empty edited message and keeps the previous message', async () => {
-    const result = { COMMIT_MESSAGE: 'original message' };
+    const commitMessage = 'original message';
     const { dialogue, notes, selectOptions } = createScriptedDialogue(['edit', '', 'commit']);
 
     await expect(
       dialogue.review({
         state: createState(),
-        result,
+        commitMessage,
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
-    expect(result.COMMIT_MESSAGE).toBe('original message');
+    ).resolves.toEqual({
+      type: 'commit',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      commitMessage: 'original message',
+    });
     expect(notes).toEqual([
       ['Commit message cannot be empty. The previous message was kept.', 'Error'],
     ]);
@@ -348,17 +383,21 @@ describe('interactive generation dialogue', () => {
   });
 
   test('keeps the original message when the edit prompt is cancelled', async () => {
-    const result = { COMMIT_MESSAGE: 'original message' };
+    const commitMessage = 'original message';
     const { dialogue, notes, selectOptions } = createScriptedDialogue(['edit', escape, 'commit']);
 
     await expect(
       dialogue.review({
         state: createState(),
-        result,
+        commitMessage,
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
-    expect(result.COMMIT_MESSAGE).toBe('original message');
+    ).resolves.toEqual({
+      type: 'commit',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      commitMessage: 'original message',
+    });
     expect(notes).toEqual([]);
     expect(selectOptions).toHaveLength(2);
   });
@@ -369,10 +408,15 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state: createState(),
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
+    ).resolves.toEqual({
+      type: 'commit',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      commitMessage: 'message',
+    });
     expect(selectOptions).toHaveLength(2);
   });
 
@@ -383,20 +427,26 @@ describe('interactive generation dialogue', () => {
     await expect(
       sameModel.dialogue.review({
         state: createState(),
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({ type: 'regenerate', modelName: 'gemini-3.7-flash', userHint: undefined });
+    ).resolves.toEqual({
+      type: 'regenerate',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      commitMessage: 'message',
+    });
     await expect(
       withHint.dialogue.review({
         state: createState(),
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({
       type: 'regenerate',
       modelName: 'gemini-3.7-flash',
       userHint: 'emphasize refactoring',
+      commitMessage: 'message',
     });
   });
 
@@ -406,10 +456,15 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state: createState(),
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({ type: 'regenerate', modelName: 'gemini-3.7-flash', userHint: '' });
+    ).resolves.toEqual({
+      type: 'regenerate',
+      modelName: 'gemini-3.7-flash',
+      userHint: '',
+      commitMessage: 'message',
+    });
     expect(selectOptions).toHaveLength(1);
   });
 
@@ -424,10 +479,15 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state,
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
+    ).resolves.toEqual({
+      type: 'commit',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      commitMessage: 'message',
+    });
     expect(state).toEqual(createState());
     expect(selectOptions).toHaveLength(2);
   });
@@ -438,13 +498,14 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state: createState(),
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability(),
       }),
     ).resolves.toEqual({
       type: 'regenerate',
       modelName: 'gemini-3.1-pro-preview',
       userHint: undefined,
+      commitMessage: 'message',
     });
   });
 
@@ -464,7 +525,7 @@ describe('interactive generation dialogue', () => {
 
     await dialogue.review({
       state: createState(),
-      result: { COMMIT_MESSAGE: 'message' },
+      commitMessage: 'message',
       commitCapability: createCapability(),
     });
 
@@ -480,10 +541,15 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state,
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability(),
       }),
-    ).resolves.toEqual({ type: 'commit', modelName: 'gemini-3.7-flash', userHint: undefined });
+    ).resolves.toEqual({
+      type: 'commit',
+      modelName: 'gemini-3.7-flash',
+      userHint: undefined,
+      commitMessage: 'message',
+    });
     expect(state).toEqual(createState());
     expect(selectOptions).toHaveLength(3);
   });
@@ -497,7 +563,7 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state: createState(),
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability(),
       }),
     ).rejects.toThrow('offline');
@@ -512,7 +578,7 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.review({
         state: createState(),
-        result: { COMMIT_MESSAGE: 'message' },
+        commitMessage: 'message',
         commitCapability: createCapability(),
       }),
     ).rejects.toThrow('Provider returned no compatible models');
@@ -551,17 +617,7 @@ describe('interactive generation dialogue', () => {
       providerId: 'gemini',
       baselineModelName: 'gemini-3.1-pro-preview',
       modelName: 'gemini-3.1-pro-preview',
-      outputMode: 'commit-only',
     });
-    expect(selectOptions).toHaveLength(3);
-  });
-
-  test('changes the configured output mode before returning to the main menu', async () => {
-    const state = createState();
-    const { dialogue, selectOptions } = createScriptedDialogue(['mode', 'full', 'generate']);
-
-    await expect(dialogue.configure(state)).resolves.toBe('continue');
-    expect(state).toEqual({ ...createState(), outputMode: 'full' });
     expect(selectOptions).toHaveLength(3);
   });
 

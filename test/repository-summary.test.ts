@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { summarizeLargeDiff } from '../src/summarizer.js';
+import { summarizeRepositoryDiff as summarizeLargeDiff } from '../src/services/repository-summary.js';
 import { CONFIG } from '../gcm.config.js';
 
 async function runGit(repository: string, args: string[]): Promise<void> {

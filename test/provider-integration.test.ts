@@ -57,7 +57,7 @@ test('a keyless provider generates from a real staged Git snapshot', async funct
   process.chdir(repository);
 
   let receivedPrompt = '';
-  await executeCommitMessageGeneration(['--model', 'local-model', '--mode', 'commit-only'], {
+  await executeCommitMessageGeneration(['--model', 'local-model'], {
     logger: { log: function () {} },
     languageModelProvider: {
       id: 'local',
@@ -76,7 +76,7 @@ test('a keyless provider generates from a real staged Git snapshot', async funct
       service: {
         generate: async function (params) {
           receivedPrompt = params.promptContext;
-          return { text: 'COMMIT_MESSAGE: test: use local provider', usage: {} };
+          return { text: 'test: use local provider', usage: {} };
         },
       },
     },

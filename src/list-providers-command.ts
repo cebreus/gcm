@@ -1,9 +1,4 @@
-import {
-  getLanguageModelProviderValidationError,
-  isLanguageModelName,
-  getModelSpecValidationError,
-  type LanguageModelProviderFactory,
-} from './language-model-service.js';
+import type { LanguageModelProviderFactory } from './language-model-service.js';
 
 function formatProbeError(error: unknown): string {
   const message = String(error).toLowerCase();
@@ -41,22 +36,9 @@ export async function runListProvidersCommand(options: {
     options.factories.map(async function (factory) {
       try {
         const provider = await factory.create({ probeOnly: true });
-        if (provider.id !== factory.id || provider.label !== factory.label) {
-          throw new Error('Invalid provider factory identity');
-        }
-        const validationError = getLanguageModelProviderValidationError(provider);
-        if (validationError) throw new Error(validationError);
         if (provider.readinessError) throw new Error(provider.readinessError);
         const models = await provider.models();
         if (models.length === 0) throw new Error('Provider returned no compatible models');
-        if (
-          models.some(
-            model =>
-              !isLanguageModelName(model.name) || getModelSpecValidationError(model) !== null,
-          )
-        ) {
-          throw new Error('Provider returned invalid model name');
-        }
         if (!models.some(model => model.name === provider.defaultModel)) {
           throw new Error('Provider default model is not in its catalogue');
         }

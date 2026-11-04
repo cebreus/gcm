@@ -1,32 +1,9 @@
-import { estimateTokenCount } from '../runner-utils.js';
+import { estimateTokenCount } from '../utils.js';
 import type { Logger } from '../logger.js';
 
 export interface ContextService {
   constructLLMPromptContext(params: ContextParams): Promise<ContextResult>;
-  reduceForRetry(params: {
-    promptParts: PromptContextParts;
-    stagedFiles?: string[];
-    summaryAttempted: boolean;
-    targetCommit?: string;
-  }): Promise<RetryReductionResult>;
 }
-
-export interface PromptContextParts {
-  prefix: string;
-  diffHeading: string;
-  diffBody: string;
-  suffix: string;
-}
-
-export type RetryReductionResult =
-  | { mode: 'unreducible' }
-  | {
-      promptContext: string;
-      promptParts: PromptContextParts;
-      mode: 'summary' | 'truncation';
-      summaryAttempted: boolean;
-      summaryUsed: boolean;
-    };
 
 interface DiffSummary {
   text: string;
@@ -58,26 +35,12 @@ interface ContextParams {
 
 export interface ContextResult {
   promptContext: string;
-  promptParts: PromptContextParts;
   processedDiffContent: string;
   tokens: number;
-  summaryAttempted?: boolean;
 }
 
 const PARTIAL_SUMMARY_NOTICE =
   'This summary is partial; use conservative wording when intent is ambiguous.';
-const PER_FILE_BUFFER_NOTICE =
-  'Note: The diff was truncated while being read due to per-file buffer limits.';
-const RETRY_TRUNCATION_HEADING = 'Diff (input truncated to fit model context):\n';
-
-export function renderPromptContext({
-  prefix,
-  diffHeading,
-  diffBody,
-  suffix,
-}: PromptContextParts): string {
-  return prefix + diffHeading + diffBody + suffix;
-}
 
 function buildPromptHeader(promptSuffix: string, customHeader?: string): string {
   if (customHeader) {
@@ -112,18 +75,14 @@ function buildHints(
 }
 
 function buildContextResult(
-  promptParts: PromptContextParts,
+  promptContext: string,
   processedDiffContent: string,
   tokenBytesRatio: number,
-  summaryAttempted = false,
 ): ContextResult {
-  const promptContext = renderPromptContext(promptParts);
   return {
     promptContext,
-    promptParts,
     processedDiffContent,
     tokens: estimateTokenCount(promptContext, tokenBytesRatio),
-    summaryAttempted,
   };
 }
 
@@ -160,31 +119,26 @@ function buildHardTruncatedContext(params: {
   const fixedContent = header + scopeHint + hintSection;
   const fixedTokens = estimateTokenCount(fixedContent, tokenBytesRatio);
   if (fixedTokens >= maxAvailableTokens) {
-    const promptParts = {
-      prefix: '',
-      diffHeading: '',
-      diffBody: truncateToTokenBudget(fixedContent, maxAvailableTokens, tokenBytesRatio),
-      suffix: '',
-    };
-    return buildContextResult(promptParts, '', tokenBytesRatio, true);
+    return buildContextResult(
+      truncateToTokenBudget(fixedContent, maxAvailableTokens, tokenBytesRatio),
+      '',
+      tokenBytesRatio,
+    );
   }
-  const remainingTokens = maxAvailableTokens - fixedTokens;
   const truncatedInput = truncateToTokenBudget(
     'Diff summary:\n' + summaryText + '\n\n' + PARTIAL_SUMMARY_NOTICE,
-    remainingTokens,
+    maxAvailableTokens - fixedTokens,
     tokenBytesRatio,
   );
   return buildContextResult(
-    {
-      prefix: header,
-      diffHeading: '',
-      diffBody: truncatedInput,
-      suffix: scopeHint + hintSection,
-    },
+    header + truncatedInput + scopeHint + hintSection,
     truncatedInput,
     tokenBytesRatio,
-    true,
   );
+}
+
+function hasSummaryEvidence(summary: DiffSummary): boolean {
+  return summary.numHunks > 0 || (summary.numSkippedFiles ?? 0) > 0;
 }
 
 async function constructLLMPromptContext(
@@ -210,140 +164,34 @@ async function constructLLMPromptContext(
     recentCommitSubjects,
     userHint,
   );
-  const initialParts = {
-    prefix: header + changedFilesSection + contextHeader,
-    diffHeading: 'Diff:\n',
-    diffBody: diffContent,
-    suffix: hintSection,
-  };
-  const initialContent = renderPromptContext(initialParts);
+  const prefix = header + changedFilesSection + contextHeader;
+  const initialContent = prefix + 'Diff:\n' + diffContent + hintSection;
   const estimatedTokens = estimateTokenCount(initialContent, tokenBytesRatio);
   if (estimatedTokens <= maxAvailableTokens) {
-    return buildContextResult(initialParts, diffContent, tokenBytesRatio);
+    return buildContextResult(initialContent, diffContent, tokenBytesRatio);
   }
   logger?.log(
     'info',
     `Input token count (${estimatedTokens}) exceeds limit (${maxAvailableTokens}). Summarizing diff...`,
   );
   const summary = await summarize(stagedFiles, { targetCommit });
-  const summaryText = summary.text;
   if (diffContent.trim() && !hasSummaryEvidence(summary)) {
     throw new Error('Diff summary contains no evidence for a non-empty diff');
   }
-  const summaryParts = {
-    prefix: header + changedFilesSection + contextHeader,
-    diffHeading: 'Diff summary:\n',
-    diffBody: summaryText + '\n\n' + PARTIAL_SUMMARY_NOTICE,
-    suffix: hintSection,
-  };
-  const summaryContent = renderPromptContext(summaryParts);
+  const summaryBody = summary.text + '\n\n' + PARTIAL_SUMMARY_NOTICE;
+  const summaryContent = prefix + 'Diff summary:\n' + summaryBody + hintSection;
   if (estimateTokenCount(summaryContent, tokenBytesRatio) <= maxAvailableTokens) {
-    return buildContextResult(summaryParts, summaryText, tokenBytesRatio, true);
+    return buildContextResult(summaryContent, summary.text, tokenBytesRatio);
   }
   logger?.log('warn', 'Summary was still too large, performing hard truncation.');
   return buildHardTruncatedContext({
     header,
     scopeHint: changedFilesSection + contextHeader,
     hintSection,
-    summaryText,
+    summaryText: summary.text,
     maxAvailableTokens,
     tokenBytesRatio,
   });
-}
-
-function hasSummaryEvidence(summary: DiffSummary): boolean {
-  return summary.numHunks > 0 || (summary.numSkippedFiles ?? 0) > 0;
-}
-
-function buildRetrySummaryBody(summary: DiffSummary): string {
-  return (
-    summary.text +
-    '\n\n' +
-    PARTIAL_SUMMARY_NOTICE +
-    (summary.totalTruncated ? `\n\n${PER_FILE_BUFFER_NOTICE}` : '')
-  );
-}
-
-function hardTruncateForRetry(promptParts: PromptContextParts): PromptContextParts | null {
-  const currentPrompt = renderPromptContext(promptParts);
-  const proportionalMaximumLength = Math.ceil(currentPrompt.length * 0.7);
-  const maximumLength =
-    proportionalMaximumLength < currentPrompt.length
-      ? proportionalMaximumLength
-      : Math.max(0, currentPrompt.length - 1);
-  const fixedContent = promptParts.prefix + RETRY_TRUNCATION_HEADING + promptParts.suffix;
-  const truncatedParts = {
-    prefix: promptParts.prefix,
-    diffHeading: RETRY_TRUNCATION_HEADING,
-    diffBody: promptParts.diffBody.slice(0, Math.max(0, maximumLength - fixedContent.length)),
-    suffix: promptParts.suffix,
-  };
-  if (renderPromptContext(truncatedParts).length < currentPrompt.length) {
-    return truncatedParts;
-  }
-  const emptiedParts = {
-    prefix: promptParts.prefix,
-    diffHeading: promptParts.diffHeading,
-    diffBody: '',
-    suffix: promptParts.suffix,
-  };
-  return renderPromptContext(emptiedParts).length < currentPrompt.length ? emptiedParts : null;
-}
-
-function truncateRetryPrompt(
-  promptParts: PromptContextParts,
-  summaryAttempted: boolean,
-): RetryReductionResult {
-  const truncatedParts = hardTruncateForRetry(promptParts);
-  if (!truncatedParts) return { mode: 'unreducible' };
-  return {
-    promptContext: renderPromptContext(truncatedParts),
-    promptParts: truncatedParts,
-    mode: 'truncation',
-    summaryAttempted,
-    summaryUsed: false,
-  };
-}
-
-async function reduceForRetry(
-  {
-    promptParts,
-    stagedFiles,
-    summaryAttempted,
-    targetCommit,
-  }: {
-    promptParts: PromptContextParts;
-    stagedFiles?: string[];
-    summaryAttempted: boolean;
-    targetCommit?: string;
-  },
-  summarize: ContextServiceDeps['summarizeLargeDiff'],
-): Promise<RetryReductionResult> {
-  const currentPrompt = renderPromptContext(promptParts);
-  if (!summaryAttempted && Array.isArray(stagedFiles) && stagedFiles.length > 0) {
-    const summary = await summarize(stagedFiles, { targetCommit });
-    if (!hasSummaryEvidence(summary)) {
-      throw new Error('Diff summary contains no evidence for a non-empty diff');
-    }
-    const summaryParts = {
-      prefix: promptParts.prefix,
-      diffHeading: 'Diff summary:\n',
-      diffBody: buildRetrySummaryBody(summary),
-      suffix: promptParts.suffix,
-    };
-    const summaryPrompt = renderPromptContext(summaryParts);
-    if (summaryPrompt.length < currentPrompt.length) {
-      return {
-        promptContext: summaryPrompt,
-        promptParts: summaryParts,
-        mode: 'summary',
-        summaryAttempted: true,
-        summaryUsed: true,
-      };
-    }
-    return truncateRetryPrompt(promptParts, true);
-  }
-  return truncateRetryPrompt(promptParts, summaryAttempted);
 }
 
 export function createContextService({
@@ -351,6 +199,5 @@ export function createContextService({
 }: ContextServiceDeps): ContextService {
   return {
     constructLLMPromptContext: params => constructLLMPromptContext(params, summarize),
-    reduceForRetry: params => reduceForRetry(params, summarize),
   };
 }

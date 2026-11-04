@@ -69,7 +69,6 @@ test('pure core modules reject adapter imports and I/O globals', async () => {
     'src/model-registry.ts',
     'src/scope-detector.ts',
     'src/parser.ts',
-    'src/runner-utils.ts',
     'src/utils.ts',
   ];
   const source = [
