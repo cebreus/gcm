@@ -59,6 +59,9 @@ export interface InteractiveGenerationDialogue {
     targetCommit: string | null,
     stagedFilesFromWorktree: readonly string[],
   ): Promise<'retry' | 'cancel'>;
+  recoverGeneration(
+    message: string,
+  ): Promise<'retry' | 'cancel' | { type: 'switch-model'; modelName: string }>;
   review(params: {
     state: GenerationState;
     commitMessage: string;
@@ -259,6 +262,25 @@ export function createInteractiveGenerationDialogue(
 ): InteractiveGenerationDialogue {
   const { prompts } = dependencies;
   return {
+    recoverGeneration: async message => {
+      prompts.note(message, 'Details');
+      const action = await prompts.select({
+        message: 'What do you want to do?',
+        options: [
+          { value: 'retry', label: 'Try again' },
+          { value: 'switch', label: 'Choose another model' },
+          { value: 'cancel', label: 'Cancel' },
+        ],
+      });
+      if (prompts.isCancel(action) || action === 'cancel') return 'cancel';
+      if (action === 'retry') return 'retry';
+      const selectedModel = await prompts.select({
+        message: 'Select AI Model',
+        options: await getModelSelectionOptions(dependencies),
+      });
+      if (prompts.isCancel(selectedModel)) return 'cancel';
+      return { type: 'switch-model', modelName: String(selectedModel) };
+    },
     handleEmptyStaging: async (targetCommit, stagedFilesFromWorktree) => {
       if (targetCommit) {
         prompts.cancel(`No changes found in commit ${targetCommit}.`);

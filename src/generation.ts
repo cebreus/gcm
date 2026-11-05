@@ -53,6 +53,33 @@ export type GenerationServices = {
 type ProviderSwitchOutcome = { type: 'switch-provider'; providerId: string };
 type TerminalOutcome = 'success' | 'failure' | ProviderSwitchOutcome;
 
+function describeLanguageModelApiError(
+  error: unknown,
+  output: GenerationServices['output'],
+): string {
+  if (!isLanguageModelApiError(error)) return output.sanitizeTerminalText(String(error));
+  const { metadata } = error;
+  const status =
+    typeof metadata.status === 'string' || typeof metadata.status === 'number'
+      ? String(metadata.status)
+      : 'Unknown';
+  let message = error.message;
+  try {
+    const parsed: unknown = JSON.parse(
+      typeof metadata.snippet === 'string' ? metadata.snippet : '{}',
+    );
+    const responseError = isRecord(parsed) ? parsed.error : undefined;
+    const responseMessage = isRecord(responseError) ? responseError.message : undefined;
+    if (typeof responseMessage === 'string' && responseMessage) message = responseMessage;
+  } catch {
+    // Keep provider error message.
+  }
+  const safeMessage = output.sanitizeTerminalText(message);
+  return status === 'Unknown' && /timed? out/i.test(message)
+    ? safeMessage
+    : `API Error (${status}): ${safeMessage}`;
+}
+
 export function createGenerationState(
   parsedArgs: ParsedOptions,
   session: GCMSession,
@@ -113,31 +140,11 @@ export async function runGenerationCommand(params: {
     } else if (/unknown revision/i.test(errStr))
       output.cancel(`Error: Invalid commit SHA: ${targetCommit}`);
     else if (isLanguageModelApiError(error)) {
-      const { metadata } = error;
-      let status = 'Unknown';
-      if (typeof metadata.status === 'string' || typeof metadata.status === 'number') {
-        status = String(metadata.status);
-      }
-      let msg = `API Error (${status})`;
-      try {
-        const parsed: unknown = JSON.parse(
-          typeof metadata.snippet === 'string' ? metadata.snippet : '{}',
-        );
-        const responseError = isRecord(parsed) ? parsed.error : undefined;
-        const responseMessage = isRecord(responseError) ? responseError.message : undefined;
-        if (typeof responseMessage === 'string' && responseMessage) {
-          msg += `: ${output.sanitizeTerminalText(responseMessage)}`;
-        } else {
-          msg += `: ${output.sanitizeTerminalText(error.message)}`;
-        }
-      } catch {
-        msg += `: ${output.sanitizeTerminalText(error.message)}`;
-      }
       logger.log('error', `Commit helper failed: ${error}`, {
         error: errStr,
-        snippet: metadata.snippet,
+        snippet: error.metadata.snippet,
       });
-      output.cancel(output.sanitizeTerminalText(msg));
+      output.cancel(describeLanguageModelApiError(error, output));
     } else {
       logger.log('error', `Commit helper failed: ${error}`, { error: errStr });
       output.cancel(`An unexpected error occurred: ${output.sanitizeTerminalText(errStr)}`);
@@ -497,16 +504,32 @@ async function runGenerationCycle(params: {
     commitCapability,
   } = params;
   for (;;) {
-    const outcome = await runSingleGenerationAttempt({
-      services,
-      logger,
-      state,
-      staged,
-      meta,
-      commitContextHints,
-      targetCommit,
-      commitCapability,
-    });
+    let outcome: Awaited<ReturnType<typeof runSingleGenerationAttempt>>;
+    try {
+      outcome = await runSingleGenerationAttempt({
+        services,
+        logger,
+        state,
+        staged,
+        meta,
+        commitContextHints,
+        targetCommit,
+        commitCapability,
+      });
+    } catch (error) {
+      if (state.nonInteractive || !isLanguageModelApiError(error)) throw error;
+      services.output.stopProgress(/timed? out/i.test(error.message) ? 'Request timed out' : 'Request failed');
+      logger.log('error', `Commit helper request failed: ${error}`, { error: String(error) });
+      const recovery = await services.dialogue.recoverGeneration(
+        describeLanguageModelApiError(error, services.output),
+      );
+      if (recovery === 'cancel') return 'failure';
+      if (typeof recovery === 'object') {
+        state.baselineModelName = recovery.modelName;
+        state.modelName = recovery.modelName;
+      }
+      continue;
+    }
     if (outcome === 'regenerate') continue;
     return outcome;
   }
@@ -629,34 +652,40 @@ async function handleSuccessfulGeneration(params: {
       );
       return 'failure';
     }
-    return commitGeneratedMessage({
+    const outcome = await commitGeneratedMessage({
       commitMessage: parsedOut,
       commitCapability,
       services,
       state,
       logger,
     });
+    return outcome === 'review' ? 'failure' : outcome;
   }
-  const actionResult: ActionMenuResult = await services.dialogue.review({
-    state,
-    commitMessage: parsedOut,
-    commitCapability,
-  });
-  if (actionResult.type === 'cancel') return 'success';
-  state.baselineModelName = actionResult.modelName;
-  state.modelName = actionResult.modelName;
-  state.userHint = actionResult.userHint;
-  if (actionResult.type === 'regenerate') return 'regenerate';
-  return commitGeneratedMessage({
-    commitMessage: actionResult.commitMessage,
-    commitCapability: {
-      ...commitCapability,
-      exclusionsAcknowledged: actionResult.exclusionsAcknowledged,
-    },
-    services,
-    state,
-    logger,
-  });
+  let commitMessage = parsedOut;
+  for (;;) {
+    const actionResult: ActionMenuResult = await services.dialogue.review({
+      state,
+      commitMessage,
+      commitCapability,
+    });
+    if (actionResult.type === 'cancel') return 'success';
+    state.baselineModelName = actionResult.modelName;
+    state.modelName = actionResult.modelName;
+    state.userHint = actionResult.userHint;
+    if (actionResult.type === 'regenerate') return 'regenerate';
+    commitMessage = actionResult.commitMessage;
+    const outcome = await commitGeneratedMessage({
+      commitMessage,
+      commitCapability: {
+        ...commitCapability,
+        exclusionsAcknowledged: actionResult.exclusionsAcknowledged,
+      },
+      services,
+      state,
+      logger,
+    });
+    if (outcome !== 'review') return outcome;
+  }
 }
 
 async function commitGeneratedMessage(params: {
@@ -665,7 +694,7 @@ async function commitGeneratedMessage(params: {
   services: GenerationServices;
   state: GenerationState;
   logger: Logger;
-}): Promise<TerminalOutcome> {
+}): Promise<TerminalOutcome | 'review'> {
   const { commitMessage, commitCapability, services, state, logger } = params;
   const verb = commitCapability.mode === 'commit' ? 'Committing changes' : commitCapability.mode;
   services.output.startProgress(`${verb}...`);
@@ -679,13 +708,16 @@ async function commitGeneratedMessage(params: {
     services.output.outro(services.output.style.cyan(summary));
   } catch (error) {
     services.output.stopProgress('Failed');
-    services.output.cancel(
-      isCommitActionRefusal(error)
-        ? error.message
-        : `Failed to apply commit action: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    if (isCommitActionRefusal(error)) {
+      services.output.cancel(error.message);
+      logger.log('error', `Commit action failed: ${error}`);
+      return 'failure';
+    }
+    const message = `Failed to apply commit action: ${error instanceof Error ? error.message : String(error)}`;
+    if (state.nonInteractive) services.output.cancel(message);
+    else services.output.note(message, 'Commit failed');
     logger.log('error', `Commit action failed: ${error}`);
-    return 'failure';
+    return state.nonInteractive ? 'failure' : 'review';
   }
   return 'success';
 }

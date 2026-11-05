@@ -1048,26 +1048,34 @@ describe('Refactored Runner', () => {
       processedDiffContent: 'diff',
       tokens: 10,
     });
-    mockGeminiService.generate.mockRejectedValueOnce(error);
-    mockSelect.mockResolvedValueOnce('generate');
+    mockGeminiService.generate
+      .mockRejectedValueOnce(error)
+      .mockResolvedValueOnce({ text: 'BRANCH: fix/retry\nfix: recover generation', usage: {} });
+    mockSelect
+      .mockResolvedValueOnce('generate')
+      .mockResolvedValueOnce('retry')
+      .mockResolvedValueOnce('cancel');
 
-    await expect(
-      executeCommitMessageGeneration([], {
-        logger: mockLogger,
-        gitService: mockGitService,
-        contextService: mockContextService,
-        geminiService: mockGeminiService,
-        geminiModelLister: mockListModels,
-      }),
-    ).rejects.toBe(error);
+    await executeCommitMessageGeneration([], {
+      logger: mockLogger,
+      gitService: mockGitService,
+      contextService: mockContextService,
+      geminiService: mockGeminiService,
+      geminiModelLister: mockListModels,
+    });
 
-    expect(mockCancel).toHaveBeenCalledWith('API Error (429): quota exhausted');
+    expect(mockGeminiService.generate).toHaveBeenCalledTimes(2);
+    expect(mockGitService.retrieveStagedChanges).toHaveBeenCalledTimes(1);
+    expect(mockNote).toHaveBeenCalledWith(
+      'API Error (429): quota exhausted',
+      'Details',
+    );
   });
 
-  test('Should report truthy non-string Gemini API error messages', async () => {
-    const error = Object.assign(new Error('quota exhausted'), {
+  test('Should present request timeouts without an unknown API status', async () => {
+    const error = Object.assign(new Error('FreeLLMAPI request timed out'), {
       name: 'LanguageModelApiError',
-      metadata: { status: 429, snippet: '{"error":{"message":429}}' },
+      metadata: {},
     });
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
@@ -1082,17 +1090,18 @@ describe('Refactored Runner', () => {
     mockGeminiService.generate.mockRejectedValueOnce(error);
     mockSelect.mockResolvedValueOnce('generate');
 
-    await expect(
-      executeCommitMessageGeneration([], {
-        logger: mockLogger,
-        gitService: mockGitService,
-        contextService: mockContextService,
-        geminiService: mockGeminiService,
-        geminiModelLister: mockListModels,
-      }),
-    ).rejects.toBe(error);
+    await executeCommitMessageGeneration([], {
+      logger: mockLogger,
+      gitService: mockGitService,
+      contextService: mockContextService,
+      geminiService: mockGeminiService,
+      geminiModelLister: mockListModels,
+    });
 
-    expect(mockCancel).toHaveBeenCalledWith('API Error (429): quota exhausted');
+    expect(mockNote).toHaveBeenCalledWith(
+      'FreeLLMAPI request timed out',
+      'Details',
+    );
   });
 
   test('Should remove terminal controls from Gemini API error messages', async () => {
@@ -1117,17 +1126,15 @@ describe('Refactored Runner', () => {
     mockGeminiService.generate.mockRejectedValueOnce(error);
     mockSelect.mockResolvedValueOnce('generate');
 
-    await expect(
-      executeCommitMessageGeneration([], {
-        logger: mockLogger,
-        gitService: mockGitService,
-        contextService: mockContextService,
-        geminiService: mockGeminiService,
-        geminiModelLister: mockListModels,
-      }),
-    ).rejects.toBe(error);
+    await executeCommitMessageGeneration([], {
+      logger: mockLogger,
+      gitService: mockGitService,
+      contextService: mockContextService,
+      geminiService: mockGeminiService,
+      geminiModelLister: mockListModels,
+    });
 
-    expect(mockCancel).toHaveBeenCalledWith('API Error (429): badlink');
+    expect(mockNote).toHaveBeenCalledWith('API Error (429): badlink', 'Details');
   });
 
   test('Should include version details in --help output', async () => {
@@ -1575,7 +1582,7 @@ describe('Refactored Runner', () => {
     }
   });
 
-  test('Should fail when the commit action fails', async () => {
+  test('Should return to review when the commit action fails', async () => {
     const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
     const originalExitCode = process.exitCode;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
@@ -1595,7 +1602,7 @@ describe('Refactored Runner', () => {
       usage: {},
     });
     mockGitService.commitChanges.mockRejectedValueOnce(new Error('git commit failed'));
-    mockSelect.mockResolvedValueOnce('commit');
+    mockSelect.mockResolvedValueOnce('commit').mockResolvedValueOnce('cancel');
 
     try {
       await executeCommitMessageGeneration(['--model', 'gemini-3.7-flash'], {
@@ -1606,8 +1613,12 @@ describe('Refactored Runner', () => {
         geminiModelLister: mockListModels,
       });
 
-      expect(mockCancel).toHaveBeenCalledWith('Failed to apply commit action: git commit failed');
-      expect(Number(process.exitCode)).toBe(1);
+      expect(mockNote).toHaveBeenCalledWith(
+        'Failed to apply commit action: git commit failed',
+        'Commit failed',
+      );
+      expect(mockSelect).toHaveBeenCalledTimes(2);
+      expect(Number(process.exitCode)).toBe(0);
     } finally {
       process.exitCode = originalExitCode;
       if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;

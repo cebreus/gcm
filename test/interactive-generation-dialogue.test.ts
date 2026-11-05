@@ -108,6 +108,17 @@ function createScriptedDialogue(
 }
 
 describe('interactive generation dialogue', () => {
+  test('offers retry or another model after generation fails', async () => {
+    const retry = createScriptedDialogue(['retry']);
+    await expect(retry.dialogue.recoverGeneration('Provider unavailable')).resolves.toBe('retry');
+    expect(retry.notes).toEqual([['Provider unavailable', 'Details']]);
+
+    const switched = createScriptedDialogue(['switch', 'gemini-3.1-pro-preview']);
+    await expect(switched.dialogue.recoverGeneration('Provider unavailable')).resolves.toEqual({
+      type: 'switch-model',
+      modelName: 'gemini-3.1-pro-preview',
+    });
+  });
   test('returns a provider switch request from the main menu', async function () {
     const state = createState();
     const { dialogue, selectOptions } = createScriptedDialogue(['provider', 'lm-studio'], {
