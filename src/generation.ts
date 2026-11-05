@@ -1,4 +1,11 @@
 import { CONFIG } from '../gcm.config.js';
+import {
+  changesetCommitMessage,
+  commitWithChangeset,
+  prepareChangeset,
+  stripChangesetTrailers,
+  type ChangesetDraft,
+} from './auto-changeset.js';
 import type { ParsedOptions } from './cli.js';
 import {
   isCommitActionRefusal,
@@ -518,7 +525,9 @@ async function runGenerationCycle(params: {
       });
     } catch (error) {
       if (state.nonInteractive || !isLanguageModelApiError(error)) throw error;
-      services.output.stopProgress(/timed? out/i.test(error.message) ? 'Request timed out' : 'Request failed');
+      services.output.stopProgress(
+        /timed? out/i.test(error.message) ? 'Request timed out' : 'Request failed',
+      );
       logger.log('error', `Commit helper request failed: ${error}`, { error: String(error) });
       const recovery = await services.dialogue.recoverGeneration(
         describeLanguageModelApiError(error, services.output),
@@ -610,6 +619,43 @@ async function runSingleGenerationAttempt(params: {
     return 'failure';
   }
   services.output.stopProgress(services.providerLabel + ' response received');
+  let prepareAutomaticChangeset: (() => Promise<ChangesetDraft | null>) | undefined;
+  if (
+    CONFIG.AUTO_CHANGESET &&
+    !state.nonInteractive &&
+    !targetCommit &&
+    commitCapability.allowed &&
+    commitCapability.snapshot &&
+    ![...staged.stagedFiles, ...(staged.excludedPaths ?? [])].some(path =>
+      path.startsWith('.changeset/'),
+    )
+  ) {
+    prepareAutomaticChangeset = async function () {
+      return null;
+    };
+    if (
+      response.truncated === false &&
+      !staged.truncated &&
+      !staged.excludedPaths?.length &&
+      contextResult.processedDiffContent === staged.stagedDiff &&
+      estimateTokenCount(staged.stagedDiff, CONFIG.TOKEN_BYTES_RATIO) + 1024 <= maxAvailableTokens
+    ) {
+      prepareAutomaticChangeset = async function () {
+        return prepareChangeset({
+          diff: staged.stagedDiff,
+          generate: async function (promptContext, systemPrompt) {
+            return services.languageModelService.generate({
+              promptContext,
+              systemPrompt,
+              meta,
+              modelName: state.modelName,
+              maxOutputTokens,
+            });
+          },
+        });
+      };
+    }
+  }
   const action = await handleSuccessfulGeneration({
     response,
     state,
@@ -617,6 +663,7 @@ async function runSingleGenerationAttempt(params: {
     services,
     meta,
     commitCapability,
+    prepareChangeset: prepareAutomaticChangeset,
   });
   return action;
 }
@@ -628,6 +675,7 @@ async function handleSuccessfulGeneration(params: {
   services: GenerationServices;
   meta: LogMetadata;
   commitCapability: CommitCapability;
+  prepareChangeset?: () => Promise<ChangesetDraft | null>;
 }): Promise<TerminalOutcome | 'regenerate'> {
   const { response, state, logger, services, meta, commitCapability } = params;
   logger.log('debug', 'LLM response received', {
@@ -642,7 +690,8 @@ async function handleSuccessfulGeneration(params: {
     return 'failure';
   }
   const warningIcon = response.truncated ? ` ${services.output.style.yellow('[⚠ TRUNCATED]')}` : '';
-  services.output.note(parsedOut, 'Generated Commit Message' + warningIcon);
+  const reviewedMessage = params.prepareChangeset ? stripChangesetTrailers(parsedOut) : parsedOut;
+  services.output.note(reviewedMessage, 'Generated Commit Message' + warningIcon);
   reportStats(services.output, logger, state.modelName, response.usage, response.text.length);
   if (state.nonInteractive) {
     if (!state.apply) return 'success';
@@ -661,12 +710,31 @@ async function handleSuccessfulGeneration(params: {
     });
     return outcome === 'review' ? 'failure' : outcome;
   }
-  let commitMessage = parsedOut;
+  let changeset: ChangesetDraft | null | undefined;
+  if (params.prepareChangeset) {
+    services.output.startProgress('Preparing changeset...');
+    try {
+      changeset = await params.prepareChangeset();
+    } catch (error) {
+      changeset = null;
+      logger.log('debug', `Changeset preparation failed: ${String(error)}`);
+    }
+    services.output.stopProgress(
+      changeset ? 'Changeset ready for review' : 'Changeset needs review',
+    );
+    services.output.note(
+      changeset?.content ??
+        'NEEDS_REVIEW: A changeset could not be supported by complete package and diff evidence. No changeset will be written.',
+      changeset ? 'Proposed Changeset' : 'Changeset unavailable',
+    );
+  }
+  let commitMessage = reviewedMessage;
   for (;;) {
     const actionResult: ActionMenuResult = await services.dialogue.review({
       state,
       commitMessage,
       commitCapability,
+      changeset: changeset === undefined ? undefined : (changeset?.content ?? null),
     });
     if (actionResult.type === 'cancel') return 'success';
     state.baselineModelName = actionResult.modelName;
@@ -674,12 +742,21 @@ async function handleSuccessfulGeneration(params: {
     state.userHint = actionResult.userHint;
     if (actionResult.type === 'regenerate') return 'regenerate';
     commitMessage = actionResult.commitMessage;
+    const reviewedCapability: CommitCapability = {
+      ...commitCapability,
+      exclusionsAcknowledged: actionResult.exclusionsAcknowledged,
+    };
     const outcome = await commitGeneratedMessage({
-      commitMessage,
-      commitCapability: {
-        ...commitCapability,
-        exclusionsAcknowledged: actionResult.exclusionsAcknowledged,
-      },
+      commitMessage:
+        changeset === undefined
+          ? commitMessage
+          : changesetCommitMessage(
+              commitMessage,
+              actionResult.includeChangeset === true && changeset !== null,
+              actionResult.changesetReason,
+            ),
+      commitCapability: reviewedCapability,
+      changeset: actionResult.includeChangeset ? (changeset ?? undefined) : undefined,
       services,
       state,
       logger,
@@ -691,15 +768,25 @@ async function handleSuccessfulGeneration(params: {
 async function commitGeneratedMessage(params: {
   commitMessage: string;
   commitCapability: CommitCapability;
+  changeset?: ChangesetDraft;
   services: GenerationServices;
   state: GenerationState;
   logger: Logger;
 }): Promise<TerminalOutcome | 'review'> {
-  const { commitMessage, commitCapability, services, state, logger } = params;
+  const { commitMessage, commitCapability, changeset, services, state, logger } = params;
   const verb = commitCapability.mode === 'commit' ? 'Committing changes' : commitCapability.mode;
   services.output.startProgress(`${verb}...`);
   try {
-    const { summary } = await services.commitActions.apply(commitCapability, commitMessage);
+    const { summary } = changeset
+      ? await commitWithChangeset({
+          draft: changeset,
+          capability: commitCapability,
+          message: commitMessage,
+          commitActions: services.commitActions,
+          gitService: services.gitService,
+          logger,
+        })
+      : await services.commitActions.apply(commitCapability, commitMessage);
     await services.saveSession({
       providerId: services.providerId,
       modelName: state.baselineModelName,

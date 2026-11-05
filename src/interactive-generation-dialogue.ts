@@ -1,4 +1,5 @@
 import type { ModelSpec } from './model-registry.js';
+import { CHANGESET_SKIP_REASONS, type ChangesetSkipReason } from './auto-changeset.js';
 import { buildAtomicSplitProposal, detectAtomicGroup } from './atomic-commit-planner.js';
 import { describeExcludedPaths } from './commit-action-service.js';
 import { stripTerminalControlSequences } from './utils.js';
@@ -13,6 +14,8 @@ export interface GenerationState {
 }
 
 export interface ActionMenuResult {
+  includeChangeset?: boolean;
+  changesetReason?: ChangesetSkipReason;
   type: 'commit' | 'regenerate' | 'cancel';
   modelName: string;
   commitMessage: string;
@@ -66,12 +69,20 @@ export interface InteractiveGenerationDialogue {
     state: GenerationState;
     commitMessage: string;
     commitCapability: ReviewCommitCapability;
+    changeset?: string | null;
   }): Promise<ActionMenuResult>;
   confirmAtomicity(stagedFiles: string[], targetCommit: string | null): Promise<boolean>;
 }
 
 type ActionChoice =
-  'commit' | 'copy' | 'edit' | 'regenerate' | 'regenerate-hint' | 'switch' | 'cancel';
+  | 'commit-with-changeset'
+  | 'commit'
+  | 'copy'
+  | 'edit'
+  | 'regenerate'
+  | 'regenerate-hint'
+  | 'switch'
+  | 'cancel';
 
 function toModelOption(model: ModelSpec): PromptOption {
   return {
@@ -99,10 +110,17 @@ function commitActionLabel(commitCapability: ReviewCommitCapability): string {
 async function selectAction(
   prompts: PromptAdapter,
   commitCapability: ReviewCommitCapability,
+  changeset?: string | null,
 ): Promise<ActionChoice | null> {
   const options: PromptOption[] = [];
   if (commitCapability.allowed) {
-    options.push({ value: 'commit', label: commitActionLabel(commitCapability) });
+    if (typeof changeset === 'string')
+      options.push({ value: 'commit-with-changeset', label: 'Commit with changeset' });
+    options.push({
+      value: 'commit',
+      label:
+        changeset !== undefined ? 'Commit without changeset' : commitActionLabel(commitCapability),
+    });
   }
   options.push(
     { value: 'copy', label: 'Copy to clipboard' },
@@ -221,7 +239,7 @@ async function handleActionChoice(params: {
   excludedPaths: string[];
 }): Promise<ReviewActionResult> {
   const { action, message, state, dependencies, excludedPaths } = params;
-  if (action === 'commit') {
+  if (action === 'commit' || action === 'commit-with-changeset') {
     if (!(await confirmExcludedPathCommit(dependencies.prompts, excludedPaths))) {
       dependencies.prompts.outro('Commit cancelled.');
       return {
@@ -238,6 +256,7 @@ async function handleActionChoice(params: {
       type: 'return',
       result: {
         type: 'commit',
+        ...(action === 'commit-with-changeset' ? { includeChangeset: true } : {}),
         modelName: state.modelName,
         commitMessage: message,
         userHint: state.userHint,
@@ -371,7 +390,7 @@ export function createInteractiveGenerationDialogue(
         }
       }
     },
-    review: async ({ state, commitMessage, commitCapability }) => {
+    review: async ({ state, commitMessage, commitCapability, changeset }) => {
       let finalMessage = commitMessage;
       if (!commitCapability.allowed && commitCapability.reason) {
         prompts.note(commitCapability.reason, 'Commit unavailable');
@@ -381,7 +400,7 @@ export function createInteractiveGenerationDialogue(
       }
 
       for (;;) {
-        const action = await selectAction(prompts, commitCapability);
+        const action = await selectAction(prompts, commitCapability, changeset);
         if (action === null || action === 'cancel') {
           prompts.outro('Commit cancelled.');
           return {
@@ -403,6 +422,19 @@ export function createInteractiveGenerationDialogue(
           continue;
         }
         if (actionResult.type === 'continue') continue;
+        if (
+          actionResult.result.type === 'commit' &&
+          !actionResult.result.includeChangeset &&
+          changeset !== undefined
+        ) {
+          const reason = await prompts.select({
+            message: 'Why does this commit need no changeset?',
+            options: CHANGESET_SKIP_REASONS.map(value => ({ value, label: value })),
+          });
+          if (prompts.isCancel(reason) || !CHANGESET_SKIP_REASONS.some(value => value === reason))
+            continue;
+          actionResult.result.changesetReason = reason as ChangesetSkipReason;
+        }
         return actionResult.result;
       }
     },

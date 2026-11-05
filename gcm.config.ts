@@ -54,6 +54,7 @@ export const CONFIG = {
   ),
   LOG_LEVEL: stringOrDefault(process.env.GCM_LOG_LEVEL, 'info'),
   DEBUG_API: process.env.GCM_DEBUG_API === 'true',
+  AUTO_CHANGESET: process.env.GCM_AUTO_CHANGESET === 'true',
   MAX_RETRIES: retry.maxRetries,
   RETRY_BASE_MS: retry.retryBaseMs,
   RETRY_MAX_MS: retry.retryMaxMs,

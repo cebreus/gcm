@@ -14,6 +14,7 @@ const DEFAULT_CONFIG = {
   freeLlmApiUrl: 'http://127.0.0.1:3001',
   freeLlmApiModel: 'auto',
   freeLlmApiToken: null,
+  autoChangeset: false,
 };
 
 async function readConfig(env: Record<string, string>): Promise<unknown> {
@@ -21,7 +22,7 @@ async function readConfig(env: Record<string, string>): Promise<unknown> {
     cmd: [
       'bun',
       '-e',
-      "import { CONFIG } from './gcm.config.ts'; console.log(JSON.stringify({ model: CONFIG.MODEL, temp: CONFIG.TEMP, maxBuffer: CONFIG.CHILD_PROCESS_MAX_BUFFER, maxHunks: CONFIG.MAX_HUNKS, perFileBuffer: CONFIG.PER_FILE_BUFFER, tokenRatio: CONFIG.TOKEN_BYTES_RATIO, maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS, retries: CONFIG.MAX_RETRIES, retryBase: CONFIG.RETRY_BASE_MS, retryMax: CONFIG.RETRY_MAX_MS, freeLlmApiUrl: CONFIG.FREELLMAPI_URL, freeLlmApiModel: CONFIG.FREELLMAPI_MODEL, freeLlmApiToken: CONFIG.FREELLMAPI_TOKEN ?? null }));",
+      "import { CONFIG } from './gcm.config.ts'; console.log(JSON.stringify({ model: CONFIG.MODEL, temp: CONFIG.TEMP, maxBuffer: CONFIG.CHILD_PROCESS_MAX_BUFFER, maxHunks: CONFIG.MAX_HUNKS, perFileBuffer: CONFIG.PER_FILE_BUFFER, tokenRatio: CONFIG.TOKEN_BYTES_RATIO, maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS, retries: CONFIG.MAX_RETRIES, retryBase: CONFIG.RETRY_BASE_MS, retryMax: CONFIG.RETRY_MAX_MS, freeLlmApiUrl: CONFIG.FREELLMAPI_URL, freeLlmApiModel: CONFIG.FREELLMAPI_MODEL, freeLlmApiToken: CONFIG.FREELLMAPI_TOKEN ?? null, autoChangeset: CONFIG.AUTO_CHANGESET }));",
     ],
     cwd: process.cwd(),
     env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', ...env },
@@ -60,6 +61,15 @@ test('config: reads the short GCM names', async () => {
     model: 'test-model',
     temp: 0.25,
   });
+});
+
+test('config: automatic changesets require the literal true opt-in', async function () {
+  await expect(readConfig({})).resolves.toEqual(DEFAULT_CONFIG);
+  await expect(readConfig({ GCM_AUTO_CHANGESET: 'true' })).resolves.toEqual({
+    ...DEFAULT_CONFIG,
+    autoChangeset: true,
+  });
+  await expect(readConfig({ GCM_AUTO_CHANGESET: '1' })).resolves.toEqual(DEFAULT_CONFIG);
 });
 
 test('config: reads provider-neutral retry names only', async () => {

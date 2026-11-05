@@ -27,6 +27,12 @@ does not read Git state, generate text, load an LM Studio model or save a sessio
 
 ## Staged changes: `gcm`
 
+With `GCM_AUTO_CHANGESET=true`, interactive staged commits also prepare a proposed
+Changeset from the same complete diff. Review offers committing with the note, or
+without it after choosing an allowed skip reason. Only the selected note is created
+and staged; the refreshed index must equal the reviewed snapshot plus that note.
+Uncertain evidence blocks note creation. Non-interactive and history flows are unchanged.
+
 ```mermaid
 flowchart TD
   A[Run gcm] --> B{Arguments, repository<br/>and conflicts valid?}

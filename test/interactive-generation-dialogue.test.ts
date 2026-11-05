@@ -108,6 +108,31 @@ function createScriptedDialogue(
 }
 
 describe('interactive generation dialogue', () => {
+  test('requires an explicit allowed reason to commit without a changeset', async function () {
+    const { dialogue } = createScriptedDialogue(['commit', 'test-only']);
+    const result = await dialogue.review({
+      state: createState(),
+      commitMessage: 'test: cover models',
+      commitCapability: createCapability(),
+      changeset: null,
+    });
+    expect(result.changesetReason).toBe('test-only');
+    expect(result.includeChangeset).toBeUndefined();
+  });
+  test('offers explicit changeset choices and returns the selected choice', async function () {
+    const { dialogue, selectOptions } = createScriptedDialogue(['commit-with-changeset', 'cancel']);
+    const result = await dialogue.review({
+      state: createState(),
+      commitMessage: 'fix: keep model',
+      commitCapability: createCapability(),
+      changeset: '---\n"gcm": patch\n---\n\nKeep the selected model.\n',
+    });
+    expect(selectOptions[0]?.slice(0, 2)).toEqual([
+      { value: 'commit-with-changeset', label: 'Commit with changeset' },
+      { value: 'commit', label: 'Commit without changeset' },
+    ]);
+    expect(result.includeChangeset).toBe(true);
+  });
   test('offers retry or another model after generation fails', async () => {
     const retry = createScriptedDialogue(['retry']);
     await expect(retry.dialogue.recoverGeneration('Provider unavailable')).resolves.toBe('retry');
