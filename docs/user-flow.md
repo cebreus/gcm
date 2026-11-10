@@ -52,7 +52,7 @@ flowchart TD
   F -- Yes --> F2{Git operation<br/>in progress?}
   F2 -- Yes --> R[Keep snapshot;<br/>disable Git write]
   F2 -- No --> G[Write capability available]
-  R --> G2[Configure unless model<br/>and mode are both fixed]
+  R --> G2[Configure unless model<br/>is fixed]
   G --> G2
   G2 --> H{Multiple atomic scopes?}
   H -- Yes --> I[Show split proposal;<br/>continue or cancel]
@@ -85,7 +85,7 @@ flowchart TD
   C2 -- Yes --> C3{Conflicts absent and<br/>snapshot verifiable?}
   C3 -- No --> X
   C3 -- Yes --> C4{Inspect Git capability}
-  C4 -- Amend HEAD or amend! --> D[Configure unless model<br/>and mode are both fixed]
+  C4 -- Amend HEAD or amend! --> D[Configure unless model<br/>is fixed]
   C4 -- In-progress operation,<br/>unreachable or unresolved target,<br/>detached HEAD or staged index --> R[Disable Git write]
   R --> D
   D --> E[Generate with active provider]
@@ -107,12 +107,12 @@ flowchart TD
 ```
 
 The exact write-action matrix and edge cases remain in the
-[Commit Safety](../README.md#commit-safety) table.
+[Git safety](../README.md#git-safety) list.
 
 Immediately before a selected write, the action service re-reads repository
 state, conflicts, the index snapshot and capability. Target actions also
 revalidate HEAD and the resolved target. The delegated Git write boundary then
-checks the index and HEAD/target once more. Session model and mode are saved
+checks the index and HEAD/target once more. Session provider and model are saved
 only after that Git action succeeds.
 
 ## Commit range: `gcm --commit-range <range>`

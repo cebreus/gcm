@@ -2,7 +2,7 @@
 
 Generate Conventional Commit messages from staged changes or existing commits with Gemini, OpenAI-compatible APIs, or LM Studio.
 
-Default: GCM generate commit message. `full` mode also generate branch name, PR title, PR description. Review every result before any Git write.
+Review every result before any Git write.
 
 ## Requirements
 
@@ -58,7 +58,7 @@ gcm --hint 'emphasize migration'
 
 From source checkout, replace `gcm` with `bun run ./gcm.ts`.
 
-Interactive flow lets you configure model and mode, regenerate, add hint, switch models, edit or copy message, select available Git action. Selected model and mode saved only after successful Git action.
+Interactive flow lets you configure provider and model, regenerate, add hint, switch models, edit or copy message, select available Git action. Selected provider and model saved only after successful Git action.
 
 Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Supported values: `gemini`, `freellmapi`, `lm-studio`.
 
@@ -117,7 +117,7 @@ Analysed diff is sent to the selected provider. LM Studio stays on the configure
 
 ## Configuration
 
-`GCM_MODEL`, `GCM_TEMP` only model/temperature names; legacy Gemini aliases not read. Invalid numeric values fall back safely.
+`GCM_MODEL`, `GCM_TEMP` only model/temperature names. Invalid or out-of-range numeric values stop GCM with an `Invalid <NAME>` error.
 
 | Variable                | Default                 | Purpose                                                |
 | ----------------------- | ----------------------- | ------------------------------------------------------ |
@@ -141,8 +141,6 @@ Analysed diff is sent to the selected provider. LM Studio stays on the configure
 | `GCM_MAX_RETRIES`       | `3`                     | Retries for transient provider failures.               |
 | `GCM_RETRY_BASE_MS`     | `1000`                  | Initial retry delay.                                   |
 | `GCM_RETRY_MAX_MS`      | `60000`                 | Maximum retry delay.                                   |
-
-Legacy `GCM_GEMINI_*` retry names remain fallback aliases.
 
 Set `GCM_AUTO_CHANGESET=true` to prepare a Changeset after generating an interactive
 staged commit message. Review the proposed note, then choose **Commit with changeset**

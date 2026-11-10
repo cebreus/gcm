@@ -1,6 +1,6 @@
 ## Project
 
-`gcm` generates conventional commits, PR titles, and branch names from `git diff` using Google Gemini.
+`gcm` generates Conventional Commit messages from staged changes or existing commits using Gemini, FreeLLMAPI, or LM Studio.
 Start every reply with `cebreus+gcm`.
 
 ## Stack
