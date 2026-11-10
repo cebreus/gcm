@@ -1,4 +1,5 @@
 import { WORKSPACE_PATH_PATTERN } from './scope-detector.js';
+import { stripTerminalControlSequences } from './utils.js';
 
 export function buildAtomicSplitProposal(
   stagedFiles: readonly string[],
@@ -55,10 +56,6 @@ export function detectAtomicGroup(file: string): string {
   if (file.startsWith('.github/')) return 'ci';
   if (/^(infra|scripts)\//.test(file)) return 'tooling';
   if (/^test\//.test(file) || /\.test\./.test(file)) return 'tests';
-  if (/^src\/services\//.test(file)) return 'services';
-  if (/^src\/models\//.test(file)) return 'models';
-  if (/^src\/.*runner/.test(file) || file.includes('runner.ts')) return 'runner';
-  if (/^src\/.*scope-detector/.test(file) || file.includes('scope-detector.ts')) return 'scope';
   const topLevel = file.split('/')[0];
   if (topLevel && topLevel !== file) return topLevel;
   return 'core';
@@ -88,10 +85,6 @@ function orderAtomicGroups(groups: Map<string, string[]>): Array<[string, string
     ci: 20,
     tooling: 30,
     core: 40,
-    services: 50,
-    models: 60,
-    runner: 70,
-    scope: 80,
     tests: 90,
     'docs-formatting': 100,
   };
@@ -145,4 +138,3 @@ function escapeAnsiCString(value: string): string {
       character => `\\x${character.charCodeAt(0).toString(16).padStart(2, '0')}`,
     );
 }
-import { stripTerminalControlSequences } from './utils.js';

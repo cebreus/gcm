@@ -33,12 +33,12 @@ test('atomic commit planner: classifies paths in rule precedence order', () => {
     ['test/README.md', 'docs-formatting'],
     ['test/runner.test.ts', 'tests'],
     ['src/services/README.md', 'docs-formatting'],
-    ['src/services/api.ts', 'services'],
-    ['src/models/user.ts', 'models'],
+    ['src/services/api.ts', 'src'],
+    ['src/models/user.ts', 'src'],
     ['src/runner.test.ts', 'tests'],
-    ['src/runner.ts', 'runner'],
+    ['src/runner.ts', 'src'],
     ['src/scope-detector.test.ts', 'tests'],
-    ['src/scope-detector.ts', 'scope'],
+    ['src/scope-detector.ts', 'src'],
     ['src/feature.ts', 'src'],
     ['LICENSE', 'core'],
   ];
@@ -56,13 +56,12 @@ test('atomic commit planner: groups matching files and orders groups determinist
   ]);
 
   expect(proposal).toContain(
-    'Found 5 changed file(s) in the worktree, proposed 4 atomic group(s).',
+    'Found 5 changed file(s) in the worktree, proposed 3 atomic group(s).',
   );
   expect(proposal).toContain('Commit 1: deps');
-  expect(proposal).toContain('Commit 2: services');
-  expect(proposal).toContain('Commit 3: runner');
-  expect(proposal).toContain('Commit 4: docs-formatting');
-  expect(proposal).toContain('- src/services/api.ts\n- src/services/auth.ts');
+  expect(proposal).toContain('Commit 2: src');
+  expect(proposal).toContain('Commit 3: docs-formatting');
+  expect(proposal).toContain('- src/runner.ts\n- src/services/api.ts\n- src/services/auth.ts');
 });
 
 test('atomic commit planner: renders a complete deterministic proposal', () => {
@@ -74,7 +73,7 @@ test('atomic commit planner: renders a complete deterministic proposal', () => {
     'src/services/auth.ts',
   ]);
 
-  expect(proposal).toBe(`Found 5 changed file(s) in the worktree, proposed 4 atomic group(s).
+  expect(proposal).toBe(`Found 5 changed file(s) in the worktree, proposed 3 atomic group(s).
 
 Rules applied: lockfiles grouped with dependency manifests; docs/formatting split from functional changes.
 
@@ -89,26 +88,18 @@ git add -- ':(literal)package.json'
 git commit -m $'build(deps): split package.json updates' \\
   -m $'- align dependency metadata and lockfile state'
 
-Commit 2: services
+Commit 2: src
+- src/runner.ts
 - src/services/api.ts
 - src/services/auth.ts
 
 Suggested commands:
 git reset
-git add -- ':(literal)src/services/api.ts' ':(literal)src/services/auth.ts'
-git commit -m $'refactor(services): split changes updates' \\
-  -m $'- group services changes into one atomic unit'
+git add -- ':(literal)src/runner.ts' ':(literal)src/services/api.ts' ':(literal)src/services/auth.ts'
+git commit -m $'refactor(src): split changes updates' \\
+  -m $'- group src changes into one atomic unit'
 
-Commit 3: runner
-- src/runner.ts
-
-Suggested commands:
-git reset
-git add -- ':(literal)src/runner.ts'
-git commit -m $'refactor(runner): split runner.ts updates' \\
-  -m $'- isolate src/runner.ts changes into one atomic unit'
-
-Commit 4: docs-formatting
+Commit 3: docs-formatting
 - docs/guide.md
 
 Suggested commands:
@@ -118,7 +109,7 @@ git commit -m $'docs(docs): split guide.md updates' \\
   -m $'- separate documentation and formatting-only changes'`);
 });
 
-test('atomic commit planner: classifies alternate dependency, documentation, config, and runner paths', () => {
+test('atomic commit planner: classifies alternate dependency, documentation, and config paths', () => {
   const cases: Array<[string, string]> = [
     ['bun.lock', 'deps'],
     ['bun.lockb', 'deps'],
@@ -136,24 +127,22 @@ test('atomic commit planner: classifies alternate dependency, documentation, con
     ['.eslintrc', 'docs-formatting'],
     ['.eslintrc.cjs', 'docs-formatting'],
     ['eslint.config.mjs', 'docs-formatting'],
-    ['docs/runner.ts', 'runner'],
-    ['docs/scope-detector.ts', 'scope'],
+    ['docs/runner.ts', 'docs'],
+    ['docs/scope-detector.ts', 'docs'],
   ];
 
   for (const [file, group] of cases) expect(detectAtomicGroup(file)).toBe(group);
 });
 
-test('atomic commit planner: uses single-file and multi-file commit wording', () => {
+test('atomic commit planner: uses multi-file commit wording', () => {
   const proposal = buildAtomicSplitProposal([
     'src/runner.ts',
     'src/services/api.ts',
     'src/services/auth.ts',
   ]);
 
-  expect(proposal).toContain("git commit -m $'refactor(runner): split runner.ts updates'");
-  expect(proposal).toContain("-m $'- isolate src/runner.ts changes into one atomic unit'");
-  expect(proposal).toContain("git commit -m $'refactor(services): split changes updates'");
-  expect(proposal).toContain("-m $'- group services changes into one atomic unit'");
+  expect(proposal).toContain("git commit -m $'refactor(src): split changes updates'");
+  expect(proposal).toContain("-m $'- group src changes into one atomic unit'");
 });
 
 test('atomic commit planner: safely quotes shell paths', () => {
