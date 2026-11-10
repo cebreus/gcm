@@ -34,7 +34,10 @@ function escapeTclDoubleQuoted(text: string): string {
     .replaceAll('"', '\\"');
 }
 
-function controlledEnvironment(apiKey?: string): Record<string, string> {
+function controlledEnvironment(
+  apiKey?: string,
+  extra: Record<string, string> = {},
+): Record<string, string> {
   return {
     PATH: Bun.env.PATH ?? '/usr/bin:/bin',
     HOME: tempRoot,
@@ -43,6 +46,7 @@ function controlledEnvironment(apiKey?: string): Record<string, string> {
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null',
     GOOGLE_GEMINI_API_KEY: apiKey ?? '',
+    ...extra,
   };
 }
 
@@ -50,11 +54,12 @@ async function runSubprocess(
   command: string[],
   cwd: string,
   apiKey?: string,
+  extraEnvironment?: Record<string, string>,
 ): Promise<BinaryResult> {
   const child = Bun.spawn({
     cmd: command,
     cwd,
-    env: controlledEnvironment(apiKey),
+    env: controlledEnvironment(apiKey, extraEnvironment),
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -271,6 +276,16 @@ test.skipIf(expectPath === null)(
     expect(subjects).toEqual([`amend! ${target}`, 'feat: later work', 'feat: original subject']);
   },
 );
+
+test('binary contract: an invalid configuration value is reported without a stack trace', async () => {
+  const result = await runSubprocess([binaryPath, '--version'], gitRepository, undefined, {
+    GCM_MAX_HUNKS: 'abc',
+  });
+
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe('');
+  expect(result.stderr).toBe('gcm: Invalid GCM_MAX_HUNKS\n');
+});
 
 test('binary contract: reports its bundled package version outside the repository', async () => {
   const result = await runBinary(['--version'], nonRepository);

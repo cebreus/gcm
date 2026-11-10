@@ -331,8 +331,7 @@ export async function executeCommitMessageGeneration(
     }
     // Checked before any provider is built, because GCM_MODEL becomes a
     // provider's default model and would otherwise surface as "unavailable".
-    // --help never resolves a model, so it stays usable; a throw in gcm.config
-    // would not, since that runs before the entrypoint can report it.
+    // --help never resolves a model, so it stays usable.
     if (!parsedArgs.help && !isLanguageModelName(CONFIG.MODEL)) {
       cancel('Error: Invalid GCM_MODEL.');
       process.exitCode = 1;
