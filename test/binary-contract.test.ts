@@ -15,6 +15,7 @@ let excludeRepository = '';
 let conflictRepository = '';
 let rewordRepository = '';
 let providerPreload = '';
+const flowRepositories: string[] = [];
 
 interface BinaryResult {
   exitCode: number;
@@ -107,6 +108,37 @@ async function runBinary(
     stdout: clean(result.stdout),
     stderr: clean(result.stderr),
   };
+}
+
+async function runBinaryWithProvider(args: string[], cwd: string): Promise<BinaryResult> {
+  const result = await runSubprocess(
+    ['bun', '--preload', providerPreload, binaryPath, '--model', 'gemini-3.7-flash', ...args],
+    cwd,
+    'fake-key',
+  );
+  return {
+    exitCode: result.exitCode,
+    stdout: clean(result.stdout),
+    stderr: clean(result.stderr),
+  };
+}
+
+async function createCommittedRepository(): Promise<string> {
+  const repository = await mkdtemp(`${tempRoot}/gcm-binary-contract-flow-`);
+  flowRepositories.push(repository);
+  await runCommand(['git', 'init', '--quiet', '--initial-branch=main'], repository);
+  await runCommand(['git', 'config', 'user.email', 'test@gcm.local'], repository);
+  await runCommand(['git', 'config', 'user.name', 'GCM Test'], repository);
+  await Bun.write(`${repository}/file.txt`, 'first\n');
+  await runCommand(['git', 'add', 'file.txt'], repository);
+  await runCommand(['git', 'commit', '-qm', 'feat: first subject'], repository);
+  await Bun.write(`${repository}/file.txt`, 'second\n');
+  await runCommand(['git', 'commit', '-qam', 'feat: second subject'], repository);
+  return repository;
+}
+
+async function readSubjects(repository: string): Promise<string[]> {
+  return (await runCommand(['git', 'log', '--format=%s'], repository)).stdout.trim().split('\n');
 }
 
 async function runInteractiveBinary(args: string[], cwd: string): Promise<BinaryResult> {
@@ -246,6 +278,7 @@ afterAll(async () => {
     rm(excludeRepository, { recursive: true, force: true }),
     rm(conflictRepository, { recursive: true, force: true }),
     rm(rewordRepository, { recursive: true, force: true }),
+    ...flowRepositories.map(repository => rm(repository, { recursive: true, force: true })),
   ]);
 });
 
@@ -276,6 +309,64 @@ test.skipIf(expectPath === null)(
     expect(subjects).toEqual([`amend! ${target}`, 'feat: later work', 'feat: original subject']);
   },
 );
+
+test('binary contract: non-interactive generation stays read-only without --apply', async () => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/file.txt`, 'third\n');
+  await runCommand(['git', 'add', 'file.txt'], repository);
+
+  const result = await runBinaryWithProvider(['--non-interactive'], repository);
+
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain('fix: corrected message');
+  expect(await readSubjects(repository)).toEqual(['feat: second subject', 'feat: first subject']);
+});
+
+test('binary contract: --apply commits the staged changes with the generated message', async () => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/file.txt`, 'third\n');
+  await runCommand(['git', 'add', 'file.txt'], repository);
+
+  const result = await runBinaryWithProvider(['--non-interactive', '--apply'], repository);
+
+  expect(result.exitCode).toBe(0);
+  expect(await readSubjects(repository)).toEqual([
+    'fix: corrected message',
+    'feat: second subject',
+    'feat: first subject',
+  ]);
+  expect((await runCommand(['git', 'status', '--porcelain'], repository)).stdout).toBe('');
+});
+
+test('binary contract: --commit-range --apply adds one amend! per target and skips them on a re-run', async () => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/file.txt`, 'third\n');
+  await runCommand(['git', 'commit', '-qam', 'feat: third subject'], repository);
+  const [third, second, first] = (
+    await runCommand(['git', 'log', '--format=%H'], repository)
+  ).stdout
+    .trim()
+    .split('\n');
+  const args = ['--commit-range', `${first}..HEAD`, '--non-interactive', '--apply'];
+  const expected = [
+    `amend! ${third}`,
+    `amend! ${second}`,
+    'feat: third subject',
+    'feat: second subject',
+    'feat: first subject',
+  ];
+
+  const result = await runBinaryWithProvider(args, repository);
+
+  expect(result.exitCode).toBe(0);
+  expect(await readSubjects(repository)).toEqual(expected);
+
+  const repeated = await runBinaryWithProvider(args, repository);
+
+  expect(repeated.exitCode).toBe(0);
+  expect(repeated.stdout).toContain('0 completed, 2 skipped');
+  expect(await readSubjects(repository)).toEqual(expected);
+});
 
 test('binary contract: an invalid configuration value is reported without a stack trace', async () => {
   const result = await runSubprocess([binaryPath, '--version'], gitRepository, undefined, {
