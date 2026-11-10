@@ -53,27 +53,6 @@ test('keeps repository facts when Git history fails', async () => {
   });
 });
 
-test('recovers recent history when the longer history read fails', async () => {
-  const commands: string[][] = [];
-  const result = await readCommitContextFacts(['src/a.ts'], {
-    runGit: async function (args) {
-      commands.push(args);
-      if (commands.length === 1) throw new Error('transient git log failure');
-      return gitResult('feat: recovered');
-    },
-    fileExists: async function () {
-      return false;
-    },
-  });
-
-  expect(commands).toEqual([
-    ['log', '-n', '50', '--pretty=format:%s', '--', ':(literal)src/a.ts'],
-    ['log', '-n', '20', '--pretty=format:%s', '--', ':(literal)src/a.ts'],
-  ]);
-  expect(result.scopeHistorySubjects).toEqual([]);
-  expect(result.recentSubjects).toEqual(['feat: recovered']);
-});
-
 test.each([
   ['lerna', ['lerna.json']],
   ['pnpm workspace', ['pnpm-workspace.yaml']],

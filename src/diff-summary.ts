@@ -1,8 +1,7 @@
-import { pushHunkToTop } from './utils.js';
+import { pushHunkToTop, truncateUtf8 } from './utils.js';
 import type { Hunk } from './utils.js';
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
 
 export interface DiffFileFacts {
   file: string;
@@ -26,14 +25,6 @@ export interface SummarizeDiffResult {
 interface HunkAccumulator {
   topHunks: Hunk[];
   maxHunks: number;
-}
-
-function truncateUtf8(text: string, maxBytes: number): string {
-  const bytes = encoder.encode(text);
-  if (bytes.byteLength <= maxBytes) return text;
-  let end = maxBytes;
-  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
-  return decoder.decode(bytes.subarray(0, end));
 }
 
 function appendWithinLimit(text: string, suffix: string, maxBytes: number): string {

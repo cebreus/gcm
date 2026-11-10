@@ -1,9 +1,10 @@
 import { sanitizeTerminalText } from './utils.js';
+import type { ModelSpec } from './model-registry.js';
 
 export async function runModelsListCommand(options: {
   providerLabel: string;
   readinessError?: string;
-  models(): Promise<import('./model-registry.js').ModelSpec[]>;
+  models(): Promise<ModelSpec[]>;
   output: {
     cancel(message: string): void;
     note(message: string): void;

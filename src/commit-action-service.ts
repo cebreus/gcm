@@ -1,4 +1,5 @@
 import type { Logger } from './logger.js';
+import { commitActionRefusal } from './services/git-service.js';
 import type {
   CommitTarget,
   CommitWriteSafety,
@@ -36,18 +37,12 @@ export function isCommitActionRefusal(error: unknown): error is Error {
   return error instanceof Error && error.name === 'CommitActionRefusal';
 }
 
-function refusal(message: string): Error {
-  const error = new Error(message);
-  error.name = 'CommitActionRefusal';
-  return error;
-}
-
 function indexIndeterminateReason(detail?: string): string {
   const suffix = detail ? ` (${detail})` : '';
   return `Cannot safely determine the staged changes${suffix}. No commit action was taken. Resolve the Git state, regenerate the message, then try again.`;
 }
 
-function indexEntryKey(entry: IndexEntry): string {
+export function indexEntryKey(entry: IndexEntry): string {
   return `${entry.mode}:${entry.objectId}`;
 }
 
@@ -326,32 +321,35 @@ export function createCommitActionService(params: {
     capability: CommitCapability,
     message: string,
   ): Promise<{ summary: string }> {
-    if (!capability.allowed) throw refusal(capability.reason ?? 'Commit action is unavailable.');
+    if (!capability.allowed)
+      throw commitActionRefusal(capability.reason ?? 'Commit action is unavailable.');
     if (!capability.snapshot)
-      throw refusal(indexIndeterminateReason('the original staged snapshot is missing'));
+      throw commitActionRefusal(
+        indexIndeterminateReason('the original staged snapshot is missing'),
+      );
     if (capability.excludedPaths?.length && !capability.exclusionsAcknowledged) {
-      throw refusal(
+      throw commitActionRefusal(
         `Explicit confirmation is required before committing excluded staged paths. ${describeExcludedPaths(capability.excludedPaths)}`,
       );
     }
 
     const revalidated = await inspect(capability.target?.hash ?? null);
     if (!revalidated.repositoryState || !revalidated.capability.snapshot) {
-      throw refusal(revalidated.capability.reason ?? indexIndeterminateReason());
+      throw commitActionRefusal(revalidated.capability.reason ?? indexIndeterminateReason());
     }
     if (revalidated.capability.snapshot.tree !== capability.snapshot.tree) {
-      throw refusal(
+      throw commitActionRefusal(
         describeIndexDrift(capability.snapshot.entries, revalidated.capability.snapshot.entries),
       );
     }
     if (!revalidated.capability.allowed) {
-      throw refusal(
+      throw commitActionRefusal(
         revalidated.capability.reason ??
           'The repository changed and the action is no longer available.',
       );
     }
     if (revalidated.capability.mode !== capability.mode) {
-      throw refusal(
+      throw commitActionRefusal(
         `The repository changed since generation: the action would now be a ${revalidated.capability.mode}, not a ${capability.mode}. Run again.`,
       );
     }
@@ -361,7 +359,7 @@ export function createCommitActionService(params: {
         revalidated.capability.target.hash !== capability.target.hash ||
         revalidated.capability.target.headHash !== capability.target.headHash)
     ) {
-      throw refusal(
+      throw commitActionRefusal(
         'HEAD or target commit moved since generation. Regenerate the message, then try again.',
       );
     }

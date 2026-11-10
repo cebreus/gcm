@@ -1,7 +1,20 @@
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 export function estimateTokenCount(text: string, tokenBytesRatio: number): number {
   return Math.ceil(encoder.encode(text).length / tokenBytesRatio);
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function truncateUtf8(text: string, maxBytes: number): string {
+  const bytes = encoder.encode(text);
+  if (bytes.byteLength <= maxBytes) return text;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
+  return decoder.decode(bytes.subarray(0, end));
 }
 
 export interface Hunk {

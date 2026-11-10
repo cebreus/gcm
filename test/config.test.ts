@@ -72,31 +72,18 @@ test('config: automatic changesets require the literal true opt-in', async funct
   await expect(readConfig({ GCM_AUTO_CHANGESET: '1' })).resolves.toEqual(DEFAULT_CONFIG);
 });
 
-test('config: reads provider-neutral retry names only', async () => {
+test('config: reads retry settings', async () => {
   await expect(
     readConfig({
       GCM_MAX_RETRIES: '2',
       GCM_RETRY_BASE_MS: '20',
       GCM_RETRY_MAX_MS: '200',
-      GCM_GEMINI_MAX_RETRIES: '4',
-      GCM_GEMINI_RETRY_BASE_MS: '40',
-      GCM_GEMINI_RETRY_MAX_MS: '400',
     }),
   ).resolves.toEqual({
     ...DEFAULT_CONFIG,
     retries: 2,
     retryBase: 20,
     retryMax: 200,
-  });
-
-  await expect(
-    readConfig({
-      GCM_GEMINI_MAX_RETRIES: '4',
-      GCM_GEMINI_RETRY_BASE_MS: '40',
-      GCM_GEMINI_RETRY_MAX_MS: '400',
-    }),
-  ).resolves.toEqual({
-    ...DEFAULT_CONFIG,
   });
 });
 

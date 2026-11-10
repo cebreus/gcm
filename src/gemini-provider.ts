@@ -52,13 +52,11 @@ function selectCompatibleModels(discovered: ModelSpec[]): ModelSpec[] {
     if (UNSUPPORTED_MODEL_PATTERN.test(model.name)) continue;
     const validationError = getModelSpecValidationError(model);
     if (validationError) {
-      throw createLanguageModelApiError(validationError, { category: 'data' });
+      throw createLanguageModelApiError(validationError);
     }
     compatible.push(model);
   }
-  return requireDistinctModels(compatible, 'Gemini', message =>
-    createLanguageModelApiError(message, { category: 'data' }),
-  );
+  return requireDistinctModels(compatible, 'Gemini', createLanguageModelApiError);
 }
 
 export function createGeminiProvider(options: {

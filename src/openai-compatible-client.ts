@@ -3,15 +3,11 @@ import {
   type LanguageModelGenerateParams,
   type LanguageModelResponse,
 } from './language-model-service.js';
-import { redactSensitiveTextForPrompt, sanitizeTerminalText } from './utils.js';
+import { isRecord, redactSensitiveTextForPrompt, sanitizeTerminalText } from './utils.js';
 import { CONFIG } from '../gcm.config.js';
 import { requestProviderText, type ProviderFetch } from './provider-http.js';
 
 const MAX_ERROR_SNIPPET_BYTES = 4_096;
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function readNonNegativeInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null;
@@ -25,7 +21,7 @@ export function isHeaderSafeToken(token: string): boolean {
   return /^[\x21-\x7E]+$/.test(token);
 }
 
-export function sanitizeLanguageModelErrorText(text: string, token?: string): string {
+function sanitizeLanguageModelErrorText(text: string, token?: string): string {
   return sanitizeTerminalText(redactToken(text, token))
     .replace(/(["'](?:password|token|api[_-]?key)["']\s*:\s*)["'][^"']*["']/gi, '$1"[REDACTED]"')
     .replace(/\b(password|token|api[_-]?key)\s*[:=]\s*[^\s,}&]+/gi, '$1=[REDACTED]');

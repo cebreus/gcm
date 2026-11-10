@@ -36,20 +36,11 @@ export async function readCommitContextFacts(
     '--pretty=format:%s',
     '--',
     ...changedFiles.map(literalPathspec),
-  ]).then(async history => {
+  ]).then(history => {
     if (history !== null) {
       return { scopeHistorySubjects: history, recentSubjects: history.slice(0, 20) };
     }
-    const recentSubjects =
-      (await readHistory(dependencies, [
-        'log',
-        '-n',
-        '20',
-        '--pretty=format:%s',
-        '--',
-        ...changedFiles.map(literalPathspec),
-      ])) ?? [];
-    return { scopeHistorySubjects: [], recentSubjects };
+    return { scopeHistorySubjects: [], recentSubjects: [] };
   });
   const [history, hasLerna, hasPnpmWorkspace, hasPackagesDir, hasAppsDir] = await Promise.all([
     historyPromise,

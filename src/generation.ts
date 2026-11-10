@@ -15,9 +15,8 @@ import {
 import type { Logger, LogMetadata } from './logger.js';
 import { isLanguageModelApiError, type ModelSpec } from './language-model-service.js';
 import { resolveTokenBudget } from './model-registry.js';
-import { isRecord } from './openai-compatible-client.js';
 import { parseLanguageModelOutput } from './parser.js';
-import { estimateTokenCount } from './utils.js';
+import { estimateTokenCount, isRecord } from './utils.js';
 import type { CommitContextHints } from './scope-detector.js';
 import type { ContextService } from './services/context-service.js';
 import type { LanguageModelService } from './language-model-service.js';

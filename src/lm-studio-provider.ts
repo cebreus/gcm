@@ -14,10 +14,10 @@ import { parseProviderBaseUrl } from './provider-http.js';
 import {
   generateOpenAiCompatibleChat,
   isHeaderSafeToken,
-  isRecord,
   rejectUnsafeModelMetadata,
   requestLanguageModelJson,
 } from './openai-compatible-client.js';
+import { isRecord } from './utils.js';
 
 const PREFERRED_LM_STUDIO_MODEL = 'gemma-4-e4b-it-mlx';
 

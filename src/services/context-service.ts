@@ -1,4 +1,4 @@
-import { estimateTokenCount } from '../utils.js';
+import { estimateTokenCount, truncateUtf8 } from '../utils.js';
 import type { Logger } from '../logger.js';
 
 export interface ContextService {
@@ -92,18 +92,7 @@ function truncateToTokenBudget(
   tokenBytesRatio: number,
 ): string {
   const maxBytes = Math.max(0, Math.floor(maxTokens * tokenBytesRatio));
-  const encoded = new TextEncoder().encode(content);
-  if (encoded.byteLength <= maxBytes) return content;
-  const decoder = new TextDecoder('utf-8', { fatal: true });
-  let end = maxBytes;
-  while (end > 0) {
-    try {
-      return decoder.decode(encoded.slice(0, end));
-    } catch {
-      end -= 1;
-    }
-  }
-  return '';
+  return truncateUtf8(content, maxBytes);
 }
 
 function buildHardTruncatedContext(params: {

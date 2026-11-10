@@ -1,7 +1,7 @@
 import { redactSensitiveText, stripTerminalControlSequences } from './utils.js';
 import { stringOrDefault } from './config-values.js';
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LoggerConfig {
   LOG_LEVEL?: string;

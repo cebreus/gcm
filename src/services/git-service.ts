@@ -62,7 +62,7 @@ export interface GitService {
   getRepositoryState(logger: Logger | null): Promise<RepositoryState>;
 }
 
-export type GitCommandRunner = typeof spawnGitStream;
+type GitCommandRunner = typeof spawnGitStream;
 
 interface GitServiceOptions {
   gitCommandRunner?: GitCommandRunner;
@@ -330,7 +330,7 @@ async function rollBackUnsafeAmendCommit(
     }
     await runGit(['reset', '--soft', previousHead]);
   } catch {
-    throw commitSafetyRefusal(
+    throw commitActionRefusal(
       `The unsafe amend! commit ${createdHead} could not be rolled back automatically. ` +
         'Inspect HEAD and use git reset --soft only after confirming the target.',
     );
@@ -345,11 +345,11 @@ async function assertAmendCommitIsEmpty(runGit: GitCommandRunner): Promise<void>
     ]);
     if (committed.text.trim() === parent.text.trim()) return;
   } catch {
-    throw commitSafetyRefusal(
+    throw commitActionRefusal(
       'The amend! commit was created, but its tree could not be verified. Batch processing must stop.',
     );
   }
-  throw commitSafetyRefusal(
+  throw commitActionRefusal(
     'The amend! commit contains file changes introduced by a Git hook. Batch processing must stop.',
   );
 }
@@ -380,7 +380,7 @@ async function warnIfCommittedTreeChanged(
   }
 }
 
-function commitSafetyRefusal(message: string): Error {
+export function commitActionRefusal(message: string): Error {
   const error = new Error(message);
   error.name = 'CommitActionRefusal';
   return error;
@@ -394,14 +394,14 @@ async function assertCommitWriteSafety(
   if (!safety) return;
   const tree = await getIndexTree(runGit, logger);
   if (tree !== safety.snapshot.tree) {
-    throw commitSafetyRefusal(
+    throw commitActionRefusal(
       'Staged changes changed before the commit could be written. Regenerate the message, then try again.',
     );
   }
   if (!safety.target) return;
   const target = await inspectCommitTarget(runGit, safety.target.hash, logger);
   if (target.hash !== safety.target.hash || target.headHash !== safety.target.headHash) {
-    throw commitSafetyRefusal(
+    throw commitActionRefusal(
       'HEAD or target commit moved before the commit could be written. Regenerate the message, then try again.',
     );
   }

@@ -8,10 +8,10 @@ import {
 import {
   generateOpenAiCompatibleChat,
   isHeaderSafeToken,
-  isRecord,
   rejectUnsafeModelMetadata,
   requestLanguageModelJson,
 } from './openai-compatible-client.js';
+import { isRecord } from './utils.js';
 import {
   collectSortedModels,
   readPositiveTokenCount,

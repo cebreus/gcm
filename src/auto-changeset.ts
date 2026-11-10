@@ -2,9 +2,17 @@
 import { lstat, open, realpath, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { literalPathspec, spawnGitStream } from './git-utils.js';
-import { isRecord } from './openai-compatible-client.js';
-import type { CommitActionService, CommitCapability } from './commit-action-service.js';
-import type { GitService, IndexSnapshot } from './services/git-service.js';
+import {
+  indexEntryKey,
+  type CommitActionService,
+  type CommitCapability,
+} from './commit-action-service.js';
+import { isRecord } from './utils.js';
+import {
+  commitActionRefusal,
+  type GitService,
+  type IndexSnapshot,
+} from './services/git-service.js';
 import type { Logger } from './logger.js';
 import type { LanguageModelResponse } from './language-model-service.js';
 
@@ -114,14 +122,12 @@ function isExpectedSnapshot(
   path: string,
   objectId: string,
 ): boolean {
-  const expected = new Map(
-    before.entries.map(entry => [entry.path, `${entry.mode}:${entry.objectId}`]),
-  );
+  const expected = new Map(before.entries.map(entry => [entry.path, indexEntryKey(entry)]));
   expected.set(path, `100644:${objectId}`);
   return (
     !before.entries.some(entry => entry.path === path) &&
     after.entries.length === expected.size &&
-    after.entries.every(entry => expected.get(entry.path) === `${entry.mode}:${entry.objectId}`)
+    after.entries.every(entry => expected.get(entry.path) === indexEntryKey(entry))
   );
 }
 
@@ -212,10 +218,9 @@ export async function commitWithChangeset(params: {
     return result;
   } catch (error) {
     if ((await readHead(draft.root)) !== head) {
-      const retained = new Error(
+      const retained = commitActionRefusal(
         `${String(error)} HEAD changed; generated changeset retained at ${path}. Verify the commit before continuing.`,
       );
-      retained.name = 'CommitActionRefusal';
       throw retained;
     }
     await removeOwnedChangeset({
