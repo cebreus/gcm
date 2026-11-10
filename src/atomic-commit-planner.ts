@@ -18,7 +18,7 @@ export function buildAtomicSplitProposal(
   let index = 0;
   for (const [scope, files] of orderedGroups) {
     index += 1;
-    const escapedFiles = files.map(file => escapeShellArg(`:(literal)${file}`)).join(' ');
+    const escapedFiles = files.map(file => escapeShellArg(`:(top,literal)${file}`)).join(' ');
     const commitSubject = buildSuggestedSplitCommitSubject(scope, files);
     const commitBodyBullet = buildSuggestedSplitCommitBody(scope, files);
     sections.push(

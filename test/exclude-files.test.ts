@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from '../src/cli';
@@ -129,14 +129,14 @@ test('exclude-files: excludes root and nested dist from staged and commit analys
   expect(staged?.excludedPaths).toEqual([]);
   expect(committed?.stagedFiles).toEqual(['src/app.ts']);
   expect(committed?.excludedPaths).toEqual([]);
-  expect(calls).toContainEqual(['diff', '--staged', '-w', '--', ':(literal)src/app.ts']);
+  expect(calls).toContainEqual(['diff', '--staged', '-w', '--', ':(top,literal)src/app.ts']);
   expect(calls).toContainEqual([
     'show',
     '--first-parent',
     '-w',
     'abc123',
     '--',
-    ':(literal)src/app.ts',
+    ':(top,literal)src/app.ts',
   ]);
 });
 
@@ -181,7 +181,7 @@ test('exclude-files: diff requests only include non-excluded paths', async () =>
 
   await service.retrieveStagedChanges(null, null, ['.env*']);
 
-  expect(calls).toContainEqual(['diff', '--staged', '-w', '--', ':(literal)src/app.ts']);
+  expect(calls).toContainEqual(['diff', '--staged', '-w', '--', ':(top,literal)src/app.ts']);
 });
 
 test('exclude-files: carries excluded staged paths alongside the analysed snapshot', async () => {
@@ -272,6 +272,7 @@ test('exclude-files: real GitService excludes Unicode paths and keeps newline pa
   const includedPath = 'notes\nnext.txt';
   try {
     await runGitInRepository(repository, ['init', '-q']);
+    await mkdir(join(repository, 'src'));
     await runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
     await runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
     await writeFile(join(repository, excludedPath), 'secret\n');
@@ -279,7 +280,7 @@ test('exclude-files: real GitService excludes Unicode paths and keeps newline pa
     await runGitInRepository(repository, ['add', '--', excludedPath, includedPath]);
 
     const service = createGitService({
-      gitCommandRunner: args => spawnGitStream(['-C', repository, ...args]),
+      gitCommandRunner: args => spawnGitStream(['-C', join(repository, 'src'), ...args]),
     });
     const staged = await service.retrieveStagedChanges(null, null, [excludedPath]);
 

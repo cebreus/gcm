@@ -177,7 +177,7 @@ export async function spawnGitStream(
 }
 
 export function literalPathspec(path: string): string {
-  return `:(literal)${path}`;
+  return `:(top,literal)${path}`;
 }
 
 export async function fileExists(path: string): Promise<boolean> {

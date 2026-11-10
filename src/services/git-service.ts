@@ -67,6 +67,7 @@ type GitCommandRunner = typeof spawnGitStream;
 
 interface GitServiceOptions {
   gitCommandRunner?: GitCommandRunner;
+  maxBytes?: number;
 }
 
 export interface RepositoryState {
@@ -110,7 +111,11 @@ function logNoChanges(logger: Logger | null, commitHash: string | null): void {
 }
 
 export function createGitService(opts: GitServiceOptions = {}): GitService {
-  const runGit: GitCommandRunner = opts.gitCommandRunner ?? spawnGitStream;
+  const runGit: GitCommandRunner =
+    opts.gitCommandRunner ??
+    function (args, options) {
+      return spawnGitStream(args, { ...options, maxBytes: opts.maxBytes });
+    };
   return {
     listCommitHashes: (range, logger = null) => listCommitHashes(runGit, range, logger),
     hasAmendment: (hash, logger = null) => hasAmendment(runGit, hash, logger),

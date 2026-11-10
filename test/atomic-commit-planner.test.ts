@@ -84,7 +84,7 @@ Commit 1: deps
 
 Suggested commands:
 git reset
-git add -- ':(literal)package.json'
+git add -- ':(top,literal)package.json'
 git commit -m $'build(deps): split package.json updates' \\
   -m $'- align dependency metadata and lockfile state'
 
@@ -95,7 +95,7 @@ Commit 2: src
 
 Suggested commands:
 git reset
-git add -- ':(literal)src/runner.ts' ':(literal)src/services/api.ts' ':(literal)src/services/auth.ts'
+git add -- ':(top,literal)src/runner.ts' ':(top,literal)src/services/api.ts' ':(top,literal)src/services/auth.ts'
 git commit -m $'refactor(src): split changes updates' \\
   -m $'- group src changes into one atomic unit'
 
@@ -104,7 +104,7 @@ Commit 3: docs-formatting
 
 Suggested commands:
 git reset
-git add -- ':(literal)docs/guide.md'
+git add -- ':(top,literal)docs/guide.md'
 git commit -m $'docs(docs): split guide.md updates' \\
   -m $'- separate documentation and formatting-only changes'`);
 });
@@ -153,9 +153,9 @@ test('atomic commit planner: safely quotes shell paths', () => {
   ]);
 
   expect(proposal).toContain(
-    "git add -- ':(literal)src/file with space.ts' ':(literal)src/quote'\\''s.ts'",
+    "git add -- ':(top,literal)src/file with space.ts' ':(top,literal)src/quote'\\''s.ts'",
   );
-  expect(proposal).toContain("git add -- ':(literal)-leading.ts'");
+  expect(proposal).toContain("git add -- ':(top,literal)-leading.ts'");
 });
 
 test('atomic commit planner: renders control characters in filenames without terminal escapes', () => {
@@ -164,7 +164,7 @@ test('atomic commit planner: renders control characters in filenames without ter
   expect(proposal).not.toContain('\u001B');
   expect(proposal).not.toContain('\u0007');
   expect(proposal).toContain(
-    "git add -- $':(literal)src/\\x1b]8;;https://example.test\\x07unsafe.ts'",
+    "git add -- $':(top,literal)src/\\x1b]8;;https://example.test\\x07unsafe.ts'",
   );
 });
 
@@ -179,7 +179,7 @@ test('atomic commit planner: keeps special paths as literal shell arguments', ()
   const addCommand = proposal.split('git reset\n')[1]?.split('\ngit commit')[0];
 
   expect(addCommand).toBe(
-    `git add -- $':(literal)src/line\\nbreak.ts' ':(literal)src/semicolon;file.ts' ':(literal)src/$(printf unsafe).ts' ':(literal)src/café.ts'`,
+    `git add -- $':(top,literal)src/line\\nbreak.ts' ':(top,literal)src/semicolon;file.ts' ':(top,literal)src/$(printf unsafe).ts' ':(top,literal)src/café.ts'`,
   );
 });
 
@@ -191,7 +191,7 @@ test('atomic commit planner: emits reset for every group', () => {
 
 Suggested commands:
 git reset
-git add -- ':(literal)src/one.ts'
+git add -- ':(top,literal)src/one.ts'
 git commit -m $'refactor(src): split one.ts updates' \\
   -m $'- isolate src/one.ts changes into one atomic unit'`);
   expect(proposal).toContain(`Commit 2: tests
@@ -199,7 +199,7 @@ git commit -m $'refactor(src): split one.ts updates' \\
 
 Suggested commands:
 git reset
-git add -- ':(literal)test/two.test.ts'
+git add -- ':(top,literal)test/two.test.ts'
 git commit -m $'test(tests): split two.test.ts updates' \\
   -m $'- keep test coverage aligned with related code updates'`);
   expect(proposal).toContain(`Commit 2: tests
@@ -225,7 +225,7 @@ test('atomic commit planner: a later group stages only its own files', async () 
 
     if (laterCommands === undefined) throw new Error('Missing later group commands');
     expect(laterCommands).toBe(`git reset
-git add -- ':(literal)test/two.test.ts'`);
+git add -- ':(top,literal)test/two.test.ts'`);
     const child = Bun.spawn({ cmd: ['sh', '-c', laterCommands], cwd: repository, stderr: 'pipe' });
     const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
     if (exitCode !== 0) throw new Error(stderr);

@@ -67,11 +67,19 @@ test('repository summary keeps the injected summarizeLargeDiff(files, options) c
   expect(result.text).toContain('+injected');
   expect(calls).toEqual([
     {
-      args: ['diff', '--staged', '-w', '--stat', '--stat-width=80', '--', ':(literal)example.ts'],
+      args: [
+        'diff',
+        '--staged',
+        '-w',
+        '--stat',
+        '--stat-width=80',
+        '--',
+        ':(top,literal)example.ts',
+      ],
       options: { allowTruncated: true },
     },
     {
-      args: ['diff', '--staged', '-w', '-U1', '--', ':(literal)example.ts'],
+      args: ['diff', '--staged', '-w', '-U1', '--', ':(top,literal)example.ts'],
       options: { maxBytes: CONFIG.PER_FILE_BUFFER, allowTruncated: true },
     },
   ]);
@@ -97,10 +105,10 @@ test('repository summary owns config context and binary skip Git reads', async (
       '--stat',
       '--stat-width=80',
       '--',
-      ':(literal)gcm.config.ts',
-      ':(literal)image.jpg',
+      ':(top,literal)gcm.config.ts',
+      ':(top,literal)image.jpg',
     ],
-    ['diff', '--staged', '-w', '-U0', '--', ':(literal)gcm.config.ts'],
+    ['diff', '--staged', '-w', '-U0', '--', ':(top,literal)gcm.config.ts'],
   ]);
 });
 
@@ -141,7 +149,7 @@ test('repository summary stops scheduling file reads after the first failure', a
       },
       spawnLinesImpl: async function (args) {
         calls += 1;
-        if (args.at(-1) === `:(literal)${files[0]}`) throw new Error('read failed');
+        if (args.at(-1) === `:(top,literal)${files[0]}`) throw new Error('read failed');
         await Bun.sleep(1);
         return { lines: [], truncated: false };
       },
@@ -191,9 +199,18 @@ test('repository summary reads the target commit instead of the staged index', a
       '--stat-width=80',
       'abc123',
       '--',
-      ':(literal)example.ts',
+      ':(top,literal)example.ts',
     ],
-    ['show', '--first-parent', '--format=', '-w', '-U1', 'abc123', '--', ':(literal)example.ts'],
+    [
+      'show',
+      '--first-parent',
+      '--format=',
+      '-w',
+      '-U1',
+      'abc123',
+      '--',
+      ':(top,literal)example.ts',
+    ],
   ]);
 });
 

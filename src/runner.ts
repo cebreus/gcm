@@ -383,7 +383,8 @@ export async function executeCommitMessageGeneration(
       return;
     }
     const session = await loadSession();
-    const gitService = opts.gitService ?? createGitService();
+    const gitService =
+      opts.gitService ?? createGitService({ maxBytes: config.CHILD_PROCESS_MAX_BUFFER });
     const requestedProviderId = parsedArgs.provider ?? config.PROVIDER;
     let providerId = opts.languageModelProvider
       ? opts.languageModelProvider.id

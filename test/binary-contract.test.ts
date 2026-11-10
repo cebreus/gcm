@@ -110,11 +110,16 @@ async function runBinary(
   };
 }
 
-async function runBinaryWithProvider(args: string[], cwd: string): Promise<BinaryResult> {
+async function runBinaryWithProvider(
+  args: string[],
+  cwd: string,
+  extraEnvironment?: Record<string, string>,
+): Promise<BinaryResult> {
   const result = await runSubprocess(
     ['bun', '--preload', providerPreload, binaryPath, '--model', 'gemini-3.7-flash', ...args],
     cwd,
     'fake-key',
+    extraEnvironment,
   );
   return {
     exitCode: result.exitCode,
@@ -423,6 +428,14 @@ test('binary contract: a provider failure is reported once', async () => {
   expect(result.exitCode).toBe(1);
   expect(clean(result.stdout)).toContain('API Error (400): quota exhausted');
   expect(result.stderr).not.toContain('gcm: ');
+});
+test('binary contract: GCM_MAX_BUFFER limits Git output', async () => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/long-file-name.txt`, 'content\n');
+  await runCommand(['git', 'add', 'long-file-name.txt'], repository);
+  const result = await runBinaryWithProvider([], repository, { GCM_MAX_BUFFER: '8' });
+  expect(result.exitCode).toBe(1);
+  expect(`${result.stdout}${result.stderr}`).toContain('output was truncated');
 });
 
 test('binary contract: an invalid configuration value is reported without a stack trace', async () => {

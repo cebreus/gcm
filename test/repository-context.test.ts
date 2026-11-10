@@ -27,7 +27,15 @@ test('reads exact scope and recent history commands for changed paths', async ()
   });
 
   expect(commands).toEqual([
-    ['log', '-n', '50', '--pretty=format:%s', '--', ':(literal)src/a.ts', ':(literal)src/b.ts'],
+    [
+      'log',
+      '-n',
+      '50',
+      '--pretty=format:%s',
+      '--',
+      ':(top,literal)src/a.ts',
+      ':(top,literal)src/b.ts',
+    ],
   ]);
   expect(result).toEqual({
     scopeHistorySubjects: history,
