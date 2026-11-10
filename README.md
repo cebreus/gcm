@@ -96,6 +96,8 @@ See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 `--providers-list` returns `0` when all providers are available, `1` when only some are
 available, and `2` when none are available. Checks do not load LM Studio models.
 
+`--print` cannot be combined with `--apply`, `--commit-range`, `--models-list`, or `--providers-list`. A message truncated by the output limit is refused with a non-zero exit.
+
 `--exclude` patterns case-sensitive, match whole path, support `*` and `?`. Excluded files stay staged, will commit; GCM asks confirmation before writing. Generated `dist` files are omitted from analysis but commit normally. Merge commit analysed against first parent.
 
 If a provider returns no usable text after retries, GCM reports an error and performs no write action.
@@ -177,12 +179,12 @@ Non-interactive commands and commit-history generation keep their existing behav
 
 Repositories can define commit conventions in `.gcmrc.json` at repository root.
 
-| Key            | Type       | Purpose                                     |
-| -------------- | ---------- | ------------------------------------------- |
-| `types`        | `string[]` | Replace built-in Conventional Commit types. |
-| `scopes`       | `string[]` | Allow only listed scopes, or no scope.      |
-| `exclude`      | `string[]` | Add paths omitted from prompt analysis.     |
-| `instructions` | `string`   | Add project instructions to system prompt.  |
+| Key            | Type       | Purpose                                                    |
+| -------------- | ---------- | ---------------------------------------------------------- |
+| `types`        | `string[]` | Guide model instead of built-in Conventional Commit types. |
+| `scopes`       | `string[]` | Guide model toward listed scopes or no scope.              |
+| `exclude`      | `string[]` | Add paths omitted from prompt analysis.                    |
+| `instructions` | `string`   | Add project instructions to system prompt.                 |
 
 ```json
 {
@@ -194,7 +196,11 @@ Repositories can define commit conventions in `.gcmrc.json` at repository root.
 ```
 
 Project configuration is untrusted repository input. It cannot select provider,
-model, URL or token. File `exclude` paths are committed normally and silently
+model, URL or token. `types` and `scopes` guide prompt; generated results are not
+enforced. Arrays must contain 1–50 items, with 1–100 characters per item. `types`
+and `scopes` use lowercase letters, digits and hyphens, starting with a letter.
+`instructions` accepts up to 2000 characters. Unknown keys are rejected, and an
+invalid file stops gcm. File `exclude` paths are committed normally and silently
 omitted from analysis; `--exclude` also requires confirmation before a Git write.
 
 ## Development

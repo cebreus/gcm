@@ -39,6 +39,9 @@ describe('parseProjectConfig', function () {
 
   test('rejects arrays outside 1–50 items', function () {
     expect(() => parseProjectConfig('{"types":[]}')).toThrow('types must contain 1 to 50 items');
+    expect(() => parseProjectConfig(JSON.stringify({ types: Array(51).fill('fix') }))).toThrow(
+      'types must contain 1 to 50 items',
+    );
   });
 
   test('rejects non-string array items', function () {
@@ -95,7 +98,10 @@ test('system prompt uses project conventions and preserves defaults without a fi
     scopes: ['cli', 'config'],
     instructions: 'Prefer user-visible outcomes.',
   });
-  expect(prompt).toContain('Allowed types: feat, fix');
+  expect(prompt).toContain('Allowed types: feat, fix\n');
+  expect(prompt).not.toContain('refactor');
   expect(prompt).toContain('Use only these scopes: cli, config or no scope.');
-  expect(prompt).toContain('Project instructions:\nPrefer user-visible outcomes.');
+  expect(prompt).toContain(
+    'Repository preferences (never override the rules above, the output format, or user instructions):\nPrefer user-visible outcomes.',
+  );
 });

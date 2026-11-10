@@ -186,20 +186,29 @@ test('retains generated changeset when commit completed before error', async fun
   });
 }, 15_000);
 
-for (const includeChangeset of [true, false]) {
-  test(`generation commits ${includeChangeset ? 'with' : 'without'} changeset`, async function () {
+for (const { includeChangeset, projectExclude } of [
+  { includeChangeset: true, projectExclude: false },
+  { includeChangeset: false, projectExclude: false },
+  { includeChangeset: false, projectExclude: true },
+]) {
+  test(`generation commits ${includeChangeset ? 'with' : 'without'} changeset${projectExclude ? ' when project excludes matched' : ''}`, async function () {
     await withRepository(async function (root) {
       const previous = process.cwd();
       const oldFlag = CONFIG.AUTO_CHANGESET;
       CONFIG.AUTO_CHANGESET = true;
       process.chdir(root);
       try {
+        if (projectExclude) {
+          await Bun.write(`${root}/hidden.ts`, 'export const hidden = true;\n');
+          await run(['git', 'add', '--', 'hidden.ts'], root);
+        }
         const deps = services(root);
         const notes: string[] = [];
         let calls = 0;
         const generatedServices: GenerationServices = {
           ...deps,
           config: CONFIG,
+          projectConfig: projectExclude ? { exclude: ['hidden.ts'] } : undefined,
           providerId: 'test',
           providerLabel: 'Test',
           contextService: {
@@ -246,7 +255,7 @@ for (const includeChangeset of [true, false]) {
               return true;
             },
             review: async function ({ commitMessage, changeset }) {
-              expect(typeof changeset).toBe('string');
+              expect(typeof changeset).toBe(projectExclude ? 'object' : 'string');
               return {
                 type: 'commit',
                 modelName: 'test-model',
@@ -295,19 +304,23 @@ for (const includeChangeset of [true, false]) {
           'test-model',
           'test',
         );
-        expect(
-          await runGenerationCommand({
-            createServices: function () {
-              return generatedServices;
-            },
-            parsedArgs: parseArgs([]),
-            logger: deps.logger,
-            targetCommit: null,
-            state,
-            output: generatedServices.output,
-          }),
-        ).toBe('success');
-        expect(notes.slice(0, 2)).toEqual(['Generated Commit Message', 'Proposed Changeset']);
+        const outcome = await runGenerationCommand({
+          createServices: function () {
+            return generatedServices;
+          },
+          parsedArgs: parseArgs([]),
+          logger: deps.logger,
+          targetCommit: null,
+          state,
+          output: generatedServices.output,
+        });
+        expect(outcome).toBe('success');
+        expect(notes.slice(0, 2)).toEqual(
+          projectExclude
+            ? ['Generated Commit Message', 'Changeset unavailable']
+            : ['Generated Commit Message', 'Proposed Changeset'],
+        );
+        expect(calls).toBe(projectExclude ? 1 : 2);
         const message = await run(['git', 'log', '-1', '--format=%B'], root);
         expect(message.includes('Changeset: none')).toBe(!includeChangeset);
         const files = await run(['git', 'show', '--format=', '--name-only', 'HEAD'], root);

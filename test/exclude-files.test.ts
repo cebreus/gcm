@@ -204,6 +204,21 @@ test('exclude-files: carries excluded staged paths alongside the analysed snapsh
   expect(staged?.excludedPaths).toEqual(['secrets.txt']);
 });
 
+test('exclude-files: reports project excludes separately from CLI excludes', async () => {
+  const service = createGitService({
+    gitCommandRunner: async args => {
+      if (args.includes('--name-only'))
+        return { text: 'src/app.ts\0generated.txt\0', truncated: false };
+      if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
+      if (args[0] === 'ls-files') return { text: '', truncated: false };
+      return { text: 'diff', truncated: false };
+    },
+  });
+  const staged = await service.retrieveStagedChanges(null, null, [], ['generated.txt']);
+  expect(staged?.projectExcludesMatched).toBe(true);
+  expect(staged?.excludedPaths).toEqual([]);
+});
+
 test('exclude-files: parses NUL-separated file-list fixtures as real paths', async () => {
   const nulPath = ' leading space.txt';
   const quotedNulPath = '"quoted name"';

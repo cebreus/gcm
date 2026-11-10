@@ -442,6 +442,35 @@ describe('Refactored Runner', () => {
     expect(mockGitService.commitChanges).not.toHaveBeenCalled();
     expect(mockCancel).toHaveBeenCalledWith(expect.stringContaining('truncated'));
   });
+  test('--print refuses to print a truncated message', async () => {
+    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    mockGitService.retrieveStagedChanges.mockResolvedValue({
+      stagedDiff: 'diff',
+      stagedFiles: ['a.ts'],
+      truncated: false,
+    });
+    mockContextService.constructLLMPromptContext.mockResolvedValue({
+      promptContext: 'ctx',
+      processedDiffContent: 'diff',
+      tokens: 10,
+    });
+    mockGeminiService.generate.mockResolvedValue({
+      text: 'fix(scope): generated message',
+      usage: {},
+      truncated: true,
+    });
+    await executeCommitMessageGeneration(['--print', '--model', 'gemini-3.7-flash'], {
+      logger: mockLogger,
+      gitService: mockGitService,
+      contextService: mockContextService,
+      geminiService: mockGeminiService,
+      geminiModelLister: mockListModels,
+    });
+    expect(mockCancel).toHaveBeenCalledWith(
+      expect.stringContaining('Refusing to print it.'),
+      expect.anything(),
+    );
+  });
 
   test('commit range refuses to rewrite history from a truncated message', async () => {
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
@@ -661,6 +690,7 @@ describe('Refactored Runner', () => {
     expect(mockNote).toHaveBeenCalledWith(
       'Preferred model is unavailable; using local-model',
       'Model fallback',
+      undefined,
     );
 
     const originalStdoutWrite = process.stdout.write;

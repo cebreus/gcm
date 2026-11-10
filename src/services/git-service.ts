@@ -7,6 +7,7 @@ interface StagedChangesResult {
   stagedDiff: string;
   stagedFiles: string[];
   excludedPaths?: string[];
+  projectExcludesMatched?: boolean;
   truncated: boolean;
   snapshot?: IndexSnapshot;
 }
@@ -206,6 +207,9 @@ async function retrieveStagedChanges(
   const files = filterExcludedFiles(allFiles, analysisExcludePatterns);
   const explicitlyIncludedPaths = new Set(filterExcludedFiles(allFiles, excludePatterns));
   const excludedPaths = allFiles.filter(path => !explicitlyIncludedPaths.has(path));
+  const projectExcludesMatched = projectExcludePatterns.some(pattern =>
+    allFiles.some(path => shouldExcludeFile(path, [pattern])),
+  );
   const originalFileCount = allFiles.length;
   const matchedExcludePatterns = analysisExcludePatterns.filter(pattern =>
     allFiles.some(path => shouldExcludeFile(path, [pattern])),
@@ -228,6 +232,7 @@ async function retrieveStagedChanges(
     stagedDiff: diffRes.text,
     stagedFiles: files,
     excludedPaths,
+    projectExcludesMatched,
     truncated: diffRes.truncated,
     snapshot: 'snapshot' in diff ? diff.snapshot : undefined,
   };

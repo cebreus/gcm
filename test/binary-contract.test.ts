@@ -209,7 +209,7 @@ beforeAll(async () => {
         return new Response(JSON.stringify({ error: { message: 'quota exhausted' } }), { status: Number(process.env.FAKE_CHAT_STATUS) });
       }
       return new Response(JSON.stringify({
-        choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'fix: corrected message' } }],
+choices: [{ finish_reason: process.env.FAKE_FINISH_REASON ?? 'stop', message: { role: 'assistant', content: 'fix: corrected message' } }],
         usage: { prompt_tokens: 10, completion_tokens: 4 }
       }));
     } as typeof fetch;`,
@@ -339,6 +339,23 @@ test('binary contract: --print writes only generated message and stays read-only
   expect(result.stdout).toBe('fix: corrected message\n');
   expect(await readSubjects(repository)).toEqual(['feat: second subject', 'feat: first subject']);
 });
+test('binary contract: --print refuses truncated generated message', async () => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/file.txt`, 'third\n');
+  await runCommand(['git', 'add', 'file.txt'], repository);
+  const result = await runBinaryWithProvider(['--print'], repository, {
+    FAKE_FINISH_REASON: 'length',
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe('');
+  expect(result.stderr).toContain('Refusing to print it.');
+});
+test('binary contract: --print=true argument error keeps stdout empty', async () => {
+  const result = await runBinary(['--print=true', '--apply']);
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe('');
+  expect(result.stderr).not.toBe('');
+});
 test('binary contract: --print keeps stdout empty on provider failure', async () => {
   const repository = await createCommittedRepository();
   await Bun.write(`${repository}/file.txt`, 'third\n');
@@ -426,8 +443,9 @@ test('binary contract: a provider failure is reported once', async () => {
   );
 
   expect(result.exitCode).toBe(1);
-  expect(clean(result.stdout)).toContain('API Error (400): quota exhausted');
-  expect(result.stderr).not.toContain('gcm: ');
+  const reports =
+    `${clean(result.stdout)}\n${clean(result.stderr)}`.match(/quota exhausted/g) ?? [];
+  expect(reports).toHaveLength(1);
 });
 test('binary contract: GCM_MAX_BUFFER limits Git output', async () => {
   const repository = await createCommittedRepository();

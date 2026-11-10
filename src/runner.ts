@@ -246,7 +246,8 @@ function parseArgsOrReport(argv: string[]): ParsedOptions | null {
   } catch (error) {
     if (!isArgumentValidationError(error)) throw error;
     const message = `Error: ${error.message}. Run gcm --help for usage.`;
-    if (argv.includes('--print')) cancel(message, { output: process.stderr });
+    if (argv.some(arg => arg === '--print' || arg.startsWith('--print=')))
+      cancel(message, { output: process.stderr });
     else cancel(message);
     return null;
   }
@@ -447,8 +448,7 @@ export async function executeCommitMessageGeneration(
       }
       if (!parsedArgs.print)
         intro(`${C.bright}${provider.label} Commit Message Helper v${pkg.version}${C.reset}`);
-      if (provider.selectionNotice && !parsedArgs.print)
-        note(provider.selectionNotice, 'Model fallback');
+      if (provider.selectionNotice) note(provider.selectionNotice, 'Model fallback', printOutput);
       const earlyExitCode = await maybeHandleModelsList(parsedArgs, provider);
       if (earlyExitCode !== null) {
         exitCode = earlyExitCode;
