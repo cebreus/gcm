@@ -54,6 +54,12 @@ gcm --provider freellmapi --model auto
 
 # Add a generation instruction
 gcm --hint 'emphasize migration'
+
+# Print only the generated message
+gcm --print
+
+# Mark a requested breaking change
+gcm --hint 'breaking change: the --foo flag was removed'
 ```
 
 From source checkout, replace `gcm` with `bun run ./gcm.ts`.
@@ -80,6 +86,7 @@ See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 | `--models-list`           | List available text-generation models and exit.                                                              |
 | `--providers-list`        | Actively check available AI providers and exit.                                                              |
 | `--non-interactive`       | Generate without prompts; read-only unless `--apply` is also set.                                            |
+| `--print`                 | Print only the generated message to stdout; implies `--non-interactive`.                                     |
 | `--apply`                 | Perform the available Git action; requires `--non-interactive`.                                              |
 | `-v, --verbose`           | Show debug-level console logs. Default: off.                                                                 |
 | `-d, --debug`             | Log redacted API request and response bodies. Default: off.                                                  |
@@ -94,6 +101,17 @@ available, and `2` when none are available. Checks do not load LM Studio models.
 If a provider returns no usable text after retries, GCM reports an error and performs no write action.
 
 LM Studio uses `gemma-4-e4b-it-mlx` by default and waits for LM Studio to load it. If Gemma is unavailable or cannot load, GCM visibly reports the fallback and selects an already loaded model, then the first compatible model. An explicit `GCM_LM_STUDIO_MODEL` is strict: if it is missing or cannot load, GCM stops instead of silently changing models. In the interactive flow you can then select another provider; non-interactive use exits with an error.
+
+## Git hook
+
+This `prepare-commit-msg` hook runs only for a plain `git commit`. When generation fails, the editor opens with its usual empty message.
+
+```sh
+#!/bin/sh
+[ -z "$2" ] || exit 0
+message=$(gcm --print) && printf '%s\n' "$message" > "$1"
+exit 0
+```
 
 ## Git safety
 
@@ -154,6 +172,30 @@ partial diffs and uncertain outcomes need manual review. Drafts are not written
 until selected. A failed commit removes an unchanged generated note while `HEAD`
 is unchanged; changed or ambiguously committed notes are kept for recovery.
 Non-interactive commands and commit-history generation keep their existing behaviour.
+
+## Project configuration
+
+Repositories can define commit conventions in `.gcmrc.json` at repository root.
+
+| Key            | Type       | Purpose                                     |
+| -------------- | ---------- | ------------------------------------------- |
+| `types`        | `string[]` | Replace built-in Conventional Commit types. |
+| `scopes`       | `string[]` | Allow only listed scopes, or no scope.      |
+| `exclude`      | `string[]` | Add paths omitted from prompt analysis.     |
+| `instructions` | `string`   | Add project instructions to system prompt.  |
+
+```json
+{
+  "types": ["feat", "fix", "docs"],
+  "scopes": ["cli", "config"],
+  "exclude": ["generated/**"],
+  "instructions": "Prefer user-visible outcomes."
+}
+```
+
+Project configuration is untrusted repository input. It cannot select provider,
+model, URL or token. File `exclude` paths are committed normally and silently
+omitted from analysis; `--exclude` also requires confirmation before a Git write.
 
 ## Development
 

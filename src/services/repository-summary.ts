@@ -1,4 +1,4 @@
-import { CONFIG } from '../../gcm.config.js';
+import type { Config } from '../../gcm.config.js';
 import { BINARY_EXTENSIONS } from '../constants.js';
 import { summarizeDiff, type DiffFileFacts } from '../diff-summary.js';
 import { literalPathspec, spawnGitLines, spawnGitStream } from '../git-utils.js';
@@ -54,12 +54,13 @@ async function readFileFacts(
   file: string,
   spawnLinesImpl: NonNullable<RepositorySummaryOptions['spawnLinesImpl']>,
   targetCommit?: string,
+  config?: Pick<Config, 'PER_FILE_BUFFER'>,
 ): Promise<DiffFileFacts> {
   if (isBinaryFile(file)) return { file, lines: [], skipped: true, truncated: false };
   const contextLines = isConfigFile(file) ? 0 : 1;
   const args = diffArgs(targetCommit, [`-U${contextLines}`], [file]);
   const result = await spawnLinesImpl(args, {
-    maxBytes: CONFIG.PER_FILE_BUFFER,
+    maxBytes: config?.PER_FILE_BUFFER,
     allowTruncated: true,
   });
   const gitDetectedBinary = result.lines.some(
@@ -75,7 +76,8 @@ async function readFileFacts(
 
 export async function summarizeRepositoryDiff(
   stagedFiles: string[],
-  options?: RepositorySummaryOptions,
+  options: RepositorySummaryOptions | undefined = undefined,
+  config: Pick<Config, 'PER_FILE_BUFFER' | 'MAX_HUNKS' | 'CHILD_PROCESS_MAX_BUFFER'>,
 ) {
   const dependencies = {
     spawnLinesImpl: options?.spawnLinesImpl ?? spawnGitLines,
@@ -100,6 +102,7 @@ export async function summarizeRepositoryDiff(
           file,
           dependencies.spawnLinesImpl,
           dependencies.targetCommit,
+          config,
         );
       } catch (error) {
         failures[index] = { error };
@@ -114,7 +117,7 @@ export async function summarizeRepositoryDiff(
     ? `${stats.text}\n... (file statistics truncated by output limit) ...`
     : stats.text;
   return summarizeDiff(statsText, files, {
-    maxHunks: CONFIG.MAX_HUNKS,
-    maxOutputBytes: Math.floor(CONFIG.CHILD_PROCESS_MAX_BUFFER / 2),
+    maxHunks: config.MAX_HUNKS,
+    maxOutputBytes: Math.floor(config.CHILD_PROCESS_MAX_BUFFER / 2),
   });
 }

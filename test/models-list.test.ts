@@ -47,7 +47,7 @@ test('cli: --models-list prints available models', async () => {
 
   try {
     await executeCommitMessageGeneration(['--models-list']);
-    expect(listMock).toHaveBeenCalledWith('test-key');
+    expect(listMock.mock.calls[0] as unknown[]).toEqual(['test-key', expect.anything()]);
     expect(stdoutChunks.join('')).toContain('gemini-3.7-flash');
     expect(stdoutChunks.join('')).not.toContain('image');
     expect(stdoutChunks.join('')).not.toContain('tts');

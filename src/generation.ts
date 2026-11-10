@@ -1,4 +1,4 @@
-import { CONFIG } from '../gcm.config.js';
+import type { Config } from '../gcm.config.js';
 import {
   changesetCommitMessage,
   commitWithChangeset,
@@ -22,6 +22,7 @@ import type { ContextService } from './services/context-service.js';
 import type { LanguageModelService } from './language-model-service.js';
 import type { GitService, RepositoryState } from './services/git-service.js';
 import type { GCMSession } from './session.js';
+import type { ProjectConfig } from './project-config.js';
 import {
   type ActionMenuResult,
   type GenerationState,
@@ -29,6 +30,8 @@ import {
 } from './interactive-generation-dialogue.js';
 
 export type GenerationServices = {
+  config: Config;
+  projectConfig?: ProjectConfig;
   gitService: GitService;
   contextService: ContextService;
   languageModelService: LanguageModelService;
@@ -46,6 +49,7 @@ export type GenerationServices = {
     cancel(message: string): void;
     note(message: string, title?: string): void;
     outro(message: string): void;
+    print(message: string): void;
     sanitizeGeneratedText(message: string): string;
     sanitizeTerminalText(message: string): string;
     style: {
@@ -101,6 +105,7 @@ export function createGenerationState(
       baselineModelName: initialModelName,
       modelName: initialModelName,
       nonInteractive: parsedArgs.nonInteractive,
+      print: parsedArgs.print,
       apply: parsedArgs.apply,
       userHint: parsedArgs.hint ?? undefined,
     },
@@ -175,9 +180,21 @@ function reportStats(
   );
 }
 
+const DEFAULT_TYPES = [
+  'feat',
+  'fix',
+  'refactor',
+  'perf',
+  'style',
+  'docs',
+  'test',
+  'build',
+  'ci',
+  'chore',
+];
 const COMMIT_MESSAGE_RULES = `Commit message rules:
 - Subject format: type(scope): summary
-- Allowed types: feat, fix, refactor, perf, style, docs, test, build, ci, chore
+- Allowed types: {types}
 - Subject must start lowercase after the colon, use imperative mood, have no trailing period, and be extremely concise (max 60 characters).
 - Body is optional. Use it only when the change cannot be described faithfully in the subject alone.
 - When a body is needed, use at least two concise "- " bullets.
@@ -202,13 +219,26 @@ Grounding:
 - Use only facts present in the changed file list, diff, and recent commit examples.
 - Do not mention tools, frameworks, modules, APIs, versions, or behaviours unless visible in the provided context.
 - Never invent motivation, performance impact, security impact, migration impact, or breaking-change status.
+- Mark it with ! after the type or scope and add a BREAKING CHANGE: <impact> footer only when user instructions say the change is breaking. Never infer breaking status.
 - If intent is ambiguous, use conservative wording.
 
 Style alignment:
 - Use recent commit examples only to align type, scope, and wording style.
 - Do not copy unrelated content from history.`;
 
-const SYSTEM_INSTRUCTIONS = `You generate concise, evidence-grounded Conventional Commit messages from git diffs.\n\nOutput only the commit message.\n\n${COMMIT_MESSAGE_RULES}`;
+export function buildSystemPrompt(projectConfig: ProjectConfig = {}): string {
+  const rules = COMMIT_MESSAGE_RULES.replace(
+    '{types}',
+    (projectConfig.types ?? DEFAULT_TYPES).join(', '),
+  );
+  const scopes = projectConfig.scopes?.length
+    ? `\n- Use only these scopes: ${projectConfig.scopes.join(', ')} or no scope.`
+    : '';
+  const instructions = projectConfig.instructions
+    ? `\n\nProject instructions:\n${projectConfig.instructions}`
+    : '';
+  return `You generate concise, evidence-grounded Conventional Commit messages from git diffs.\n\nOutput only the commit message.\n\n${rules}${scopes}${instructions}`;
+}
 
 function logTokenInfo(params: {
   modelName: string;
@@ -449,6 +479,7 @@ async function loadStagedChanges(params: {
     targetCommit,
     logger,
     parsedArgs.exclude,
+    services.projectConfig?.exclude,
   );
   if (!staged) {
     services.output.stopProgress(services.output.style.yellow('No staged changes found'));
@@ -562,6 +593,8 @@ async function runSingleGenerationAttempt(params: {
     targetCommit,
     commitCapability,
   } = params;
+  const config = services.config;
+  const systemPrompt = buildSystemPrompt(services.projectConfig);
   const modelSpec = (await services.models()).find(model => model.name === state.modelName);
   if (!modelSpec) {
     services.output.cancel('Error: Unknown ' + services.providerLabel + ' model.');
@@ -569,8 +602,8 @@ async function runSingleGenerationAttempt(params: {
   }
   const { maxOutputTokens, maxAvailableTokens } = resolveTokenBudget(
     modelSpec.limits,
-    CONFIG.MAX_OUTPUT_TOKENS,
-    estimateTokenCount(SYSTEM_INSTRUCTIONS, CONFIG.TOKEN_BYTES_RATIO),
+    config.MAX_OUTPUT_TOKENS,
+    estimateTokenCount(systemPrompt, config.TOKEN_BYTES_RATIO),
   );
   if (maxAvailableTokens <= 0) {
     services.output.cancel(
@@ -583,7 +616,7 @@ async function runSingleGenerationAttempt(params: {
     diffContent: staged.stagedDiff,
     promptSuffix: staged.truncated ? 'truncated diff' : 'diff',
     maxAvailableTokens,
-    tokenBytesRatio: CONFIG.TOKEN_BYTES_RATIO,
+    tokenBytesRatio: config.TOKEN_BYTES_RATIO,
     stagedFiles: staged.stagedFiles,
     scopeSuggestions: commitContextHints.scopeSuggestions,
     recentCommitSubjects: commitContextHints.recentCommitSubjects,
@@ -604,7 +637,7 @@ async function runSingleGenerationAttempt(params: {
   services.output.startProgress(`Generating commit message with ${state.modelName}...`);
   const response = await services.languageModelService.generate({
     promptContext: contextResult.promptContext,
-    systemPrompt: SYSTEM_INSTRUCTIONS,
+    systemPrompt,
     meta,
     modelName: state.modelName,
     maxOutputTokens,
@@ -619,7 +652,7 @@ async function runSingleGenerationAttempt(params: {
   services.output.stopProgress(services.providerLabel + ' response received');
   let prepareAutomaticChangeset: (() => Promise<ChangesetDraft | null>) | undefined;
   if (
-    CONFIG.AUTO_CHANGESET &&
+    config.AUTO_CHANGESET &&
     !state.nonInteractive &&
     !targetCommit &&
     commitCapability.allowed &&
@@ -636,7 +669,7 @@ async function runSingleGenerationAttempt(params: {
       !staged.truncated &&
       !staged.excludedPaths?.length &&
       contextResult.processedDiffContent === staged.stagedDiff &&
-      estimateTokenCount(staged.stagedDiff, CONFIG.TOKEN_BYTES_RATIO) + 1024 <= maxAvailableTokens
+      estimateTokenCount(staged.stagedDiff, config.TOKEN_BYTES_RATIO) + 1024 <= maxAvailableTokens
     ) {
       prepareAutomaticChangeset = async function () {
         return prepareChangeset({
@@ -689,6 +722,10 @@ async function handleSuccessfulGeneration(params: {
   }
   const warningIcon = response.truncated ? ` ${services.output.style.yellow('[⚠ TRUNCATED]')}` : '';
   const reviewedMessage = params.prepareChangeset ? stripChangesetTrailers(parsedOut) : parsedOut;
+  if (state.print) {
+    services.output.print(reviewedMessage);
+    return 'success';
+  }
   services.output.note(reviewedMessage, 'Generated Commit Message' + warningIcon);
   reportStats(services.output, logger, state.modelName, response.usage, response.text.length);
   if (state.nonInteractive) {

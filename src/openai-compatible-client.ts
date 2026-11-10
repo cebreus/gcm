@@ -4,7 +4,7 @@ import {
   type LanguageModelResponse,
 } from './language-model-service.js';
 import { isRecord, redactSensitiveTextForPrompt, sanitizeTerminalText } from './utils.js';
-import { CONFIG } from '../gcm.config.js';
+import type { Config } from '../gcm.config.js';
 import { requestProviderText, type ProviderFetch } from './provider-http.js';
 
 const MAX_ERROR_SNIPPET_BYTES = 4_096;
@@ -58,6 +58,7 @@ export async function requestLanguageModelJson(params: {
   timeoutMs: number;
   token?: string;
   fetchImpl?: ProviderFetch;
+  config: Pick<Config, 'MAX_RETRIES' | 'RETRY_BASE_MS' | 'RETRY_MAX_MS'>;
 }): Promise<unknown> {
   const { providerLabel, url, init, timeoutMs, token } = params;
   let result;
@@ -67,9 +68,9 @@ export async function requestLanguageModelJson(params: {
       init,
       timeoutMs,
       retry: {
-        maxRetries: CONFIG.MAX_RETRIES,
-        retryBaseMs: CONFIG.RETRY_BASE_MS,
-        retryMaxMs: CONFIG.RETRY_MAX_MS,
+        maxRetries: params.config.MAX_RETRIES,
+        retryBaseMs: params.config.RETRY_BASE_MS,
+        retryMaxMs: params.config.RETRY_MAX_MS,
       },
       retryNetworkErrors: (init?.method ?? 'GET').toUpperCase() === 'GET',
       fetchImpl: params.fetchImpl,
@@ -110,6 +111,7 @@ export async function generateOpenAiCompatibleChat(options: {
   token?: string;
   params: LanguageModelGenerateParams;
   fetchImpl?: ProviderFetch;
+  config: Pick<Config, 'TEMP' | 'MAX_RETRIES' | 'RETRY_BASE_MS' | 'RETRY_MAX_MS'>;
 }): Promise<LanguageModelResponse | null> {
   const { providerLabel, params } = options;
   const headers = new Headers({ 'content-type': 'application/json' });
@@ -120,6 +122,7 @@ export async function generateOpenAiCompatibleChat(options: {
     timeoutMs: 60_000,
     token: options.token,
     fetchImpl: options.fetchImpl,
+    config: options.config,
     init: {
       method: 'POST',
       headers,
@@ -135,7 +138,7 @@ export async function generateOpenAiCompatibleChat(options: {
             content: redactSensitiveTextForPrompt(redactToken(params.promptContext, options.token)),
           },
         ],
-        temperature: CONFIG.TEMP,
+        temperature: options.config.TEMP,
         max_tokens: params.maxOutputTokens,
         stream: false,
       }),

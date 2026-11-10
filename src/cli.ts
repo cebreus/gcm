@@ -10,6 +10,7 @@ interface Args extends ParsedArgs {
   hint?: string | null;
   verbose?: boolean;
   debug?: boolean;
+  print?: boolean;
   apply?: boolean;
   'models-list'?: boolean;
   'providers-list'?: boolean;
@@ -27,6 +28,7 @@ export interface ParsedOptions {
   verbose: boolean;
   debug: boolean;
   nonInteractive: boolean;
+  print: boolean;
   apply: boolean;
   modelsList: boolean;
   providersList: boolean;
@@ -128,6 +130,13 @@ export const CLI_OPTION_DEFINITIONS = [
     aliases: ['--apply'],
     usage: '--apply',
     description: 'Write the generated message; requires --non-interactive.',
+    takesValue: false,
+  },
+  {
+    name: 'print',
+    aliases: ['--print'],
+    usage: '--print',
+    description: 'Print only the generated message to stdout; implies --non-interactive.',
     takesValue: false,
   },
   {
@@ -260,6 +269,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
         'verbose',
         'debug',
         'non-interactive',
+        'print',
         'apply',
         'models-list',
         'providers-list',
@@ -283,9 +293,20 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     }
   }
 
-  const nonInteractive = Boolean(parsed['non-interactive']);
+  const print = Boolean(parsed.print);
+  const nonInteractive = Boolean(parsed['non-interactive']) || print;
   const apply = Boolean(parsed.apply);
   const commitRange = parsed['commit-range'] ?? null;
+  if (print) {
+    const incompatibleFlag = [
+      ['--apply', apply],
+      ['--commit-range', Boolean(commitRange)],
+      ['--models-list', Boolean(parsed['models-list'])],
+      ['--providers-list', Boolean(parsed['providers-list'])],
+    ].find(([, enabled]) => enabled)?.[0];
+    if (incompatibleFlag)
+      throw createArgumentValidationError(`--print cannot be combined with ${incompatibleFlag}`);
+  }
   if (apply && !nonInteractive) {
     throw createArgumentValidationError('--apply requires --non-interactive');
   }
@@ -310,6 +331,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedOptions
     verbose: Boolean(parsed.verbose),
     debug: Boolean(parsed.debug),
     nonInteractive,
+    print,
     apply,
     modelsList: Boolean(parsed['models-list']),
     providersList: Boolean(parsed['providers-list']),

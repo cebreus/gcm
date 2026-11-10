@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { loadConfig } from '../gcm.config.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -28,7 +29,7 @@ test('listModels: returns validated metadata and sends the API key only as a hea
 
   const { listGeminiModels } = await import('../src/gemini-models.js');
 
-  await expect(listGeminiModels(apiKey)).resolves.toEqual([
+  await expect(listGeminiModels(apiKey, loadConfig({}))).resolves.toEqual([
     {
       name: 'models/gemini-test',
       label: 'Gemini Test',
@@ -48,7 +49,9 @@ test('listModels: maps request cancellation to its timeout error', async functio
   } as unknown as typeof fetch;
 
   const { listGeminiModels } = await import('../src/gemini-models.js');
-  await expect(listGeminiModels('test-key')).rejects.toThrow('Gemini model discovery timed out');
+  await expect(listGeminiModels('test-key', loadConfig({}))).rejects.toThrow(
+    'Gemini model discovery timed out',
+  );
 
   expect(signal).toBeInstanceOf(AbortSignal);
 });
@@ -90,7 +93,7 @@ test('listModels: follows pagination and skips malformed model limits', async fu
   } as typeof fetch;
 
   const { listGeminiModels } = await import('../src/gemini-models.js');
-  const models = await listGeminiModels('test-key');
+  const models = await listGeminiModels('test-key', loadConfig({}));
 
   expect(models.map(model => model.name)).toEqual(['models/gemini-first', 'models/gemini-second']);
   expect(urls).toEqual([
@@ -105,5 +108,7 @@ test('listModels: rejects an oversized response body', async function () {
   } as unknown as typeof fetch;
 
   const { listGeminiModels } = await import('../src/gemini-models.js');
-  await expect(listGeminiModels('test-key')).rejects.toThrow('response body is too large');
+  await expect(listGeminiModels('test-key', loadConfig({}))).rejects.toThrow(
+    'response body is too large',
+  );
 });

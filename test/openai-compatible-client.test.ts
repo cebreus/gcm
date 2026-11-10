@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { requestLanguageModelJson } from '../src/openai-compatible-client.js';
 import { requestProviderText } from '../src/provider-http.js';
+import { loadConfig } from '../gcm.config.js';
 
 const retry = { maxRetries: 2, retryBaseMs: 10, retryMaxMs: 100 };
 
@@ -55,6 +56,7 @@ test('OpenAI-compatible transport does not retry permanent HTTP failures', async
   let calls = 0;
   await expect(
     requestLanguageModelJson({
+      config: loadConfig({}),
       providerLabel: 'Test provider',
       url: new URL('https://example.test/v1/models'),
       timeoutMs: 1_000,
@@ -71,6 +73,7 @@ test('OpenAI-compatible transport does not retry ambiguous gateway failures for 
   let calls = 0;
   await expect(
     requestLanguageModelJson({
+      config: loadConfig({}),
       providerLabel: 'Test provider',
       url: new URL('https://example.test/v1/chat/completions'),
       init: { method: 'POST' },

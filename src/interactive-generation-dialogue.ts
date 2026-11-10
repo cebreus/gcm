@@ -9,6 +9,7 @@ export interface GenerationState {
   baselineModelName: string;
   modelName: string;
   nonInteractive?: boolean;
+  print?: boolean;
   apply?: boolean;
   userHint?: string;
 }

@@ -32,6 +32,7 @@ test('cli: should parse default arguments with empty argv', () => {
     modelsList: false,
     providersList: false,
     nonInteractive: false,
+    print: false,
     apply: false,
     exclude: [],
   });
@@ -99,6 +100,16 @@ test('cli: parses explicit non-interactive generation and apply flags', () => {
 
   expect(result.nonInteractive).toBe(true);
   expect(result.apply).toBe(true);
+});
+
+test('cli: --print implies non-interactive and rejects incompatible modes', () => {
+  const result = parseArgs(['--print']);
+  expect(result.print).toBe(true);
+  expect(result.nonInteractive).toBe(true);
+  for (const flag of ['--apply', '--commit-range', '--models-list', '--providers-list']) {
+    const args = flag === '--commit-range' ? ['--print', flag, 'HEAD'] : ['--print', flag];
+    expect(() => parseArgs(args)).toThrow(`--print cannot be combined with ${flag}`);
+  }
 });
 
 test('cli: refuses --apply without --non-interactive', () => {

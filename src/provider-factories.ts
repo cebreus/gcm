@@ -1,4 +1,4 @@
-import { CONFIG } from '../gcm.config.js';
+import type { Config } from '../gcm.config.js';
 import { createFreeLlmApiProvider } from './freellmapi-provider.js';
 import { createGeminiProvider } from './gemini-provider.js';
 import type {
@@ -21,6 +21,7 @@ export function createProviderFactories(
   options: ProviderFactoryOptions,
   logger: Logger,
   debugApi = false,
+  config: Config,
 ): LanguageModelProviderFactory[] {
   if (options.languageModelProvider) {
     const provider = options.languageModelProvider;
@@ -43,6 +44,7 @@ export function createProviderFactories(
             debugApi,
             service: options.geminiService,
             listModels: options.geminiModelLister,
+            config,
           }),
       },
       {
@@ -50,9 +52,10 @@ export function createProviderFactories(
         label: 'FreeLLMAPI',
         create: async () =>
           createFreeLlmApiProvider({
-            baseUrl: CONFIG.FREELLMAPI_URL,
-            model: CONFIG.FREELLMAPI_MODEL,
-            token: CONFIG.FREELLMAPI_TOKEN,
+            baseUrl: config.FREELLMAPI_URL,
+            model: config.FREELLMAPI_MODEL,
+            token: config.FREELLMAPI_TOKEN,
+            config,
           }),
       },
       {
@@ -60,9 +63,10 @@ export function createProviderFactories(
         label: 'LM Studio',
         create: async factoryOptions =>
           createLmStudioProvider({
-            baseUrl: process.env.GCM_LM_STUDIO_URL ?? 'http://127.0.0.1:1234',
-            model: process.env.GCM_LM_STUDIO_MODEL,
-            token: process.env.LM_API_TOKEN,
+            baseUrl: config.LM_STUDIO_URL,
+            model: config.LM_STUDIO_MODEL,
+            token: config.LM_STUDIO_TOKEN,
+            config,
             probeOnly: factoryOptions?.probeOnly,
           }),
       },

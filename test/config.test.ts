@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { loadConfig } from '../gcm.config.js';
 
 const DEFAULT_CONFIG = {
   model: 'gemini-3.7-flash',
@@ -18,25 +19,23 @@ const DEFAULT_CONFIG = {
 };
 
 async function readConfig(env: Record<string, string>): Promise<unknown> {
-  const child = Bun.spawn({
-    cmd: [
-      'bun',
-      '-e',
-      "import { CONFIG } from './gcm.config.ts'; console.log(JSON.stringify({ model: CONFIG.MODEL, temp: CONFIG.TEMP, maxBuffer: CONFIG.CHILD_PROCESS_MAX_BUFFER, maxHunks: CONFIG.MAX_HUNKS, perFileBuffer: CONFIG.PER_FILE_BUFFER, tokenRatio: CONFIG.TOKEN_BYTES_RATIO, maxOutputTokens: CONFIG.MAX_OUTPUT_TOKENS, retries: CONFIG.MAX_RETRIES, retryBase: CONFIG.RETRY_BASE_MS, retryMax: CONFIG.RETRY_MAX_MS, freeLlmApiUrl: CONFIG.FREELLMAPI_URL, freeLlmApiModel: CONFIG.FREELLMAPI_MODEL, freeLlmApiToken: CONFIG.FREELLMAPI_TOKEN ?? null, autoChangeset: CONFIG.AUTO_CHANGESET }));",
-    ],
-    cwd: process.cwd(),
-    env: { PATH: Bun.env.PATH ?? '/usr/bin:/bin', ...env },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  expect(exitCode, stderr).toBe(0);
-  const config: unknown = JSON.parse(stdout);
-  return config;
+  const config = loadConfig(env);
+  return {
+    model: config.MODEL,
+    temp: config.TEMP,
+    maxBuffer: config.CHILD_PROCESS_MAX_BUFFER,
+    maxHunks: config.MAX_HUNKS,
+    perFileBuffer: config.PER_FILE_BUFFER,
+    tokenRatio: config.TOKEN_BYTES_RATIO,
+    maxOutputTokens: config.MAX_OUTPUT_TOKENS,
+    retries: config.MAX_RETRIES,
+    retryBase: config.RETRY_BASE_MS,
+    retryMax: config.RETRY_MAX_MS,
+    freeLlmApiUrl: config.FREELLMAPI_URL,
+    freeLlmApiModel: config.FREELLMAPI_MODEL,
+    freeLlmApiToken: config.FREELLMAPI_TOKEN ?? null,
+    autoChangeset: config.AUTO_CHANGESET,
+  };
 }
 
 async function runCli(env: Record<string, string>, args: string[] = ['--version']) {
@@ -60,6 +59,24 @@ test('config: reads the short GCM names', async () => {
     ...DEFAULT_CONFIG,
     model: 'test-model',
     temp: 0.25,
+  });
+});
+
+test('config: resolves provider credentials and LM Studio settings from supplied environment', function () {
+  expect(
+    loadConfig({
+      GCM_PROVIDER: 'lm-studio',
+      GCM_LM_STUDIO_URL: 'http://127.0.0.1:4321',
+      GCM_LM_STUDIO_MODEL: 'local-model',
+      LM_API_TOKEN: 'local-token',
+      GOOGLE_GEMINI_API_KEY: 'gemini-key',
+    }),
+  ).toMatchObject({
+    PROVIDER: 'lm-studio',
+    LM_STUDIO_URL: 'http://127.0.0.1:4321',
+    LM_STUDIO_MODEL: 'local-model',
+    LM_STUDIO_TOKEN: 'local-token',
+    GEMINI_API_KEY: 'gemini-key',
   });
 });
 

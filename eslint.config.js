@@ -73,6 +73,7 @@ export default [
       'src/model-registry.ts',
       'src/scope-detector.ts',
       'src/parser.ts',
+      'src/project-config.ts',
       'src/utils.ts',
     ],
     rules: {

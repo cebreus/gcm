@@ -325,6 +325,35 @@ test('binary contract: non-interactive generation stays read-only without --appl
   expect(await readSubjects(repository)).toEqual(['feat: second subject', 'feat: first subject']);
 });
 
+test('binary contract: --print writes only generated message and stays read-only', async () => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/file.txt`, 'third\n');
+  await runCommand(['git', 'add', 'file.txt'], repository);
+  const result = await runBinaryWithProvider(['--print'], repository);
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toBe('fix: corrected message\n');
+  expect(await readSubjects(repository)).toEqual(['feat: second subject', 'feat: first subject']);
+});
+test('binary contract: --print keeps stdout empty on provider failure', async () => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/file.txt`, 'third\n');
+  await runCommand(['git', 'add', 'file.txt'], repository);
+  const result = await runSubprocess(
+    ['bun', '--preload', providerPreload, binaryPath, '--model', 'gemini-3.7-flash', '--print'],
+    repository,
+    'fake-key',
+    { FAKE_CHAT_STATUS: '400' },
+  );
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe('');
+  expect(result.stderr).not.toBe('');
+});
+test('binary contract: --print keeps stdout empty without staged changes', async () => {
+  const result = await runBinaryWithProvider(['--print'], gitRepository);
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe('');
+  expect(result.stderr).not.toBe('');
+});
 test('binary contract: --apply commits the staged changes with the generated message', async () => {
   const repository = await createCommittedRepository();
   await Bun.write(`${repository}/file.txt`, 'third\n');
@@ -404,6 +433,20 @@ test('binary contract: an invalid configuration value is reported without a stac
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe('');
   expect(result.stderr).toBe('gcm: Invalid GCM_MAX_HUNKS\n');
+});
+
+test('binary contract: invalid project configuration stops generation', async function () {
+  const path = `${gitRepository}/.gcmrc.json`;
+  await Bun.write(path, '{"model":"untrusted"}');
+  try {
+    const result = await runBinaryWithProvider([], gitRepository);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout.trim().split('\n').at(-1)).toContain(
+      'Error: Invalid .gcmrc.json: unknown key "model".',
+    );
+  } finally {
+    await rm(path, { force: true });
+  }
 });
 
 test('binary contract: reports its bundled package version outside the repository', async () => {

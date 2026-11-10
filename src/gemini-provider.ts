@@ -1,4 +1,4 @@
-import { CONFIG } from '../gcm.config.js';
+import type { Config } from '../gcm.config.js';
 import { listGeminiModels } from './gemini-models.js';
 import {
   createLanguageModelApiError,
@@ -65,10 +65,13 @@ export function createGeminiProvider(options: {
   service?: LanguageModelService;
   listModels?: (credential: string) => Promise<ModelSpec[]>;
   fetchImpl?: ProviderFetch;
+  config: Config;
 }): LanguageModelProvider {
-  const apiKey = process.env.GOOGLE_GEMINI_API_KEY ?? '';
-  const listModels = options.listModels ?? listGeminiModels;
-  const traced = options.debugApi === true || CONFIG.DEBUG_API;
+  const config = options.config;
+  const apiKey = config.GEMINI_API_KEY;
+  const listModels =
+    options.listModels ?? ((credential: string) => listGeminiModels(credential, config));
+  const traced = options.debugApi === true || config.DEBUG_API;
   const baseFetch = options.fetchImpl ?? globalThis.fetch;
   const fetchImpl = traced ? withRequestTrace(options.logger, baseFetch) : baseFetch;
   let cataloguePromise: Promise<ModelSpec[]> | null = null;
@@ -94,6 +97,7 @@ export function createGeminiProvider(options: {
       token: apiKey,
       params,
       fetchImpl,
+      config,
     });
   }
 
@@ -101,7 +105,7 @@ export function createGeminiProvider(options: {
     id: 'gemini',
     label: 'Gemini',
     readinessError: apiKey ? undefined : 'Environment variable GOOGLE_GEMINI_API_KEY not set.',
-    defaultModel: CONFIG.MODEL,
+    defaultModel: config.MODEL,
     service: options.service ?? { generate },
     models: loadModels,
   };

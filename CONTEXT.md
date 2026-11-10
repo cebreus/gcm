@@ -30,6 +30,9 @@ separate commits. `gcm` displays them but never runs them.
 
 ## Filtering
 
+**Project configuration** — repository-owned `.gcmrc.json` conventions for
+commit types, scopes, analysis excludes and prompt instructions.
+
 **Exclude pattern** — `--exclude` glob deciding which staged files stay out
 of prompt. Supports `*` (any characters, including `/`) and `?` (exactly
 one character); case-sensitive; matches whole path.

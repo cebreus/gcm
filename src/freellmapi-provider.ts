@@ -11,6 +11,7 @@ import {
   rejectUnsafeModelMetadata,
   requestLanguageModelJson,
 } from './openai-compatible-client.js';
+import type { Config } from '../gcm.config.js';
 import { isRecord } from './utils.js';
 import {
   collectSortedModels,
@@ -103,7 +104,11 @@ function candidateCatalogueError(message: string) {
   });
 }
 
-async function discoverModels(url: URL, token?: string): Promise<{ models: ModelSpec[] }> {
+async function discoverModels(
+  url: URL,
+  config: Config,
+  token?: string,
+): Promise<{ models: ModelSpec[] }> {
   const candidates = resolveModelCandidates(url);
   let lastError: unknown = null;
 
@@ -115,6 +120,7 @@ async function discoverModels(url: URL, token?: string): Promise<{ models: Model
         timeoutMs: 5_000,
         token,
         init: token ? { headers: { authorization: `Bearer ${token}` } } : undefined,
+        config,
       });
 
       let rawList: unknown[] = [];
@@ -160,6 +166,7 @@ export async function createFreeLlmApiProvider(options: {
   baseUrl: string;
   model?: string;
   token?: string;
+  config: Config;
 }): Promise<LanguageModelProvider> {
   const url = parseProviderBaseUrl(options.baseUrl, 'FreeLLMAPI', {
     allowHttps: true,
@@ -169,7 +176,8 @@ export async function createFreeLlmApiProvider(options: {
     throw createLanguageModelApiError('Invalid FreeLLMAPI API token');
   }
 
-  const { models } = await discoverModels(url, options.token);
+  const config = options.config;
+  const { models } = await discoverModels(url, config, options.token);
 
   if (options.model && !models.some(model => model.name === options.model)) {
     throw new Error('Configured FreeLLMAPI model is not available');
@@ -193,6 +201,7 @@ export async function createFreeLlmApiProvider(options: {
       url: resolveChatEndpoint(url),
       token: options.token,
       params,
+      config,
     });
   }
 

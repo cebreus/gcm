@@ -9,7 +9,8 @@ import {
 } from '../src/auto-changeset.js';
 import { createCommitActionService } from '../src/commit-action-service.js';
 import { createGitService } from '../src/services/git-service.js';
-import { CONFIG } from '../gcm.config.js';
+import { loadConfig } from '../gcm.config.js';
+const CONFIG = loadConfig({});
 import { parseArgs } from '../src/cli.js';
 import {
   createGenerationState,
@@ -198,6 +199,7 @@ for (const includeChangeset of [true, false]) {
         let calls = 0;
         const generatedServices: GenerationServices = {
           ...deps,
+          config: CONFIG,
           providerId: 'test',
           providerLabel: 'Test',
           contextService: {
@@ -267,6 +269,7 @@ for (const includeChangeset of [true, false]) {
               notes.push(title ?? '');
             },
             outro: function () {},
+            print: function () {},
             sanitizeGeneratedText: function (message) {
               return message;
             },

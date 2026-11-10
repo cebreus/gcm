@@ -140,6 +140,33 @@ test('exclude-files: excludes root and nested dist from staged and commit analys
   ]);
 });
 
+test('exclude-files: project excludes omit analysis without reporting excluded paths', async function () {
+  const repository = await mkdtemp(join(tmpdir(), 'gcm-project-exclude-'));
+  try {
+    await runGitInRepository(repository, ['init']);
+    await writeFile(join(repository, 'keep.ts'), 'export const keep = true;\n');
+    await writeFile(join(repository, 'generated.ts'), 'export const generated = true;\n');
+    await runGitInRepository(repository, ['add', '.']);
+    const previousCwd = process.cwd();
+    process.chdir(repository);
+    try {
+      const staged = await createGitService().retrieveStagedChanges(
+        null,
+        null,
+        [],
+        ['generated.ts'],
+      );
+      expect(staged?.stagedFiles).toEqual(['keep.ts']);
+      expect(staged?.excludedPaths).toEqual([]);
+      expect(staged?.stagedDiff).not.toContain('generated.ts');
+    } finally {
+      process.chdir(previousCwd);
+    }
+  } finally {
+    await rm(repository, { recursive: true, force: true });
+  }
+});
+
 test('exclude-files: diff requests only include non-excluded paths', async () => {
   const calls: string[][] = [];
   const service = createGitService({

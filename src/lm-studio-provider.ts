@@ -17,6 +17,7 @@ import {
   rejectUnsafeModelMetadata,
   requestLanguageModelJson,
 } from './openai-compatible-client.js';
+import type { Config } from '../gcm.config.js';
 import { isRecord } from './utils.js';
 
 const PREFERRED_LM_STUDIO_MODEL = 'gemma-4-e4b-it-mlx';
@@ -46,6 +47,7 @@ function parseModel(value: unknown): ModelSpec | null {
 
 async function discoverModels(
   url: URL,
+  config: Config,
   token?: string,
 ): Promise<{ models: ModelSpec[]; loadedModelIds: Set<string> }> {
   const payload = await requestLanguageModelJson({
@@ -54,6 +56,7 @@ async function discoverModels(
     timeoutMs: 5_000,
     token,
     init: token ? { headers: { authorization: `Bearer ${token}` } } : undefined,
+    config,
   });
   if (!isRecord(payload) || !Array.isArray(payload.models)) {
     throw createLanguageModelApiError('Invalid LM Studio model catalogue');
@@ -91,6 +94,7 @@ export async function createLmStudioProvider(options: {
   model?: string;
   token?: string;
   probeOnly?: boolean;
+  config: Config;
 }): Promise<LanguageModelProvider> {
   const url = parseProviderBaseUrl(options.baseUrl, 'LM Studio', {
     allowHttps: false,
@@ -99,7 +103,8 @@ export async function createLmStudioProvider(options: {
   if (options.token && !isHeaderSafeToken(options.token)) {
     throw createLanguageModelApiError('Invalid LM Studio API token');
   }
-  let { models, loadedModelIds } = await discoverModels(url, options.token);
+  const config = options.config;
+  let { models, loadedModelIds } = await discoverModels(url, config, options.token);
   if (options.model && !models.some(model => model.name === options.model)) {
     throw new Error('Configured LM Studio model is not available');
   }
@@ -117,11 +122,12 @@ export async function createLmStudioProvider(options: {
         headers,
         body: JSON.stringify({ model: modelName }),
       },
+      config,
     });
     if (!isRecord(loadResult) || loadResult.status !== 'loaded' || loadResult.type !== 'llm') {
       throw createLanguageModelApiError('Invalid LM Studio load response');
     }
-    ({ models, loadedModelIds } = await discoverModels(url, options.token));
+    ({ models, loadedModelIds } = await discoverModels(url, config, options.token));
     if (!loadedModelIds.has(modelName)) {
       throw createLanguageModelApiError('LM Studio model did not report loaded state');
     }
@@ -154,6 +160,7 @@ export async function createLmStudioProvider(options: {
       url: new URL('/v1/chat/completions', url),
       token: options.token,
       params,
+      config,
     });
   }
 

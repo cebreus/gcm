@@ -23,7 +23,7 @@ Start every reply with `cebreus+gcm`.
 - `src/interactive-generation-dialogue.ts` owns prompts; `src/commit-action-service.ts` authorizes actions.
 - `src/services/` isolates Git and context I/O; `src/openai-compatible-client.ts` is the one chat transport for every provider, and `src/gemini-models.ts` fetches Gemini's model catalogue.
 - Core modules include summarization, scope detection, atomic planning, model limits, CLI parsing, Git process boundaries, and log redaction.
-- `gcm.config.ts` exports `CONFIG`, overridable by `GCM_` environment variables. Tests mirror `src/`; binary tests require fresh build.
+- `src/runner.ts` calls `loadConfig` once per run and passes resolved settings down; `src/project-config.ts` purely parses repository `.gcmrc.json`. Tests mirror `src/`; binary tests require fresh build.
 - `CONTEXT.md` owns domain glossary; `docs/user-flow.md` owns behavioral flow diagrams; accepted design decisions live in `docs/adr/`.
 
 ## Rules

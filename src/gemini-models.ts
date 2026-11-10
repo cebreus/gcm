@@ -2,7 +2,7 @@ import { readPositiveTokenCount, requireDistinctModels, type ModelSpec } from '.
 import { createLanguageModelApiError, isLanguageModelName } from './language-model-service.js';
 import { isRecord } from './utils.js';
 import { requestProviderText } from './provider-http.js';
-import { CONFIG } from '../gcm.config.js';
+import type { Config } from '../gcm.config.js';
 
 const MODELS_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 const MAX_MODEL_PAGES = 20;
@@ -37,7 +37,10 @@ function parseModel(value: unknown): ModelSpec | null {
   };
 }
 
-export async function listGeminiModels(apiKey: string): Promise<ModelSpec[]> {
+export async function listGeminiModels(
+  apiKey: string,
+  config: Pick<Config, 'MAX_RETRIES' | 'RETRY_BASE_MS' | 'RETRY_MAX_MS'>,
+): Promise<ModelSpec[]> {
   const models: ModelSpec[] = [];
   let pageToken: string | null = null;
   for (let page = 0; page < MAX_MODEL_PAGES; page += 1) {
@@ -50,9 +53,9 @@ export async function listGeminiModels(apiKey: string): Promise<ModelSpec[]> {
         init: { method: 'GET', headers: { 'x-goog-api-key': apiKey } },
         timeoutMs: 10_000,
         retry: {
-          maxRetries: CONFIG.MAX_RETRIES,
-          retryBaseMs: CONFIG.RETRY_BASE_MS,
-          retryMaxMs: CONFIG.RETRY_MAX_MS,
+          maxRetries: config.MAX_RETRIES,
+          retryBaseMs: config.RETRY_BASE_MS,
+          retryMaxMs: config.RETRY_MAX_MS,
         },
         retryNetworkErrors: true,
       });

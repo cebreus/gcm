@@ -7,6 +7,7 @@ separate ones.
 `--non-interactive` skips configuration, atomicity, and review prompts. It
 stops after generation unless explicit `--apply` requests the available Git
 action.
+`--print` also stops after generation, writes the message to stdout, and sends diagnostics to stderr.
 
 ## Provider check: `gcm --providers-list`
 
@@ -35,7 +36,7 @@ Uncertain evidence blocks note creation. Non-interactive and history flows are u
 
 ```mermaid
 flowchart TD
-  A[Run gcm] --> B{Arguments, repository<br/>and conflicts valid?}
+  A[Run gcm] --> B{Arguments, project configuration,<br/>repository and conflicts valid?}
   B -- No --> X[Show reason and stop]
   B -- Yes --> C[Read staged snapshot]
   C --> D{Changes staged?}
@@ -77,7 +78,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A[Run gcm --commit hash] --> B{Arguments, repository,<br/>target and conflicts valid?}
+  A[Run gcm --commit hash] --> B{Arguments, project configuration,<br/>repository, target and conflicts valid?}
   B -- No --> X[Show reason and stop]
   B -- Yes --> C[Read target diff]
   C --> C2{Changes valid and<br/>active provider ready?}

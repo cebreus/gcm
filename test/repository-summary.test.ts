@@ -3,8 +3,16 @@ import { mkdir, mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { summarizeRepositoryDiff as summarizeLargeDiff } from '../src/services/repository-summary.js';
-import { CONFIG } from '../gcm.config.js';
+import { summarizeRepositoryDiff } from '../src/services/repository-summary.js';
+import { loadConfig } from '../gcm.config.js';
+const CONFIG = loadConfig({});
+
+function summarizeLargeDiff(
+  files: string[],
+  options?: Parameters<typeof summarizeRepositoryDiff>[1],
+) {
+  return summarizeRepositoryDiff(files, options, CONFIG);
+}
 
 async function runGit(repository: string, args: string[]): Promise<void> {
   const process = Bun.spawn(['git', '-C', repository, ...args], { stderr: 'pipe' });

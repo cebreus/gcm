@@ -1,7 +1,14 @@
 import { expect, test } from 'bun:test';
-import { CONFIG } from '../gcm.config.js';
-import { createLmStudioProvider } from '../src/lm-studio-provider.js';
+import { loadConfig } from '../gcm.config.js';
+const CONFIG = loadConfig({});
+import { createLmStudioProvider as createLmStudioProviderWithConfig } from '../src/lm-studio-provider.js';
 import { isLanguageModelApiError } from '../src/language-model-service.js';
+
+function createLmStudioProvider(
+  options: Omit<Parameters<typeof createLmStudioProviderWithConfig>[0], 'config'>,
+) {
+  return createLmStudioProviderWithConfig({ ...options, config: CONFIG });
+}
 
 function createGenerateParams() {
   return {

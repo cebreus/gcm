@@ -5,6 +5,7 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LoggerConfig {
   LOG_LEVEL?: string;
+  LOG_TO_STDERR?: boolean;
 }
 
 export type LogMetadata = Record<string, unknown>;
@@ -82,9 +83,14 @@ function formatLogMeta(meta: LogMetadata | undefined): string {
   return ' ' + JSON.stringify(meta);
 }
 
-function writeRuntimeLog(level: LogLevel, formatted: string, meta: LogMetadata): void {
+function writeRuntimeLog(
+  level: LogLevel,
+  formatted: string,
+  meta: LogMetadata,
+  stderrOnly: boolean,
+): void {
   const line = formatted + formatLogMeta(meta);
-  if (level === 'error') {
+  if (stderrOnly || level === 'error') {
     writeStderrLine(line);
     return;
   }
@@ -101,6 +107,7 @@ export function createLogger(config?: LoggerConfig): Logger {
         level,
         formatLogLine(new Date().toISOString(), level, sanitiseTextForLogs(message, Infinity)),
         sanitiseMetaForLogs(meta ?? {}),
+        Boolean(config?.LOG_TO_STDERR),
       );
     },
   };

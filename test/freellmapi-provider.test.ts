@@ -1,5 +1,12 @@
 import { expect, test } from 'bun:test';
-import { createFreeLlmApiProvider } from '../src/freellmapi-provider.js';
+import { createFreeLlmApiProvider as createFreeLlmApiProviderWithConfig } from '../src/freellmapi-provider.js';
+import { loadConfig } from '../gcm.config.js';
+
+function createFreeLlmApiProvider(
+  options: Omit<Parameters<typeof createFreeLlmApiProviderWithConfig>[0], 'config'>,
+) {
+  return createFreeLlmApiProviderWithConfig({ ...options, config: loadConfig({}) });
+}
 
 test('FreeLLMAPI tries each derived model endpoint once', async function () {
   const modelPaths: string[] = [];

@@ -47,6 +47,7 @@ export interface GitService {
     commitHash: string | null,
     logger: Logger | null,
     excludePatterns?: string[],
+    analysisExcludePatterns?: string[],
   ): Promise<StagedChangesResult | null>;
   commitChanges(message: string, logger: Logger | null, safety?: CommitWriteSafety): Promise<void>;
   amendCommit(message: string, logger: Logger | null, safety?: CommitWriteSafety): Promise<void>;
@@ -114,8 +115,13 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
     listCommitHashes: (range, logger = null) => listCommitHashes(runGit, range, logger),
     hasAmendment: (hash, logger = null) => hasAmendment(runGit, hash, logger),
     getHeadHash: (logger = null) => getHeadHash(runGit, logger),
-    retrieveStagedChanges: (commitHash, logger = null, excludePatterns = []) =>
-      retrieveStagedChanges(runGit, commitHash, logger, excludePatterns),
+    retrieveStagedChanges: (
+      commitHash,
+      logger = null,
+      excludePatterns = [],
+      analysisExcludePatterns = [],
+    ) =>
+      retrieveStagedChanges(runGit, commitHash, logger, excludePatterns, analysisExcludePatterns),
     commitChanges: (message, logger = null, safety) =>
       commitChanges(runGit, message, logger, safety),
     amendCommit: (message, logger = null, safety) => amendCommit(runGit, message, logger, safety),
@@ -179,8 +185,13 @@ async function retrieveStagedChanges(
   commitHash: string | null,
   logger: Logger | null,
   excludePatterns: string[],
+  projectExcludePatterns: string[],
 ): Promise<StagedChangesResult | null> {
-  const analysisExcludePatterns = [...DEFAULT_ANALYSIS_EXCLUDE_PATTERNS, ...excludePatterns];
+  const analysisExcludePatterns = [
+    ...DEFAULT_ANALYSIS_EXCLUDE_PATTERNS,
+    ...projectExcludePatterns,
+    ...excludePatterns,
+  ];
   logger?.log('debug', 'Checking git status');
   const fileListRes = await runGit(buildFileListArgs(commitHash));
   if (fileListRes.truncated) {

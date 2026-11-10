@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createProviderFactories } from '../src/provider-factories.js';
+import { loadConfig } from '../gcm.config.js';
 
 test('LM Studio factory reads its URL when the factory runs', async function () {
   let staleRequests = 0;
@@ -35,6 +36,8 @@ test('LM Studio factory reads its URL when the factory runs', async function () 
       {
         log: function () {},
       },
+      false,
+      loadConfig({ GCM_LM_STUDIO_URL: activeServer.url.origin }),
     );
     process.env.GCM_LM_STUDIO_URL = activeServer.url.origin;
     const factory = factories.find(function (candidate) {

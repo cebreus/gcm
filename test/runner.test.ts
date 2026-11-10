@@ -4,7 +4,8 @@ import { createGenerationState } from '../src/generation.js';
 import { parseArgs } from '../src/cli.js';
 import packageJson from '../package.json';
 import type { Logger } from '../src/logger.js';
-import { CONFIG } from '../gcm.config.js';
+import { loadConfig } from '../gcm.config.js';
+const CONFIG = loadConfig({});
 import { estimateTokenCount } from '../src/utils.js';
 
 // Mock @clack/prompts
@@ -1066,10 +1067,7 @@ describe('Refactored Runner', () => {
 
     expect(mockGeminiService.generate).toHaveBeenCalledTimes(2);
     expect(mockGitService.retrieveStagedChanges).toHaveBeenCalledTimes(1);
-    expect(mockNote).toHaveBeenCalledWith(
-      'API Error (429): quota exhausted',
-      'Details',
-    );
+    expect(mockNote).toHaveBeenCalledWith('API Error (429): quota exhausted', 'Details');
   });
 
   test('Should present request timeouts without an unknown API status', async () => {
@@ -1098,10 +1096,7 @@ describe('Refactored Runner', () => {
       geminiModelLister: mockListModels,
     });
 
-    expect(mockNote).toHaveBeenCalledWith(
-      'FreeLLMAPI request timed out',
-      'Details',
-    );
+    expect(mockNote).toHaveBeenCalledWith('FreeLLMAPI request timed out', 'Details');
   });
 
   test('Should remove terminal controls from Gemini API error messages', async () => {

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createGeminiProvider } from '../src/gemini-provider.js';
+import { loadConfig } from '../gcm.config.js';
 import type { ModelSpec } from '../src/language-model-service.js';
 
 const MODELS: ModelSpec[] = [
@@ -26,6 +27,7 @@ test('Gemini generates over the OpenAI-compatible endpoint with bearer auth', as
   const requests: Array<{ url: string; authorization: string | null; body: unknown }> = [];
   try {
     const provider = createGeminiProvider({
+      config: loadConfig(process.env),
       logger: { log: function () {} },
       listModels: async function () {
         return MODELS;
@@ -76,6 +78,7 @@ test('Gemini reports truncation when the model stops on length', async function 
   process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
   try {
     const provider = createGeminiProvider({
+      config: loadConfig(process.env),
       logger: { log: function () {} },
       listModels: async function () {
         return MODELS;
@@ -105,6 +108,7 @@ test('Gemini model discovery retries after failure and caches success', async fu
   let calls = 0;
   try {
     const provider = createGeminiProvider({
+      config: loadConfig(process.env),
       logger: { log: function () {} },
       service: {
         generate: async function () {
@@ -146,6 +150,7 @@ test('Gemini model discovery keeps stable text models only', async function () {
       };
     };
     const provider = createGeminiProvider({
+      config: loadConfig(process.env),
       logger: { log: function () {} },
       service: {
         generate: async function () {
@@ -181,6 +186,7 @@ test('Gemini debug tracing never logs an unbounded response body', async functio
   const logged: string[] = [];
   try {
     const provider = createGeminiProvider({
+      config: loadConfig(process.env),
       logger: {
         log: function (_level: string, message: string, meta?: Record<string, unknown>) {
           if (message === 'Gemini API response') logged.push(String(meta?.body ?? ''));
@@ -216,6 +222,7 @@ test.each(['length', 'max_tokens', 'MAX_TOKENS'])(
     process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
     try {
       const provider = createGeminiProvider({
+        config: loadConfig(process.env),
         logger: { log: function () {} },
         listModels: async function () {
           return MODELS;

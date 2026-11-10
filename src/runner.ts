@@ -1,6 +1,6 @@
 import { CLI_OPTION_DEFINITIONS, isArgumentValidationError, parseArgs } from './cli.js';
 import type { ParsedOptions } from './cli.js';
-import { CONFIG } from '../gcm.config.js';
+import { loadConfig, type Config } from '../gcm.config.js';
 import { createLogger } from './logger.js';
 import type { Logger, LoggerConfig } from './logger.js';
 import { runModelsListCommand } from './models-list-command.js';
@@ -13,6 +13,8 @@ import { readCommitContextFacts } from './services/repository-context.js';
 import { summarizeRepositoryDiff } from './services/repository-summary.js';
 import { createContextService } from './services/context-service.js';
 import type { ContextService } from './services/context-service.js';
+import { loadProjectConfig } from './services/project-config-service.js';
+import type { ProjectConfig } from './project-config.js';
 import type { LanguageModelProvider } from './language-model-service.js';
 import { isLanguageModelName } from './language-model-service.js';
 import { createProviderFactories, type ProviderFactoryOptions } from './provider-factories.js';
@@ -150,16 +152,23 @@ function createRunnerServices(
   provider: LanguageModelProvider,
   providers: Array<{ id: string; label: string }>,
   gitService: GitService,
-  allowDirectAmend = true,
+  allowDirectAmend: boolean,
+  config: Config,
+  projectConfig: ProjectConfig,
 ): Omit<GenerationServices, 'output'> {
   const contextService =
-    opts.contextService ?? createContextService({ summarizeLargeDiff: summarizeRepositoryDiff });
+    opts.contextService ??
+    createContextService({
+      summarizeLargeDiff: (files, options) => summarizeRepositoryDiff(files, options, config),
+    });
   const dialogue = createRunnerDialogue(provider, providers);
   const commitActions = createCommitActionService({ gitService, logger, allowDirectAmend });
   async function resolveCommitContextHints(files: string[]) {
     return getCommitContextHints(files, await readCommitContextFacts(files));
   }
   return {
+    config,
+    projectConfig,
     gitService,
     contextService,
     languageModelService: provider.service,
@@ -176,18 +185,29 @@ function createRunnerServices(
 function createRunnerOutput(
   s: ReturnType<typeof spinner>,
   isInteractive: boolean,
+  printOnly: boolean,
 ): GenerationServices['output'] {
   return {
     isInteractive,
     startProgress: message => {
+      if (printOnly) return;
       s.start(message);
     },
     stopProgress: message => {
+      if (printOnly) return;
       s.stop(message);
     },
-    cancel,
-    note,
-    outro,
+    cancel: message => {
+      if (printOnly) cancel(message, { output: process.stderr });
+      else cancel(message);
+    },
+    note: (message, title) => {
+      if (!printOnly) note(message, title);
+    },
+    outro: message => {
+      if (!printOnly) outro(message);
+    },
+    print: message => process.stdout.write(message + '\n'),
     sanitizeGeneratedText: sanitizeForDisplay,
     sanitizeTerminalText,
     style: {
@@ -211,9 +231,10 @@ async function maybeHandleModelsList(
   });
 }
 
-function buildLoggerConfig(parsedArgs: ParsedOptions): LoggerConfig {
+function buildLoggerConfig(parsedArgs: ParsedOptions, config: Config): LoggerConfig {
   const loggerConfig: LoggerConfig = {
-    LOG_LEVEL: CONFIG.LOG_LEVEL,
+    LOG_LEVEL: config.LOG_LEVEL,
+    LOG_TO_STDERR: parsedArgs.print,
   };
   if (parsedArgs.verbose) loggerConfig.LOG_LEVEL = 'debug';
   return loggerConfig;
@@ -224,7 +245,9 @@ function parseArgsOrReport(argv: string[]): ParsedOptions | null {
     return parseArgs(argv);
   } catch (error) {
     if (!isArgumentValidationError(error)) throw error;
-    cancel(`Error: ${error.message}. Run gcm --help for usage.`);
+    const message = `Error: ${error.message}. Run gcm --help for usage.`;
+    if (argv.includes('--print')) cancel(message, { output: process.stderr });
+    else cancel(message);
     return null;
   }
 }
@@ -321,9 +344,14 @@ export async function executeCommitMessageGeneration(
   const parsedArgs = parseArgsOrReport(argv ?? process.argv.slice(2));
   let exitCode = 0;
   if (parsedArgs) {
-    const loggerConfig = buildLoggerConfig(parsedArgs);
+    const config = loadConfig(process.env);
+    const loggerConfig = buildLoggerConfig(parsedArgs, config);
     const logger = opts.logger ?? createLogger(loggerConfig);
     const isInteractive = opts.isInteractive ?? Boolean(process.stdin.isTTY);
+    const printOutput = parsedArgs.print ? { output: process.stderr } : undefined;
+    const reportCancel = parsedArgs.print
+      ? (message: string) => cancel(message, { output: process.stderr })
+      : cancel;
     if (parsedArgs.version) {
       process.stdout.write(`${pkg.name} ${pkg.version}\n`);
       process.exitCode = 0;
@@ -332,12 +360,12 @@ export async function executeCommitMessageGeneration(
     // Checked before any provider is built, because GCM_MODEL becomes a
     // provider's default model and would otherwise surface as "unavailable".
     // --help never resolves a model, so it stays usable.
-    if (!parsedArgs.help && !isLanguageModelName(CONFIG.MODEL)) {
-      cancel('Error: Invalid GCM_MODEL.');
+    if (!parsedArgs.help && !isLanguageModelName(config.MODEL)) {
+      reportCancel('Error: Invalid GCM_MODEL.');
       process.exitCode = 1;
       return;
     }
-    const factories = createProviderFactories(opts, logger, parsedArgs.debug);
+    const factories = createProviderFactories(opts, logger, parsedArgs.debug, config);
     if (parsedArgs.providersList && !parsedArgs.help) {
       process.exitCode = await runProvidersListCommand({
         factories,
@@ -356,12 +384,12 @@ export async function executeCommitMessageGeneration(
     }
     const session = await loadSession();
     const gitService = opts.gitService ?? createGitService();
-    const requestedProviderId = parsedArgs.provider ?? process.env.GCM_PROVIDER;
+    const requestedProviderId = parsedArgs.provider ?? config.PROVIDER;
     let providerId = opts.languageModelProvider
       ? opts.languageModelProvider.id
       : (requestedProviderId ?? factories[0]?.id);
     if (!providerId || (parsedArgs.model && !isLanguageModelName(parsedArgs.model))) {
-      cancel(
+      reportCancel(
         `Error: ${providerId ? 'Invalid model name' : 'No language model provider available'}.`,
       );
       process.exitCode = 1;
@@ -369,7 +397,7 @@ export async function executeCommitMessageGeneration(
     }
     const helpFactory = factories.find(factory => factory.id === providerId);
     if (!helpFactory) {
-      cancel('Error: Unknown language model provider.');
+      reportCancel('Error: Unknown language model provider.');
       process.exitCode = 1;
       return;
     }
@@ -384,7 +412,7 @@ export async function executeCommitMessageGeneration(
     for (;;) {
       const factory = factories.find(candidate => candidate.id === providerId);
       if (!factory) {
-        cancel('Error: Unknown language model provider.');
+        reportCancel('Error: Unknown language model provider.');
         exitCode = 1;
         break;
       }
@@ -400,7 +428,7 @@ export async function executeCommitMessageGeneration(
           providerSwitched = false;
           continue;
         }
-        if (isInteractive && factories.length > 1) {
+        if (isInteractive && !parsedArgs.nonInteractive && factories.length > 1) {
           note(message, `${factory.label} unavailable`);
           const selectedProvider = await select({
             message: 'Select AI Provider',
@@ -412,19 +440,35 @@ export async function executeCommitMessageGeneration(
             continue;
           }
         }
-        cancel(`Error: ${message}.`);
+        reportCancel(`Error: ${message}.`);
         exitCode = 1;
         break;
       }
-      intro(`${C.bright}${provider.label} Commit Message Helper v${pkg.version}${C.reset}`);
-      if (provider.selectionNotice) note(provider.selectionNotice, 'Model fallback');
+      if (!parsedArgs.print)
+        intro(`${C.bright}${provider.label} Commit Message Helper v${pkg.version}${C.reset}`);
+      if (provider.selectionNotice && !parsedArgs.print)
+        note(provider.selectionNotice, 'Model fallback');
       const earlyExitCode = await maybeHandleModelsList(parsedArgs, provider);
       if (earlyExitCode !== null) {
         exitCode = earlyExitCode;
         break;
       }
-      const s = spinner();
-      const output = createRunnerOutput(s, isInteractive && !parsedArgs.nonInteractive);
+      let projectConfig: ProjectConfig;
+      try {
+        projectConfig = await loadProjectConfig();
+      } catch (error) {
+        reportCancel(
+          `Error: ${sanitizeTerminalText(error instanceof Error ? error.message : String(error))}`,
+        );
+        exitCode = 1;
+        break;
+      }
+      const s = spinner(printOutput);
+      const output = createRunnerOutput(
+        s,
+        isInteractive && !parsedArgs.nonInteractive,
+        parsedArgs.print,
+      );
       const activeParsedArgs = providerSwitched ? { ...parsedArgs, model: null } : parsedArgs;
       const { targetCommit, state } = createGenerationState(
         activeParsedArgs,
@@ -437,7 +481,16 @@ export async function executeCommitMessageGeneration(
           gitService,
           range: activeParsedArgs.commitRange,
           createServices: () =>
-            createRunnerServices(opts, logger, provider, factories, gitService, false),
+            createRunnerServices(
+              opts,
+              logger,
+              provider,
+              factories,
+              gitService,
+              false,
+              config,
+              projectConfig,
+            ),
           parsedArgs: activeParsedArgs,
           logger,
           providerReadinessError: provider.readinessError,
@@ -448,7 +501,17 @@ export async function executeCommitMessageGeneration(
         break;
       }
       const outcome = await runGenerationCommand({
-        createServices: () => createRunnerServices(opts, logger, provider, factories, gitService),
+        createServices: () =>
+          createRunnerServices(
+            opts,
+            logger,
+            provider,
+            factories,
+            gitService,
+            true,
+            config,
+            projectConfig,
+          ),
         parsedArgs: activeParsedArgs,
         logger,
         providerReadinessError: provider.readinessError,
