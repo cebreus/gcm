@@ -199,16 +199,16 @@ test('integration: a token-limit failure surfaces instead of retrying silently',
   const gitService = createGitService({ gitCommandRunner: mockSpawnStreamImpl });
   const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
 
-  await expect(
-    runnerRun(['--model', 'gemini-3.7-flash'], {
-      logger: mockLoggerInstance,
-      gitService,
-      geminiService,
-      contextService,
-      geminiModelLister: mockListModels,
-    }),
-  ).rejects.toThrow('MAX_TOKENS');
+  await runnerRun(['--model', 'gemini-3.7-flash'], {
+    logger: mockLoggerInstance,
+    gitService,
+    geminiService,
+    contextService,
+    geminiModelLister: mockListModels,
+  });
 
+  expect(mockCancel).toHaveBeenCalledWith('An unexpected error occurred: Error: MAX_TOKENS');
+  expect(process.exitCode).toBe(1);
   expect(mockCallGemini).toHaveBeenCalledTimes(1);
 });
 

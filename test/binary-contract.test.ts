@@ -200,6 +200,9 @@ beforeAll(async () => {
       if (!String(input).includes('/chat/completions')) {
         return Response.json({ models: [{ name: 'models/gemini-3.7-flash', displayName: 'Gemini 3.7 Flash', supportedGenerationMethods: ['generateContent'], inputTokenLimit: 1048576, outputTokenLimit: 65536 }] });
       }
+      if (process.env.FAKE_CHAT_STATUS) {
+        return new Response(JSON.stringify({ error: { message: 'quota exhausted' } }), { status: Number(process.env.FAKE_CHAT_STATUS) });
+      }
       return new Response(JSON.stringify({
         choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'fix: corrected message' } }],
         usage: { prompt_tokens: 10, completion_tokens: 4 }
@@ -366,6 +369,31 @@ test('binary contract: --commit-range --apply adds one amend! per target and ski
   expect(repeated.exitCode).toBe(0);
   expect(repeated.stdout).toContain('0 completed, 2 skipped');
   expect(await readSubjects(repository)).toEqual(expected);
+});
+
+test('binary contract: a provider failure is reported once', async () => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/file.txt`, 'third\n');
+  await runCommand(['git', 'add', 'file.txt'], repository);
+
+  const result = await runSubprocess(
+    [
+      'bun',
+      '--preload',
+      providerPreload,
+      binaryPath,
+      '--model',
+      'gemini-3.7-flash',
+      '--non-interactive',
+    ],
+    repository,
+    'fake-key',
+    { FAKE_CHAT_STATUS: '400' },
+  );
+
+  expect(result.exitCode).toBe(1);
+  expect(clean(result.stdout)).toContain('API Error (400): quota exhausted');
+  expect(result.stderr).not.toContain('gcm: ');
 });
 
 test('binary contract: an invalid configuration value is reported without a stack trace', async () => {

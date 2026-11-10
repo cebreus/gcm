@@ -141,10 +141,8 @@ export async function runGenerationCommand(params: {
   } catch (error: unknown) {
     output.stopProgress('An error occurred');
     const errStr = String(error);
-    if (/Not a git repository/i.test(errStr)) {
-      output.cancel('Error: Not inside a git repository.');
-      return 'failure';
-    } else if (/unknown revision/i.test(errStr))
+    if (/Not a git repository/i.test(errStr)) output.cancel('Error: Not inside a git repository.');
+    else if (/unknown revision/i.test(errStr))
       output.cancel(`Error: Invalid commit SHA: ${targetCommit}`);
     else if (isLanguageModelApiError(error)) {
       logger.log('error', `Commit helper failed: ${error}`, {
@@ -156,7 +154,8 @@ export async function runGenerationCommand(params: {
       logger.log('error', `Commit helper failed: ${error}`, { error: errStr });
       output.cancel(`An unexpected error occurred: ${output.sanitizeTerminalText(errStr)}`);
     }
-    throw error;
+    // Reported above; rethrowing would make the entrypoint print it again.
+    return 'failure';
   }
 }
 
