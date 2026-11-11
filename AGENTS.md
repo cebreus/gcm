@@ -36,6 +36,7 @@ Start every reply with `cebreus+gcm`.
 - Match local style, avoid speculative abstractions, and fix shared functions rather than call sites.
 - Prefer standard library and existing dependencies; add code or dependencies only when they remove real complexity.
 - Every non-trivial change needs runnable validation. Prefer deletion and smallest correct solution.
+- Accepted ADRs in `docs/adr/` and README claims checked by `test/readme-contract.test.ts` are owner decisions. Never reverse them without explicit user approval; a reversal needs a new ADR.
 - Project history uses Conventional Commits.
 - Commits are forbidden by default. Exception: commit only after the user approves a proposal with `YES` (e.g. via `/cebreus-commit`), or to safeguard a fully verified atomic chunk before a risky change.
 

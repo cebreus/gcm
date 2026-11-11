@@ -259,3 +259,6 @@ Architecture, maintenance references:
 - [Commit-action consistency](docs/adr/0002-commit-action-consistency.md)
 - [First-parent commit analysis](docs/adr/0003-first-parent-commit-analysis.md)
 - [Redact secrets leaving the machine](docs/adr/0004-redact-secrets-leaving-the-machine.md)
+- [Language model provider boundary](docs/adr/0005-language-model-provider-boundary.md)
+- [One chat transport for every provider](docs/adr/0006-one-chat-transport-for-every-provider.md)
+- [Strip metadata from model replies](docs/adr/0007-strip-metadata-from-model-replies.md)
