@@ -95,7 +95,7 @@ test('README options table lists exactly the CLI options', () => {
 
 test('README project configuration keys are accepted, others rejected', () => {
   const keys = tableColumn('| Key ');
-  expect(new Set(keys)).toEqual(PROJECT_CONFIG_KEYS);
+  expect(new Set(keys)).toEqual(new Set(PROJECT_CONFIG_KEYS));
   const values: Record<string, unknown> = {
     types: ['feat'],
     scopes: ['cli'],
