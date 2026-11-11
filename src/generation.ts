@@ -657,10 +657,10 @@ async function runSingleGenerationAttempt(params: {
     modelName: state.modelName,
     maxOutputTokens,
   });
-  if (!response) {
+  if (!response?.text.trim()) {
     services.output.stopProgress(services.providerLabel + ' returned no usable response');
     services.output.cancel(
-      'Error: ' + services.providerLabel + ' did not return a usable response after retries.',
+      'Error: ' + services.providerLabel + ' did not return a usable response.',
     );
     return 'failure';
   }

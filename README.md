@@ -130,7 +130,7 @@ available, and `2` when none are available. Checks do not load LM Studio models.
 
 `--exclude` patterns case-sensitive, match whole path, support `*` and `?`. Excluded files stay staged, will commit; GCM asks confirmation before writing. Files matching the built-in excludes (`dist` and secret-bearing files, see [Security](#security)) are omitted from analysis but commit normally, without that confirmation. Merge commit analysed against first parent.
 
-If a provider returns no usable text after retries, GCM reports an error and performs no write action.
+If a provider returns empty or whitespace-only text, GCM reports an error and performs no write action; such a reply is not retried.
 
 Without `GCM_LM_STUDIO_MODEL`, LM Studio uses the first loaded model in alphabetical order; if none is loaded, GCM loads the first compatible model in that order and stops if that load fails. An explicit `GCM_LM_STUDIO_MODEL` is strict: if it is missing or cannot load, GCM stops instead of silently changing models. In the interactive flow you can then select another provider; non-interactive use exits with an error.
 

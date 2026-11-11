@@ -2,7 +2,10 @@ import { test, expect, mock } from 'bun:test';
 import { createLogger } from '../src/logger.ts';
 import runner from '../src/runner.ts';
 import type { SpawnGitStreamResult } from '../src/git-utils.ts';
-import type { LanguageModelService } from '../src/language-model-service.ts';
+import type {
+  LanguageModelResponse,
+  LanguageModelService,
+} from '../src/language-model-service.ts';
 import type { GitService } from '../src/services/git-service.ts';
 
 void mock.module('@clack/prompts', () => ({
@@ -23,7 +26,9 @@ void mock.module('@clack/prompts', () => ({
   }),
 }));
 
-async function runnerFallbackStructuredOutputTest(): Promise<void> {
+async function runnerFallbackStructuredOutputTest(
+  response: LanguageModelResponse | null,
+): Promise<void> {
   // Stubbed spawnStream implementation to simulate a staged diff and file list
   async function spawnStreamImpl(args: string[]): Promise<SpawnGitStreamResult> {
     const argStr = args.join(' ');
@@ -86,10 +91,10 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
     };
   }
 
-  // Provide a service that returns null to trigger fallback
+  // Provide a service whose response carries no usable text
   function createGeminiServiceFake(): LanguageModelService {
     return {
-      generate: async (_params: Parameters<LanguageModelService['generate']>[0]) => null,
+      generate: async (_params: Parameters<LanguageModelService['generate']>[0]) => response,
     };
   }
 
@@ -137,8 +142,13 @@ async function runnerFallbackStructuredOutputTest(): Promise<void> {
   }
 
   const joined = logs.join('\n');
-  expect(joined).toContain('did not return a usable response after retries');
+  expect(joined).toContain('did not return a usable response.');
   expect(joined).not.toContain('BRANCH');
-  console.log('  fallbackTest -> passed');
+  expect(joined).not.toContain('Failed to parse');
 }
-test('runner: fallback structured output', runnerFallbackStructuredOutputTest);
+for (const text of [null, '', ' \n\t']) {
+  test(`runner: ${JSON.stringify(text)} provider text is reported as no usable response`, () =>
+    runnerFallbackStructuredOutputTest(
+      text === null ? null : { text, usage: {}, truncated: false },
+    ));
+}
