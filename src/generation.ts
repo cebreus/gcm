@@ -306,12 +306,6 @@ async function runGenerationWorkflow(params: {
   });
   if (!readyState) return 'failure';
   const { repositoryState, staged } = readyState;
-  if (!targetCommit && isWhitespaceOnlyStagedChanges(staged)) {
-    services.output.cancel(
-      `The diff of ${staged.stagedFiles.length} staged file(s) is empty. Nothing to send to AI.`,
-    );
-    return 'failure';
-  }
   if (providerReadinessError && !canSwitchProvider) {
     services.output.cancel(
       `Error: ${services.output.sanitizeTerminalText(providerReadinessError)}`,
@@ -503,22 +497,8 @@ async function loadStagedChanges(params: {
     services.output.stopProgress(services.output.style.yellow('Only excluded files found'));
     return staged;
   }
-  if (!targetCommit && isWhitespaceOnlyStagedChanges(staged)) {
-    services.output.stopProgress(
-      services.output.style.yellow(
-        `Found ${staged.stagedFiles.length} staged file(s), but their diff is empty`,
-      ),
-    );
-    return staged;
-  }
   services.output.stopProgress(`Found ${staged.stagedFiles.length} file(s) changed`);
   return staged;
-}
-
-function isWhitespaceOnlyStagedChanges(
-  staged: NonNullable<Awaited<ReturnType<GitService['retrieveStagedChanges']>>>,
-): boolean {
-  return staged.stagedFiles.length > 0 && staged.stagedDiff.trim().length === 0;
 }
 
 async function resolveCommitContextHints(

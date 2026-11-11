@@ -44,9 +44,7 @@ flowchart TD
   E -- Re-check --> B
   E -- Cancel --> X
   D -- No, non-interactive --> X
-  D -- Yes --> D1{Diff non-empty, re-read without<br/>-w when whitespace-only?}
-  D1 -- No --> X
-  D1 -- Yes --> D2{Active provider ready?}
+  D -- Yes --> D2{Active provider ready?}
   D2 -- No --> X
   D2 -- Yes --> F{Conflicts absent and<br/>analysed snapshot verifiable?}
   F -- No --> X
