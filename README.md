@@ -118,7 +118,7 @@ retries; an API model fallback starts a new request deadline.
 `--providers-list` returns `0` when all providers are available, `1` when only some are
 available, and `2` when none are available. Checks do not load LM Studio models.
 
-`--print` cannot be combined with `--apply`, `--commit-range`, `--models-list`, or `--providers-list`. A message truncated by the output limit is refused with a non-zero exit. Errors are written to stderr; stdout carries only results.
+`--print` cannot be combined with `--apply`, `--commit-range`, `--models-list`, or `--providers-list`. A message truncated by the output limit is refused with a non-zero exit. Errors, logs and progress are written to stderr; stdout carries only results.
 
 `--exclude` patterns case-sensitive, match whole path, support `*` and `?`. Excluded files stay staged, will commit; GCM asks confirmation before writing. Generated `dist` files are omitted from analysis but commit normally. Merge commit analysed against first parent.
 

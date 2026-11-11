@@ -199,7 +199,7 @@ function createRunnerServices(
 }
 
 function createRunnerOutput(
-  s: ReturnType<typeof spinner>,
+  s: Pick<ReturnType<typeof spinner>, 'start' | 'stop'>,
   isInteractive: boolean,
   printOnly: boolean,
 ): GenerationServices['output'] {
@@ -247,7 +247,6 @@ async function maybeHandleModelsList(
 function buildLoggerConfig(parsedArgs: ParsedOptions, config: Config): LoggerConfig {
   const loggerConfig: LoggerConfig = {
     LOG_LEVEL: config.LOG_LEVEL,
-    LOG_TO_STDERR: parsedArgs.print,
   };
   if (parsedArgs.verbose || parsedArgs.debug || config.DEBUG_API) loggerConfig.LOG_LEVEL = 'debug';
   return loggerConfig;
@@ -466,7 +465,9 @@ export async function executeCommitMessageGeneration(
         break;
       }
       if (!parsedArgs.print)
-        intro(`${C.bright}${provider.label} Commit Message Helper v${pkg.version}${C.reset}`);
+        intro(`${C.bright}${provider.label} Commit Message Helper v${pkg.version}${C.reset}`, {
+          output: process.stderr,
+        });
       const earlyExitCode = await maybeHandleModelsList(parsedArgs, provider);
       if (earlyExitCode !== null) {
         exitCode = earlyExitCode;
@@ -482,7 +483,14 @@ export async function executeCommitMessageGeneration(
         exitCode = 1;
         break;
       }
-      const s = spinner(printOutput);
+      // clack's spinner emits cursor control sequences even without a TTY, so draw it only on one.
+      const s = process.stderr.isTTY
+        ? spinner({ output: process.stderr })
+        : {
+            start: () => {},
+            stop: (message?: string) =>
+              void process.stderr.write(`${sanitizeTerminalText(message ?? '')}\n`),
+          };
       const output = createRunnerOutput(
         s,
         isInteractive && !parsedArgs.nonInteractive,

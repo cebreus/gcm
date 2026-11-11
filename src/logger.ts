@@ -5,7 +5,6 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LoggerConfig {
   LOG_LEVEL?: string;
-  LOG_TO_STDERR?: boolean;
 }
 
 export type LogMetadata = Record<string, unknown>;
@@ -19,14 +18,6 @@ const DEFAULT_LEVEL = 'info';
 const SENSITIVE_KEY_PATTERN = /key|token|pass|secret/i;
 
 const levels: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
-
-function writeStdoutLine(text: string): void {
-  process.stdout.write(text + '\n');
-}
-
-function writeStderrLine(text: string): void {
-  process.stderr.write(text + '\n');
-}
 
 function sanitiseTextForLogs(text: string, maxLen = 256): string {
   const out = stripTerminalControlSequences(
@@ -83,32 +74,18 @@ function formatLogMeta(meta: LogMetadata | undefined): string {
   return ' ' + JSON.stringify(meta);
 }
 
-function writeRuntimeLog(
-  level: LogLevel,
-  formatted: string,
-  meta: LogMetadata,
-  stderrOnly: boolean,
-): void {
-  const line = formatted + formatLogMeta(meta);
-  if (stderrOnly || level === 'error') {
-    writeStderrLine(line);
-    return;
-  }
-  writeStdoutLine(line);
-}
-
 export function createLogger(config?: LoggerConfig): Logger {
   const threshold =
     levels[stringOrDefault(config?.LOG_LEVEL, DEFAULT_LEVEL) as LogLevel] ?? levels.info;
   return {
     log(level, message, meta) {
       if (levels[level] < threshold) return;
-      writeRuntimeLog(
+      const formatted = formatLogLine(
+        new Date().toISOString(),
         level,
-        formatLogLine(new Date().toISOString(), level, sanitiseTextForLogs(message, Infinity)),
-        sanitiseMetaForLogs(meta ?? {}),
-        Boolean(config?.LOG_TO_STDERR),
+        sanitiseTextForLogs(message, Infinity),
       );
+      process.stderr.write(formatted + formatLogMeta(sanitiseMetaForLogs(meta ?? {})) + '\n');
     },
   };
 }

@@ -693,7 +693,9 @@ describe('Refactored Runner', () => {
     expect(mockSaveSession).toHaveBeenCalledWith(
       expect.objectContaining({ providerId: 'local', modelName: 'local-alt' }),
     );
-    expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('Local Commit Message Helper'));
+    expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('Local Commit Message Helper'), {
+      output: process.stderr,
+    });
 
     const originalStdoutWrite = process.stdout.write;
     const helpOutput: string[] = [];

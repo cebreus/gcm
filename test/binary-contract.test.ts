@@ -397,6 +397,42 @@ test('binary contract: non-interactive generation stays read-only without --appl
   expect(await readSubjects(repository)).toEqual(['feat: second subject', 'feat: first subject']);
 });
 
+function runRawWithProvider(args: string[], cwd: string): Promise<BinaryResult> {
+  return runSubprocess(
+    ['bun', '--preload', providerPreload, binaryPath, '--model', 'gemini-3.7-flash', ...args],
+    cwd,
+    'fake-key',
+  );
+}
+
+function expectNoLogsOrControlsOnStdout(stdout: string): void {
+  expect(stdout).not.toMatch(/(INFO|WARN|DEBUG):/);
+  expect(stdout).not.toContain('\u001b[?25l');
+  expect(stdout).not.toContain('\u001b[1G');
+}
+
+test('binary contract: logs and progress go to stderr, not a non-TTY stdout', async () => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/file.txt`, 'third\n');
+  await runCommand(['git', 'add', 'file.txt'], repository);
+
+  const result = await runRawWithProvider(['--non-interactive'], repository);
+
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain('fix: corrected message');
+  expectNoLogsOrControlsOnStdout(result.stdout);
+  expect(result.stderr).toContain('INFO: model:');
+});
+
+test('binary contract: a failing run keeps logs and controls off a non-TTY stdout', async () => {
+  const repository = await createCommittedRepository();
+
+  const result = await runRawWithProvider(['--non-interactive'], repository);
+
+  expect(result.exitCode).not.toBe(0);
+  expectNoLogsOrControlsOnStdout(result.stdout);
+});
+
 test('binary contract: --print writes only generated message and stays read-only', async () => {
   const repository = await createCommittedRepository();
   await Bun.write(`${repository}/file.txt`, 'third\n');
@@ -621,7 +657,7 @@ test('binary contract: an unconfigured run still shows configuration', async () 
 
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain('Settings: [Provider: Gemini] [Model: gemini-3.7-flash]');
-  expect(result.stderr).toBe('');
+  expect(result.stderr).not.toMatch(/ERROR|Error/);
 });
 
 test('binary contract: analyses whitespace-only staged changes as is', async () => {
@@ -665,7 +701,7 @@ test('binary contract: accepts clustered boolean flags', async () => {
   const result = await runBinary(['-vd']);
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain('No staged changes found');
+  expect(result.stderr).toContain('No staged changes found');
   expect(result.stdout).not.toContain('Unknown flag');
 });
 
@@ -687,8 +723,8 @@ test('binary contract: excludes a dash-prefixed sentinel from the changed-file s
   const result = await runBinary(['--exclude', '-generated/*'], excludeRepository);
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain('Excluded 1 file(s) matching patterns: -generated/*');
-  expect(result.stdout).toContain('Found 1 file(s) changed');
+  expect(result.stderr).toContain('Excluded 1 file(s) matching patterns: -generated/*');
+  expect(result.stderr).toContain('Found 1 file(s) changed');
   expect(result.stderr).toContain('GOOGLE_GEMINI_API_KEY');
   expect(result.stdout).not.toContain('Missing value for flag: --exclude');
   expect(result.stderr).not.toContain('Missing value for flag: --exclude');
