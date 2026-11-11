@@ -8,7 +8,7 @@ interface DiffLinesResult {
   truncated: boolean;
 }
 
-export interface RepositorySummaryOptions {
+interface RepositorySummaryOptions {
   spawnLinesImpl?: (args: string[], options?: Record<string, unknown>) => Promise<DiffLinesResult>;
   spawnStreamImpl?: (
     args: string[],

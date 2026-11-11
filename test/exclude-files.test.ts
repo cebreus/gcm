@@ -6,7 +6,11 @@ import { parseArgs } from '../src/cli';
 import { createCommitActionService } from '../src/commit-action-service';
 import { spawnGitStream } from '../src/git-utils';
 import { createGitService } from '../src/services/git-service';
-import { shouldExcludeFile, filterExcludedFiles } from '../src/utils';
+import { shouldExcludeFile } from '../src/utils';
+
+function filterExcludedFiles(files: string[], patterns: string[]): string[] {
+  return files.filter(file => !shouldExcludeFile(file, patterns));
+}
 
 async function runGitInRepository(repository: string, args: string[]): Promise<string> {
   const child = Bun.spawn({

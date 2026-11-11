@@ -144,7 +144,7 @@ function configuredModelFor(providerId: string): string | undefined {
   return value === '' ? undefined : value;
 }
 
-export interface RunnerOptions extends ProviderFactoryOptions {
+interface RunnerOptions extends ProviderFactoryOptions {
   isInteractive?: boolean;
   logger?: Logger;
   gitService?: GitService;

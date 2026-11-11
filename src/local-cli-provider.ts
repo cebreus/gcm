@@ -17,7 +17,7 @@ const CLI_LIMITS = {
   maxOutputTokens: 8_192,
 };
 
-export interface LocalCliRunRequest {
+interface LocalCliRunRequest {
   cmd: string[];
   stdin: string;
   timeoutMs: number;

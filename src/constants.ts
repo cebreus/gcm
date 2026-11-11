@@ -16,7 +16,7 @@ export const BINARY_EXTENSIONS = [
 // Default values
 export const MAX_CHILD_OUTPUT_BYTES = 1024 * 1024 * 1024;
 
-export const DEFAULT_QUIET_EXCLUDE_PATTERNS = ['dist/**', '**/dist/**'] as const;
+const DEFAULT_QUIET_EXCLUDE_PATTERNS = ['dist/**', '**/dist/**'] as const;
 
 // Glob has no negation, so `.env.example`/`.env.sample` are excluded with `.env.*`.
 // Staged matches are reported as excluded paths so the commit needs acknowledgement.

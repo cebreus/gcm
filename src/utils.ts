@@ -120,10 +120,6 @@ export function shouldExcludeFile(filePath: string, excludePatterns: string[]): 
   return excludePatterns.some(pattern => globToRegex(pattern).test(filePath));
 }
 
-export function filterExcludedFiles(files: string[], excludePatterns: string[]): string[] {
-  return files.filter(file => !shouldExcludeFile(file, excludePatterns));
-}
-
 export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void {
   if (!Number.isFinite(maxSize) || maxSize <= 0) return;
   if (array.length < maxSize) {

@@ -4,7 +4,6 @@ import {
   pushHunkToTop,
   formatCommitMessage,
   shouldExcludeFile,
-  filterExcludedFiles,
   sanitizeForDisplay,
   stripTerminalControlSequences,
   redactSensitiveText,
@@ -174,31 +173,6 @@ test('utils: shouldExcludeFile - should handle path-based patterns', () => {
 test('utils: shouldExcludeFile - should be case-sensitive', () => {
   expect(shouldExcludeFile('Manifest.json', ['*manifest*'])).toBe(false);
   expect(shouldExcludeFile('manifest.json', ['*manifest*'])).toBe(true);
-});
-
-// --- Tests for filterExcludedFiles ---
-test('utils: filterExcludedFiles - should filter multiple files', () => {
-  const files = ['src/app.ts', 'manifest.json', 'src/manifest.ts', 'package.json'];
-  const result = filterExcludedFiles(files, ['*manifest*']);
-  expect(result).toEqual(['src/app.ts', 'package.json']);
-});
-
-test('utils: filterExcludedFiles - should handle multiple patterns', () => {
-  const files = ['src/app.ts', 'manifest.json', 'package-lock.json', 'package.json'];
-  const result = filterExcludedFiles(files, ['*manifest*', '*lock*']);
-  expect(result).toEqual(['src/app.ts', 'package.json']);
-});
-
-test('utils: filterExcludedFiles - should return all files when no patterns', () => {
-  const files = ['src/app.ts', 'manifest.json', 'package.json'];
-  const result = filterExcludedFiles(files, []);
-  expect(result).toEqual(files);
-});
-
-test('utils: filterExcludedFiles - should return empty array when all excluded', () => {
-  const files = ['manifest.json', 'manifest.ts'];
-  const result = filterExcludedFiles(files, ['*manifest*']);
-  expect(result).toEqual([]);
 });
 
 // --- Tests for sanitizeForDisplay ---

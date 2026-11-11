@@ -34,7 +34,7 @@ export function parseProviderBaseUrl(
 
 const MAX_RESPONSE_BODY_BYTES = 1024 * 1024;
 
-export async function readResponseBody(response: Response): Promise<string> {
+async function readResponseBody(response: Response): Promise<string> {
   if (!response.body) return response.text();
   let bytesRead = 0;
   const body = response.body.pipeThrough(
@@ -90,13 +90,13 @@ export function withRequestTrace(
   };
 }
 
-export interface RetryPolicy {
+interface RetryPolicy {
   maxRetries: number;
   retryBaseMs: number;
   retryMaxMs: number;
 }
 
-export interface ProviderHttpResult {
+interface ProviderHttpResult {
   response: Response;
   body: string;
 }

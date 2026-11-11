@@ -15,7 +15,7 @@ interface DiffSummaryPolicy {
   maxOutputBytes: number;
 }
 
-export interface SummarizeDiffResult {
+interface SummarizeDiffResult {
   text: string;
   numHunks: number;
   numSkippedFiles: number;
