@@ -41,10 +41,11 @@ function isBinaryFile(file: string): boolean {
 }
 
 function diffArgs(targetCommit: string | undefined, options: string[], files: string[]): string[] {
+  const plain = ['--no-color', '--no-ext-diff', '--no-textconv'];
   return [
     ...(targetCommit
-      ? ['show', '--first-parent', '--format=', '-w', ...options, targetCommit]
-      : ['diff', '--staged', '-w', ...options]),
+      ? ['show', '--first-parent', '--format=', '-w', ...plain, ...options, targetCommit]
+      : ['diff', '--staged', '-w', ...plain, ...options]),
     '--',
     ...files.map(literalPathspec),
   ];

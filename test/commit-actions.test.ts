@@ -97,9 +97,10 @@ describe('commit actions', () => {
     let treeRead = 0;
     let diffRead = 0;
     const { calls, runner } = createRecorder({
-      'diff --staged --name-only': 'first.ts\n',
+      'diff --staged --name-status -z --find-renames': 'M\0first.ts\0',
       'ls-files --stage -z': '100644 1111111111111111111111111111111111111111 0\tfirst.ts\0',
-      'diff --staged -w': 'diff --git a/first.ts b/first.ts\n',
+      'diff --staged -w --no-color --no-ext-diff --no-textconv --find-renames':
+        'diff --git a/first.ts b/first.ts\n',
     });
     const gitService = createGitService({
       gitCommandRunner: async function (args) {
@@ -111,7 +112,7 @@ describe('commit actions', () => {
             truncated: false,
           };
         }
-        if (args[0] === 'diff' && !args.includes('--name-only')) diffRead += 1;
+        if (args[0] === 'diff' && !args.includes('--name-status')) diffRead += 1;
         return runner(args);
       },
     });
@@ -129,9 +130,10 @@ describe('commit actions', () => {
   test('refuses a staged diff that remains unstable after one retry', async () => {
     let treeRead = 0;
     const { runner } = createRecorder({
-      'diff --staged --name-only': 'first.ts\n',
+      'diff --staged --name-status -z --find-renames': 'M\0first.ts\0',
       'ls-files --stage -z': '100644 1111111111111111111111111111111111111111 0\tfirst.ts\0',
-      'diff --staged -w': 'diff --git a/first.ts b/first.ts\n',
+      'diff --staged -w --no-color --no-ext-diff --no-textconv --find-renames':
+        'diff --git a/first.ts b/first.ts\n',
     });
     const gitService = createGitService({
       gitCommandRunner: async function (args) {

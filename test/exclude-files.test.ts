@@ -105,9 +105,9 @@ test('exclude-files: excludes root and nested dist from staged and commit analys
   const service = createGitService({
     gitCommandRunner: async args => {
       calls.push(args);
-      if (args.includes('--name-only')) {
+      if (args.includes('--name-status')) {
         return {
-          text: 'src/app.ts\0dist/gcm\0packages/cli/dist/index.js\0',
+          text: 'M\0src/app.ts\0M\0dist/gcm\0M\0packages/cli/dist/index.js\0',
           truncated: false,
         };
       }
@@ -129,11 +129,25 @@ test('exclude-files: excludes root and nested dist from staged and commit analys
   expect(staged?.excludedPaths).toEqual([]);
   expect(committed?.stagedFiles).toEqual(['src/app.ts']);
   expect(committed?.excludedPaths).toEqual([]);
-  expect(calls).toContainEqual(['diff', '--staged', '-w', '--', ':(top,literal)src/app.ts']);
+  expect(calls).toContainEqual([
+    'diff',
+    '--staged',
+    '-w',
+    '--no-color',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--find-renames',
+    '--',
+    ':(top,literal)src/app.ts',
+  ]);
   expect(calls).toContainEqual([
     'show',
     '--first-parent',
     '-w',
+    '--no-color',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--find-renames',
     'abc123',
     '--',
     ':(top,literal)src/app.ts',
@@ -173,7 +187,7 @@ test('exclude-files: diff requests only include non-excluded paths', async () =>
     gitCommandRunner: async args => {
       calls.push(args);
       return {
-        text: args.includes('--name-only') ? 'src/app.ts\0.env.local\0' : 'diff',
+        text: args.includes('--name-status') ? 'M\0src/app.ts\0M\0.env.local\0' : 'diff',
         truncated: false,
       };
     },
@@ -181,14 +195,24 @@ test('exclude-files: diff requests only include non-excluded paths', async () =>
 
   await service.retrieveStagedChanges(null, null, ['.env*']);
 
-  expect(calls).toContainEqual(['diff', '--staged', '-w', '--', ':(top,literal)src/app.ts']);
+  expect(calls).toContainEqual([
+    'diff',
+    '--staged',
+    '-w',
+    '--no-color',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--find-renames',
+    '--',
+    ':(top,literal)src/app.ts',
+  ]);
 });
 
 test('exclude-files: carries excluded staged paths alongside the analysed snapshot', async () => {
   const service = createGitService({
     gitCommandRunner: async args => {
-      if (args.includes('--name-only'))
-        return { text: 'src/app.ts\0secrets.txt\0', truncated: false };
+      if (args.includes('--name-status'))
+        return { text: 'M\0src/app.ts\0M\0secrets.txt\0', truncated: false };
       if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
       if (args[0] === 'ls-files')
         return {
@@ -207,8 +231,8 @@ test('exclude-files: carries excluded staged paths alongside the analysed snapsh
 test('exclude-files: reports project excludes separately from CLI excludes', async () => {
   const service = createGitService({
     gitCommandRunner: async args => {
-      if (args.includes('--name-only'))
-        return { text: 'src/app.ts\0generated.txt\0', truncated: false };
+      if (args.includes('--name-status'))
+        return { text: 'M\0src/app.ts\0M\0generated.txt\0', truncated: false };
       if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
       if (args[0] === 'ls-files') return { text: '', truncated: false };
       return { text: 'diff', truncated: false };
@@ -224,8 +248,8 @@ test('exclude-files: parses NUL-separated file-list fixtures as real paths', asy
   const quotedNulPath = '"quoted name"';
   const service = createGitService({
     gitCommandRunner: async args => {
-      if (args.includes('--name-only')) {
-        return { text: `${nulPath}\0${quotedNulPath}\0source.ts\0`, truncated: false };
+      if (args.includes('--name-status')) {
+        return { text: `M\0${nulPath}\0M\0${quotedNulPath}\0M\0source.ts\0`, truncated: false };
       }
       if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
       if (args[0] === 'ls-files') return { text: '', truncated: false };
@@ -242,7 +266,7 @@ test('exclude-files: refuses a truncated staged file list', async () => {
   const service = createGitService({
     gitCommandRunner: async args => {
       calls.push(args);
-      if (args.includes('--name-only')) return { text: 'source.ts\0', truncated: true };
+      if (args.includes('--name-status')) return { text: 'M\0source.ts\0', truncated: true };
       if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
       if (args[0] === 'ls-files') return { text: '', truncated: false };
       return { text: 'diff', truncated: false };
@@ -252,14 +276,14 @@ test('exclude-files: refuses a truncated staged file list', async () => {
   await expect(service.retrieveStagedChanges(null, null)).rejects.toThrow(
     'File list output was truncated. Reduce the change set, then try again.',
   );
-  expect(calls).toEqual([['diff', '--staged', '--name-only', '-z']]);
+  expect(calls).toEqual([['diff', '--staged', '--name-status', '-z', '--find-renames']]);
 });
 
 test('exclude-files: keeps a truncated staged diff as a warning', async () => {
   const logs: string[] = [];
   const service = createGitService({
     gitCommandRunner: async args => {
-      if (args.includes('--name-only')) return { text: 'source.ts\0', truncated: false };
+      if (args.includes('--name-status')) return { text: 'M\0source.ts\0', truncated: false };
       if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
       if (args[0] === 'ls-files') {
         return {
@@ -413,7 +437,7 @@ test('exclude-files: real GitService reads root, ordinary, merge, octopus, and r
     expect(octopusResult.stagedFiles).toEqual(['a.txt', 'b.txt']);
     expect(octopusResult.stagedDiff).toContain('+a');
     expect(renameResult.stagedFiles).toEqual([renamedPath]);
-    expect(renameResult.stagedDiff).toContain('+root');
+    expect(renameResult.stagedDiff).toContain('rename from');
   } finally {
     await rm(repository, { recursive: true, force: true });
   }

@@ -138,8 +138,8 @@ async function mockSpawnStreamImpl(args: string[]): Promise<{ text: string; trun
   if (cmd.includes('rev-parse --is-inside-work-tree')) {
     return { text: '', truncated: false };
   }
-  if (cmd.includes('diff --staged') && cmd.includes('--name-only')) {
-    return { text: 'file1.ts\0file2.js', truncated: false };
+  if (cmd.includes('diff --staged') && cmd.includes('--name-status')) {
+    return { text: 'M\0file1.ts\0M\0file2.js', truncated: false };
   }
   if (cmd.includes('diff --staged -w')) {
     return {
@@ -147,8 +147,8 @@ async function mockSpawnStreamImpl(args: string[]): Promise<{ text: string; trun
       truncated: false,
     };
   }
-  if (cmd.includes('show --first-parent -w') && cmd.includes('--name-only')) {
-    return { text: 'src/index.js', truncated: false };
+  if (cmd.includes('show --first-parent -w') && cmd.includes('--name-status')) {
+    return { text: 'M\0src/index.js', truncated: false };
   }
   if (cmd.includes('show --first-parent -w') && cmd.includes('a1b2c3d')) {
     return { text: 'diff for commit a1b2c3d', truncated: false };
@@ -220,8 +220,8 @@ test('integration: should handle various file types', async () => {
     if (cmd.includes('rev-parse --is-inside-work-tree')) {
       return { text: '', truncated: false };
     }
-    if (cmd.includes('diff --staged') && cmd.includes('--name-only')) {
-      return { text: 'src/component.tsx\0styles/main.css\0README.md', truncated: false };
+    if (cmd.includes('diff --staged') && cmd.includes('--name-status')) {
+      return { text: 'M\0src/component.tsx\0M\0styles/main.css\0M\0README.md', truncated: false };
     }
     if (cmd.includes('diff --staged -w')) {
       return { text: 'diff for multiple files', truncated: false };
@@ -280,8 +280,8 @@ test('integration: should not send whitespace-only staged changes to AI', async 
     if (cmd.includes('rev-parse --is-inside-work-tree')) {
       return { text: '', truncated: false };
     }
-    if (cmd.includes('diff --staged --name-only')) {
-      return { text: 'docs/README.md\0docs/guide.md', truncated: false };
+    if (cmd.includes('diff --staged') && cmd.includes('--name-status')) {
+      return { text: 'M\0docs/README.md\0M\0docs/guide.md', truncated: false };
     }
     if (cmd.includes('diff --staged -w')) {
       return { text: '', truncated: false };
@@ -323,8 +323,8 @@ test('integration: should handle real git repository state', async () => {
     if (cmd.includes('rev-parse --is-inside-work-tree')) {
       return { text: '', truncated: false }; // Success
     }
-    if (cmd.includes('diff --staged --name-only')) {
-      return { text: 'package.json\0src/main.ts', truncated: false };
+    if (cmd.includes('diff --staged') && cmd.includes('--name-status')) {
+      return { text: 'M\0package.json\0M\0src/main.ts', truncated: false };
     }
     if (cmd.includes('diff --staged -w')) {
       return {

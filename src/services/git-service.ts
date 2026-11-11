@@ -1,5 +1,5 @@
 import { fileExists, literalPathspec, spawnGitStream } from '../git-utils.js';
-import { filterExcludedFiles, shouldExcludeFile } from '../utils.js';
+import { shouldExcludeFile } from '../utils.js';
 import { DEFAULT_ANALYSIS_EXCLUDE_PATTERNS } from '../constants.js';
 import type { Logger } from '../logger.js';
 
@@ -80,16 +80,52 @@ export interface RepositoryState {
 
 function buildFileListArgs(commitHash: string | null): string[] {
   return commitHash
-    ? ['show', '--first-parent', '-w', '--name-only', '--pretty=format:', '-z', commitHash]
-    : ['diff', '--staged', '--name-only', '-z'];
+    ? [
+        'show',
+        '--first-parent',
+        '-w',
+        '--name-status',
+        '--pretty=format:',
+        '-z',
+        '--find-renames',
+        commitHash,
+      ]
+    : ['diff', '--staged', '--name-status', '-z', '--find-renames'];
 }
 
 function buildDiffArgs(commitHash: string | null): string[] {
-  return commitHash ? ['show', '--first-parent', '-w', commitHash] : ['diff', '--staged', '-w'];
+  const plain = ['--no-color', '--no-ext-diff', '--no-textconv', '--find-renames'];
+  return commitHash
+    ? ['show', '--first-parent', '-w', ...plain, commitHash]
+    : ['diff', '--staged', '-w', ...plain];
 }
 
 function parseFileList(text: string): string[] {
   return text.split('\0').filter(path => path.length > 0);
+}
+
+interface FileEntry {
+  path: string;
+  origin?: string;
+}
+
+// `--name-status -z` prints `S\0path\0`, or `Rnnn\0old\0new\0` / `Cnnn\0src\0dst\0`.
+function parseFileEntries(text: string): FileEntry[] {
+  const fields = text.split('\0');
+  const entries: FileEntry[] = [];
+  for (let index = 0; index < fields.length; index += 1) {
+    const status = fields[index].trim();
+    if (!status) continue;
+    if (status.startsWith('R') || status.startsWith('C')) {
+      const [from, to] = [fields[index + 1], fields[index + 2]];
+      if (to) entries.push(status.startsWith('R') ? { path: to, origin: from } : { path: to });
+      index += 2;
+    } else {
+      if (fields[index + 1]) entries.push({ path: fields[index + 1] });
+      index += 1;
+    }
+  }
+  return entries;
 }
 
 function logExcludedFiles(
@@ -203,29 +239,40 @@ async function retrieveStagedChanges(
   if (fileListRes.truncated) {
     throw new Error('File list output was truncated. Reduce the change set, then try again.');
   }
-  const allFiles = parseFileList(fileListRes.text);
-  const files = filterExcludedFiles(allFiles, analysisExcludePatterns);
-  const explicitlyIncludedPaths = new Set(filterExcludedFiles(allFiles, excludePatterns));
-  const excludedPaths = allFiles.filter(path => !explicitlyIncludedPaths.has(path));
+  const entries = parseFileEntries(fileListRes.text);
+  const isExcluded = (entry: FileEntry, patterns: string[]): boolean =>
+    shouldExcludeFile(entry.path, patterns) ||
+    (entry.origin !== undefined && shouldExcludeFile(entry.origin, patterns));
+  const kept = entries.filter(entry => !isExcluded(entry, analysisExcludePatterns));
+  const files = kept.map(entry => entry.path);
+  // Git needs both rename endpoints in the pathspec to print `rename from/to`.
+  const pathspec = kept.flatMap(entry =>
+    entry.origin ? [entry.path, entry.origin] : [entry.path],
+  );
+  const excludedPaths = entries
+    .filter(entry => isExcluded(entry, excludePatterns))
+    .map(entry => entry.path);
   const projectExcludesMatched = projectExcludePatterns.some(pattern =>
-    allFiles.some(path => shouldExcludeFile(path, [pattern])),
+    entries.some(entry => isExcluded(entry, [pattern])),
   );
-  const originalFileCount = allFiles.length;
   const matchedExcludePatterns = analysisExcludePatterns.filter(pattern =>
-    allFiles.some(path => shouldExcludeFile(path, [pattern])),
+    entries.some(entry => isExcluded(entry, [pattern])),
   );
-  logExcludedFiles(logger, matchedExcludePatterns, originalFileCount, files.length);
+  logExcludedFiles(logger, matchedExcludePatterns, entries.length, files.length);
   if (files.length === 0) {
     logNoChanges(logger, commitHash);
     return null;
   }
   const diff = commitHash
     ? {
-        result: await runGit([...buildDiffArgs(commitHash), '--', ...files.map(literalPathspec)], {
-          allowTruncated: true,
-        }),
+        result: await runGit(
+          [...buildDiffArgs(commitHash), '--', ...pathspec.map(literalPathspec)],
+          {
+            allowTruncated: true,
+          },
+        ),
       }
-    : await readStableStagedDiff(runGit, files, logger);
+    : await readStableStagedDiff(runGit, pathspec, logger);
   const diffRes = diff.result;
   if (diffRes.truncated) logger?.log('warn', 'Diff output was truncated due to size limits.');
   return {
@@ -240,7 +287,7 @@ async function retrieveStagedChanges(
 
 async function readStableStagedDiff(
   runGit: GitCommandRunner,
-  files: string[],
+  pathspec: string[],
   logger: Logger | null,
 ): Promise<{ result: Awaited<ReturnType<GitCommandRunner>>; snapshot: IndexSnapshot }> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -248,7 +295,7 @@ async function readStableStagedDiff(
     const entries = await getIndexEntries(runGit, logger);
     const beforeDiff = await getIndexTree(runGit, logger);
     if (beforeEntries !== beforeDiff) continue;
-    const result = await runGit([...buildDiffArgs(null), '--', ...files.map(literalPathspec)], {
+    const result = await runGit([...buildDiffArgs(null), '--', ...pathspec.map(literalPathspec)], {
       allowTruncated: true,
     });
     const afterDiff = await getIndexTree(runGit, logger);
