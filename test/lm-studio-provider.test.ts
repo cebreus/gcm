@@ -317,7 +317,7 @@ test('LM Studio maps chat requests and responses without putting its token in th
       },
     });
     expect(response).toEqual({
-      text: 'test: use LM Studio [REDACTED-TOKEN] [REDACTED-KEY] token=[REDACTED]',
+      text: 'test: use LM Studio [REDACTED-TOKEN] [REDACTED-KEY] token=opaque-value',
       usage: { promptTokens: 0, outputTokens: 0 },
       truncated: true,
     });
@@ -579,4 +579,73 @@ test('LM Studio returns truncated output without speculative retry', async funct
   } finally {
     await server.stop(true);
   }
+});
+
+const TRACE_SECRET = `ghp_${'a1B2'.repeat(9)}`;
+
+async function collectLmStudioTrace(options: {
+  debugApi?: boolean;
+  configDebug?: boolean;
+}): Promise<{ message: string; meta?: Record<string, unknown> }[]> {
+  const entries: { message: string; meta?: Record<string, unknown> }[] = [];
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: function (request) {
+      if (request.method === 'GET') {
+        return Response.json({
+          models: [
+            {
+              key: 'local-model',
+              type: 'llm',
+              max_context_length: 8_192,
+              loaded_instances: [{ config: { context_length: 8_192 } }],
+            },
+          ],
+        });
+      }
+      return Response.json({
+        choices: [{ message: { content: `feat: ${TRACE_SECRET}` }, finish_reason: 'stop' }],
+        usage: {},
+      });
+    },
+  });
+  try {
+    const provider = await createLmStudioProviderWithConfig({
+      baseUrl: server.url.origin,
+      config: { ...CONFIG, DEBUG_API: options.configDebug === true },
+      debugApi: options.debugApi,
+      logger: {
+        log: function (_level: string, message: string, meta?: Record<string, unknown>) {
+          entries.push({ message, meta });
+        },
+      },
+    });
+    await provider.service.generate({
+      ...createGenerateParams(),
+      promptContext: `diff ${TRACE_SECRET}`,
+    });
+  } finally {
+    await server.stop(true);
+  }
+  return entries;
+}
+
+test.each([
+  ['debugApi flag', { debugApi: true }],
+  ['config.DEBUG_API', { configDebug: true }],
+])('LM Studio traces redacted request and response with %s', async function (_name, options) {
+  const entries = await collectLmStudioTrace(options);
+
+  expect(entries.map(entry => entry.message)).toEqual([
+    'LM Studio API request',
+    'LM Studio API response',
+  ]);
+  expect(String(entries[0]?.meta?.body)).toContain('diff ');
+  expect(entries[1]?.meta?.status).toBe(200);
+  expect(JSON.stringify(entries)).not.toContain(TRACE_SECRET);
+});
+
+test('LM Studio logs no trace when debug is off', async function () {
+  expect(await collectLmStudioTrace({})).toEqual([]);
 });

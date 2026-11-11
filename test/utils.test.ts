@@ -265,6 +265,68 @@ test('utils: secret redaction removes Authorization credentials', () => {
   expect(redactSensitiveTextForPrompt(input)).toBe(expected);
 });
 
+test('utils: prompt redaction removes URL credentials, vendor tokens and secret assignments', () => {
+  const glpat = 'glpat-' + 'aB3dE5gH7jK9mN1pQ3rS5';
+  const stripe = 'sk_live_' + 'aB3dE5gH7jK9mN1p';
+  const cases: [string, string][] = [
+    ['postgres://user:p4ssw0rd@host/db', 'postgres://user:[REDACTED]@host/db'],
+    ['redis://:x@h', 'redis://:[REDACTED]@h'],
+    [glpat, '[REDACTED-KEY]'],
+    [stripe, '[REDACTED-KEY]'],
+    ['rk_live_' + 'aB3dE5gH7jK9mN1p', '[REDACTED-KEY]'],
+    ['gho_' + 'aB3dE5gH7jK9mN1pQ3rS5tU7vW9xY1zA3bC5', '[REDACTED-KEY]'],
+    ['ghs_' + 'aB3dE5gH7jK9mN1pQ3rS5tU7vW9xY1zA3bC5', '[REDACTED-KEY]'],
+    ['npm_' + 'aB3dE5gH7jK9mN1pQ3rS5tU7vW9xY1zA3bC5', '[REDACTED-KEY]'],
+    ['AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG', 'AWS_SECRET_ACCESS_KEY=[REDACTED]'],
+    ['+export DB_PASSWORD="hunter2Pass!"', '+export DB_PASSWORD="[REDACTED]"'],
+    ['-API_KEY=abcdefgh1234', '-API_KEY=[REDACTED]'],
+    [' STRIPE_TOKEN=abcdefgh1234', ' STRIPE_TOKEN=[REDACTED]'],
+    ['+  API_KEY=abcdefgh1234', '+  API_KEY=[REDACTED]'],
+    ['+token=opaque-value-123', '+token=[REDACTED]'],
+    ['spring.datasource.password=opaque-value-123', 'spring.datasource.password=[REDACTED]'],
+    ['+PASSWORD="abcdefgh1234 restsecret5678"', '+PASSWORD="[REDACTED]"'],
+    ["export  DB_PASSWD='abcdefgh1234'\r", "export  DB_PASSWD='[REDACTED]'\r"],
+    ['const apiKey = "abcdefgh12345";', 'const apiKey = "[REDACTED]";'],
+    ['{"client_secret": "abcdefgh12345"}', '{"client_secret": "[REDACTED]"}'],
+    ["password: 'abcdefgh12345'", "password: '[REDACTED]'"],
+  ];
+  for (const [input, expected] of cases) expect(redactSensitiveTextForPrompt(input)).toBe(expected);
+});
+
+test('utils: prompt redaction replaces PEM private key blocks', () => {
+  expect(
+    redactSensitiveTextForPrompt(
+      'a\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nb',
+    ),
+  ).toBe('a\n[REDACTED-PEM]\nb');
+});
+
+test('utils: prompt redaction leaves ordinary code and placeholders untouched', () => {
+  const inputs = [
+    'const token = getToken(request);',
+    '  token = getToken(request);',
+    'fix: preserve token=optional',
+    'fix(auth): reject password: shorter than 8 chars',
+    'API_KEY=$OTHER_VAR',
+    'PASSWORD=<your-password>',
+    'TOKEN=aaaaaaaa',
+    'https://example.com/path?user=a@b',
+    'password: "short"',
+    'password: "Password must be at least 8 characters"',
+    '@@ -1,3 +1,4 @@\n function add(a: number, b: number) {\n-  return a + b;\n+  const sum = a + b;\n+  return sum;\n }',
+  ];
+  for (const input of inputs) expect(redactSensitiveTextForPrompt(input)).toBe(input);
+});
+
+test('utils: prompt redaction runs in linear time on abusive input', () => {
+  const inputs = ['A_'.repeat(100_000) + '=', '://a:'.repeat(40_000), '"'.repeat(200_000)];
+  for (const input of inputs) {
+    const start = performance.now();
+    redactSensitiveTextForPrompt(input);
+    expect(performance.now() - start).toBeLessThan(1000);
+  }
+});
+
 // --- Tests for estimateTokenCount ---
 test('utils: estimateTokenCount - should estimate tokens for various lengths', () => {
   const ratio = 4; // Simple ratio for testing

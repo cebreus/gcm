@@ -1,5 +1,8 @@
 import { expect, test } from 'bun:test';
-import { requestLanguageModelJson } from '../src/openai-compatible-client.js';
+import {
+  generateOpenAiCompatibleChat,
+  requestLanguageModelJson,
+} from '../src/openai-compatible-client.js';
 import { requestProviderText } from '../src/provider-http.js';
 import { loadConfig } from '../gcm.config.js';
 
@@ -134,4 +137,63 @@ test('provider transport combines caller cancellation with its timeout', async f
   ).rejects.toMatchObject({ name: 'AbortError' });
   expect(receivedCallerSignal).toBe(false);
   expect(receivedAborted).toBe(true);
+});
+
+test('chat generation sends the prompt without URL passwords or env secrets', async function () {
+  let sent = '';
+  await generateOpenAiCompatibleChat({
+    providerLabel: 'Test provider',
+    url: new URL('https://example.test/v1/chat/completions'),
+    config: loadConfig({}),
+    params: {
+      meta: {},
+      modelName: 'test-model',
+      systemPrompt: 'rules',
+      promptContext:
+        '+DATABASE_URL=postgres://app:hunter2pass@db.internal/app\n+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG',
+      maxOutputTokens: 100,
+    },
+    fetchImpl: async function (_input, init) {
+      sent = String(init?.body);
+      return Response.json({
+        choices: [{ message: { content: 'fix: redact' }, finish_reason: 'stop' }],
+      });
+    },
+  });
+  expect(sent).toContain('postgres://app:[REDACTED]@db.internal/app');
+  expect(sent).not.toContain('hunter2pass');
+  expect(sent).not.toContain('wJalrXUtnFEMI');
+});
+
+async function generateReply(content: string, token?: string) {
+  return generateOpenAiCompatibleChat({
+    providerLabel: 'Test provider',
+    url: new URL('https://example.test/v1/chat/completions'),
+    config: loadConfig({}),
+    token,
+    params: {
+      meta: {},
+      modelName: 'test-model',
+      systemPrompt: 'rules',
+      promptContext: 'diff',
+      maxOutputTokens: 100,
+    },
+    fetchImpl: async function () {
+      return Response.json({ choices: [{ message: { content }, finish_reason: 'stop' }] });
+    },
+  });
+}
+
+test('chat generation returns ordinary prose that mentions password or api_key unchanged', async function () {
+  const content =
+    'fix(auth): reject password: shorter than 8 chars\n\napi_key=optional flag is documented';
+  expect((await generateReply(content))?.text).toBe(content);
+});
+
+test('chat generation strips terminal escapes and the provider token from replies', async function () {
+  const text = (
+    await generateReply('\u001b[31mred\u001b[0m uses sk-secret-token', 'sk-secret-token')
+  )?.text;
+  expect(text).not.toContain('\u001b');
+  expect(text).not.toContain('sk-secret-token');
 });

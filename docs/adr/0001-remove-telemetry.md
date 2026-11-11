@@ -47,7 +47,7 @@ Delete telemetry subsystem: queue, byte budget, timer, the
 exit and signal handlers, both flush paths, and `GCM_TELEMETRY_FILE`
 setting.
 
-Console logging, level filtering, secret redaction, and separate debug log
+Console logging, level filtering, secret redaction, and the console request/response traces
 behind `GCM_DEBUG_API` are unaffected.
 
 ## Consequences

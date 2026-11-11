@@ -10,7 +10,8 @@ import {
   requireDistinctModels,
   type ModelSpec,
 } from './model-registry.js';
-import { parseProviderBaseUrl } from './provider-http.js';
+import type { Logger } from './logger.js';
+import { parseProviderBaseUrl, withRequestTrace } from './provider-http.js';
 import {
   generateOpenAiCompatibleChat,
   isHeaderSafeToken,
@@ -95,6 +96,8 @@ export async function createLmStudioProvider(options: {
   token?: string;
   probeOnly?: boolean;
   config: Config;
+  logger?: Logger;
+  debugApi?: boolean;
 }): Promise<LanguageModelProvider> {
   const url = parseProviderBaseUrl(options.baseUrl, 'LM Studio', {
     allowHttps: false,
@@ -104,6 +107,10 @@ export async function createLmStudioProvider(options: {
     throw createLanguageModelApiError('Invalid LM Studio API token');
   }
   const config = options.config;
+  const fetchImpl =
+    options.logger && (options.debugApi === true || config.DEBUG_API)
+      ? withRequestTrace(options.logger, globalThis.fetch, 'LM Studio', options.token)
+      : undefined;
   let { models, loadedModelIds } = await discoverModels(url, config, options.token);
   if (options.model && !models.some(model => model.name === options.model)) {
     throw new Error('Configured LM Studio model is not available');
@@ -160,6 +167,7 @@ export async function createLmStudioProvider(options: {
       url: new URL('/v1/chat/completions', url),
       token: options.token,
       params,
+      fetchImpl,
       config,
     });
   }

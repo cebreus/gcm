@@ -1,5 +1,7 @@
 import { setTimeout as wait } from 'node:timers/promises';
+import type { Logger } from './logger.js';
 import { retryDelayMs } from './retry-backoff.js';
+import { redactSensitiveText, redactSensitiveTextForPrompt } from './utils.js';
 
 const LOOPBACK_HOSTNAMES = ['127.0.0.1', 'localhost', '[::1]'];
 
@@ -51,6 +53,42 @@ export type ProviderFetch = (
   input: string | URL | Request,
   init?: RequestInit,
 ) => Promise<Response>;
+
+const MAX_TRACED_BODY_CHARS = 32 * 1024;
+
+// Redaction runs before truncation: slicing first can cut a secret short of
+// the pattern that would have matched it and log the remainder verbatim.
+function traceBody(body: string, token?: string): string {
+  const withoutToken = token ? body.replaceAll(token, '[REDACTED-TOKEN]') : body;
+  return redactSensitiveText(redactSensitiveTextForPrompt(withoutToken)).slice(
+    0,
+    MAX_TRACED_BODY_CHARS,
+  );
+}
+
+/** Logs request and response bodies, never headers: tokens travel there. A body may echo the token. */
+export function withRequestTrace(
+  logger: Logger,
+  fetchImpl: ProviderFetch,
+  label: string,
+  token?: string,
+): ProviderFetch {
+  return async (input, init) => {
+    logger.log('debug', `${label} API request`, {
+      url: String(input),
+      body: traceBody(String(init?.body ?? ''), token),
+    });
+    const response = await fetchImpl(input, init);
+    const body = await readResponseBody(response.clone())
+      .then(text => traceBody(text, token))
+      .catch(() => '[response body too large]');
+    logger.log('debug', `${label} API response`, {
+      status: response.status,
+      body,
+    });
+    return response;
+  };
+}
 
 export interface RetryPolicy {
   maxRetries: number;

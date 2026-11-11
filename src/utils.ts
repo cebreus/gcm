@@ -44,6 +44,10 @@ function hasSecretEntropy(value: string): boolean {
   return new Set(value).size >= 8;
 }
 
+function isSecretLiteral(value: string): boolean {
+  return value.length >= 8 && hasSecretEntropy(value);
+}
+
 export function redactSensitiveTextForPrompt(text: string): string {
   return redactAuthorizationCredentials(text)
     .replace(
@@ -51,8 +55,24 @@ export function redactSensitiveTextForPrompt(text: string): string {
       '[REDACTED-JWT]',
     )
     .replace(
-      /\b(?:AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{31,}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{60,}|sk-(?:proj-)?[A-Za-z0-9_-]{32,}|AQ\.[A-Za-z0-9_-]{24,}|xoxb-[0-9]{6,}-[0-9]{6,}-[A-Za-z0-9-]{24,})\b/g,
+      /\b(?:AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{31,}|gh[opusr]_[A-Za-z0-9]{36}|npm_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20,}|[sr]k_live_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{60,}|sk-(?:proj-)?[A-Za-z0-9_-]{32,}|AQ\.[A-Za-z0-9_-]{24,}|xoxb-[0-9]{6,}-[0-9]{6,}-[A-Za-z0-9-]{24,})\b/g,
       (value: string): string => (hasSecretEntropy(value) ? '[REDACTED-KEY]' : value),
+    )
+    .replace(/\b([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/[^\s:/@]*:)[^\s/@]+@/g, '$1[REDACTED]@')
+    .replace(
+      /^([+ -]?[ \t]*(?:export[ \t]+)?[A-Z0-9_.-]*(?:SECRET|PASSWORD|PASSWD|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY)[A-Z0-9_.-]*=)(?:(["'])([^"'\n]*)\2|([^\s"']+))/gim,
+      (match: string, head: string, quote?: string, quoted?: string, bare?: string): string => {
+        const value = quoted ?? bare ?? '';
+        const mark = quote ?? '';
+        return isSecretLiteral(value) && !/^[$<]/.test(value)
+          ? `${head}${mark}[REDACTED]${mark}`
+          : match;
+      },
+    )
+    .replace(
+      /((?:secret|password|passwd|token|api_?key|access_?key|private_?key)["']?\s*[:=]\s*)(["'])([^"'\s]+)\2/gi,
+      (match: string, head: string, quote: string, value: string): string =>
+        isSecretLiteral(value) ? `${head}${quote}[REDACTED]${quote}` : match,
     )
     .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED-PEM]');
 }

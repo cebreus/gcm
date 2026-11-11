@@ -160,7 +160,7 @@ export async function generateOpenAiCompatibleChat(options: {
   const outputTokens = readNonNegativeInteger(usage.completion_tokens);
   const spentWholeOutputCap = outputTokens !== null && outputTokens >= params.maxOutputTokens;
   return {
-    text: sanitizeLanguageModelErrorText(choice.message.content, options.token),
+    text: sanitizeTerminalText(redactToken(choice.message.content, options.token)),
     usage: {
       promptTokens: readNonNegativeInteger(usage.prompt_tokens) ?? undefined,
       outputTokens: outputTokens ?? undefined,
