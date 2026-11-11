@@ -14,13 +14,7 @@ test('returns deterministic empty hints without changed files', () => {
 
 test('deduplicates historical and single-repository path scopes in encounter order', async () => {
   const result = await getCommitContextHints(
-    [
-      'src/api/index.ts',
-      'src/api/other.ts',
-      '.github/workflows/ci.yml',
-      'package.json',
-      'scripts/release.ts',
-    ],
+    ['src/api/index.ts', 'src/api/other.ts', '.github/workflows/ci.yml', 'package.json'],
     {
       scopeHistorySubjects: [
         'feat(core): add command',
@@ -38,7 +32,7 @@ test('deduplicates historical and single-repository path scopes in encounter ord
     },
   );
 
-  expect(result.scopeSuggestions).toEqual(['core', 'api', 'ci', 'build', 'dx']);
+  expect(result.scopeSuggestions).toEqual(['core', 'api', 'ci', 'build']);
   expect(result.recentCommitSubjects).toEqual([
     'feat(core): add command',
     'fix(core): handle retry',
@@ -105,4 +99,27 @@ test('ignores direct src files and accepts valid conventional scope variants', (
   });
 
   expect(result.scopeSuggestions).toEqual(['core', 'api']);
+});
+
+test('does not special-case sites, tools, infra or scripts', () => {
+  const result = getCommitContextHints(['sites/a/x.ts', 'tools/b/x.ts', 'infra/x', 'scripts/x'], {
+    scopeHistorySubjects: [],
+    recentSubjects: [],
+    repoType: 'monorepo',
+  });
+  expect(result.scopeSuggestions).toEqual([]);
+});
+
+test('maps package-lock.json and yarn.lock to build, keeps apps, packages and ci', () => {
+  const result = getCommitContextHints(
+    [
+      'package-lock.json',
+      'yarn.lock',
+      'apps/web/x.ts',
+      'packages/ui/x.ts',
+      '.github/workflows/x.yml',
+    ],
+    { scopeHistorySubjects: [], recentSubjects: [], repoType: 'monorepo' },
+  );
+  expect(result.scopeSuggestions).toEqual(['build', 'web', 'ui', 'ci']);
 });

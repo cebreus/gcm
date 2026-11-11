@@ -54,7 +54,6 @@ export function detectAtomicGroup(file: string): string {
   const workspaceMatch = WORKSPACE_PATH_PATTERN.exec(file);
   if (workspaceMatch?.[2]) return workspaceMatch[2];
   if (file.startsWith('.github/')) return 'ci';
-  if (/^(infra|scripts)\//.test(file)) return 'tooling';
   if (/^test\//.test(file) || /\.test\./.test(file)) return 'tests';
   const topLevel = file.split('/')[0];
   if (topLevel && topLevel !== file) return topLevel;
@@ -83,7 +82,6 @@ function orderAtomicGroups(groups: Map<string, string[]>): Array<[string, string
   const priority: Record<string, number> = {
     deps: 10,
     ci: 20,
-    tooling: 30,
     core: 40,
     tests: 90,
     'docs-formatting': 100,
@@ -102,7 +100,6 @@ function buildSuggestedSplitCommitSubject(scope: string, files: string[]): strin
     'docs-formatting': 'docs',
     deps: 'build',
     ci: 'ci',
-    tooling: 'chore',
   };
   const type = typeByScope[scope] ?? 'refactor';
   const normalizedScope = scope === 'docs-formatting' ? 'docs' : scope;

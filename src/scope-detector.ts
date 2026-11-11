@@ -9,7 +9,7 @@ export interface CommitContextFacts {
   repoType: 'monorepo' | 'single';
 }
 
-export const WORKSPACE_PATH_PATTERN = /^(apps|packages|sites|tools)\/([^/]+)/;
+export const WORKSPACE_PATH_PATTERN = /^(apps|packages)\/([^/]+)/;
 
 function getPathScope(file: string, repoType: CommitContextFacts['repoType']): string | null {
   if (repoType === 'monorepo') {
@@ -17,8 +17,12 @@ function getPathScope(file: string, repoType: CommitContextFacts['repoType']): s
     if (workspace?.[2]) return workspace[2];
   }
   if (file.startsWith('.github/')) return 'ci';
-  if (/^(infra|scripts)\//.test(file)) return 'dx';
-  if (/^(package\.json|pnpm-lock\.yaml|bun\.lock|tsconfig\.json)$/.test(file)) return 'build';
+  if (
+    /^(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lock|tsconfig\.json)$/.test(
+      file,
+    )
+  )
+    return 'build';
   const parts = file.split('/');
   return parts[0] === 'src' && parts.length > 2 ? (parts[1] ?? null) : null;
 }
