@@ -1,4 +1,5 @@
 import { tmpdir } from 'os';
+import { childEnvironment } from './git-utils.js';
 import {
   createLanguageModelApiError,
   isModelUnavailableError,
@@ -78,6 +79,7 @@ export async function runLocalCli(request: LocalCliRunRequest): Promise<LocalCli
   const child = Bun.spawn({
     cmd: request.cmd,
     cwd: tmpdir(),
+    env: childEnvironment(),
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',

@@ -15,9 +15,11 @@ const PROVIDER_CREDENTIAL_NAMES = new Set([
   'LM_API_TOKEN',
 ]);
 
-function gitEnvironment(): Record<string, string> {
+export function childEnvironment(
+  env: Record<string, string | undefined> = process.env,
+): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(process.env).filter(
+    Object.entries(env).filter(
       (entry): entry is [string, string] =>
         entry[1] !== undefined && !PROVIDER_CREDENTIAL_NAMES.has(entry[0]),
     ),
@@ -76,7 +78,7 @@ async function spawnCore(
   const execName = options.execName ?? 'git';
   const child = Bun.spawn({
     cmd: [execName, ...args],
-    env: gitEnvironment(),
+    env: childEnvironment(),
     stdout: 'pipe',
     stderr: 'pipe',
   });

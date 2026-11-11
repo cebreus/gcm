@@ -5,6 +5,7 @@ import {
   runLocalCli,
   type LocalCliRun,
 } from '../src/local-cli-provider.js';
+import { childEnvironment } from '../src/git-utils.js';
 
 const generateParams = {
   promptContext: 'staged diff',
@@ -149,6 +150,26 @@ test('CLI overflow stops the child and reports bounded failure', async function 
       timeoutMs: 2000,
     }),
   ).rejects.toThrow('Local CLI output was too large');
+});
+
+test('local CLI environment drops provider credentials and keeps the rest', function () {
+  expect(
+    childEnvironment({
+      PATH: '/bin',
+      HOME: '/home/fake',
+      ANTHROPIC_API_KEY: 'fake-anthropic',
+      OPENAI_API_KEY: 'fake-openai',
+      GOOGLE_GEMINI_API_KEY: 'fake-gemini',
+      GCM_FREELLMAPI_TOKEN: 'fake-freellm',
+      LM_API_TOKEN: 'fake-lm',
+      UNSET: undefined,
+    }),
+  ).toEqual({
+    PATH: '/bin',
+    HOME: '/home/fake',
+    ANTHROPIC_API_KEY: 'fake-anthropic',
+    OPENAI_API_KEY: 'fake-openai',
+  });
 });
 
 test('Codex CLI falls back from Luna to Sol without persistence', async function () {
