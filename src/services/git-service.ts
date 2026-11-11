@@ -1,6 +1,6 @@
 import { fileExists, literalPathspec, spawnGitStream } from '../git-utils.js';
 import { shouldExcludeFile } from '../utils.js';
-import { DEFAULT_ANALYSIS_EXCLUDE_PATTERNS } from '../constants.js';
+import { DEFAULT_ANALYSIS_EXCLUDE_PATTERNS, SECRET_FILE_EXCLUDE_PATTERNS } from '../constants.js';
 import type { Logger } from '../logger.js';
 
 interface StagedChangesResult {
@@ -269,7 +269,7 @@ async function retrieveStagedChanges(
     entry.origin ? [entry.path, entry.origin] : [entry.path],
   );
   const excludedPaths = entries
-    .filter(entry => isExcluded(entry, excludePatterns))
+    .filter(entry => isExcluded(entry, [...SECRET_FILE_EXCLUDE_PATTERNS, ...excludePatterns]))
     .map(entry => entry.path);
   const projectExcludesMatched = projectExcludePatterns.some(pattern =>
     entries.some(entry => isExcluded(entry, [pattern])),
@@ -279,6 +279,16 @@ async function retrieveStagedChanges(
   );
   logExcludedFiles(logger, matchedExcludePatterns, entries.length, files.length);
   if (files.length === 0) {
+    // Only reported exclusions (secret defaults, --exclude) mean "staged, but nothing to analyse".
+    if (excludedPaths.length > 0) {
+      return {
+        stagedDiff: '',
+        stagedFiles: [],
+        excludedPaths,
+        projectExcludesMatched,
+        truncated: false,
+      };
+    }
     logNoChanges(logger, commitHash);
     return null;
   }

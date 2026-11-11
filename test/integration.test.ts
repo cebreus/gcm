@@ -274,6 +274,37 @@ test('integration: should handle concurrent execution safety', async () => {
   expect(mockCallGemini).toHaveBeenCalledTimes(2);
 });
 
+test('integration: only excluded files staged stops without calling the provider', async () => {
+  async function excludedOnlySpawn(args: string[]): Promise<{ text: string; truncated: boolean }> {
+    const cmd = args.join(' ');
+    if (cmd.includes('diff --staged') && cmd.includes('--name-status')) {
+      return { text: 'A\0.env', truncated: false };
+    }
+    return { text: '', truncated: false };
+  }
+  const gitService = createGitService({ gitCommandRunner: excludedOnlySpawn });
+  const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
+  const originalExitCode = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    await runnerRun([], {
+      logger: mockLoggerInstance,
+      gitService,
+      geminiService,
+      contextService,
+      geminiModelLister: mockListModels,
+    });
+    expect(mockCallGemini).not.toHaveBeenCalled();
+    expect(mockCancel).toHaveBeenCalledWith(
+      'Only excluded files are staged: ".env". Nothing to analyse.',
+      { output: process.stderr },
+    );
+    expect(Number(process.exitCode)).toBe(1);
+  } finally {
+    process.exitCode = originalExitCode;
+  }
+});
+
 for (const plainDiff of ['', '-  a\n+    a\n']) {
   test(`integration: ${plainDiff ? 'sends' : 'does not send'} whitespace-only staged changes to AI`, async () => {
     async function whitespaceOnlyStagedSpawn(

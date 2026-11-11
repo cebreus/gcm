@@ -101,7 +101,9 @@ for (const [form, commit] of [
       await stageRename(from, to, secret);
       const result = await resultFor(commit, ['*.env']);
       expect(result?.stagedDiff ?? '').not.toContain('LEAK_MARKER');
-      expect(result).toBeNull();
+      expect(result?.stagedFiles).toEqual([]);
+      expect(result?.stagedDiff).toBe('');
+      expect(result?.excludedPaths?.length).toBeGreaterThan(0);
     });
   }
 

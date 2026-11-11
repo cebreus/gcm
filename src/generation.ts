@@ -409,6 +409,15 @@ async function resolveReadyRepositoryState(params: {
     });
   }
 
+  if (staged.stagedFiles.length === 0) {
+    const shown = (staged.excludedPaths ?? []).map(path =>
+      JSON.stringify(services.output.sanitizeTerminalText(path)),
+    );
+    services.output.cancel(
+      `Only excluded files are staged: ${shown.join(', ')}. Nothing to analyse.`,
+    );
+    return null;
+  }
   return { repositoryState, staged };
 }
 
@@ -488,6 +497,10 @@ async function loadStagedChanges(params: {
       services.output.cancel('No staged changes found. Use "git add" to stage files.');
     }
     return null;
+  }
+  if (staged.stagedFiles.length === 0) {
+    services.output.stopProgress(services.output.style.yellow('Only excluded files found'));
+    return staged;
   }
   if (!targetCommit && isWhitespaceOnlyStagedChanges(staged)) {
     services.output.stopProgress(

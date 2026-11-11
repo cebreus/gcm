@@ -154,6 +154,48 @@ test('exclude-files: excludes root and nested dist from staged and commit analys
   ]);
 });
 
+test('exclude-files: secret-bearing files never reach the diff request by default', async () => {
+  const secretPaths = [
+    '.env',
+    'apps/web/.env',
+    '.env.production',
+    'keys/server.pem',
+    'id_rsa',
+    'home/.ssh/id_ed25519.pub',
+    'certs/a.p12',
+    'certs/a.pfx',
+    'tls.key',
+  ];
+  const calls: string[][] = [];
+  const makeService = (paths: string[]) =>
+    createGitService({
+      gitCommandRunner: async args => {
+        calls.push(args);
+        if (args.includes('--name-status')) {
+          return { text: paths.map(path => `M\0${path}\0`).join(''), truncated: false };
+        }
+        return { text: 'diff', truncated: false };
+      },
+    });
+
+  const staged = await makeService(['src/app.ts', ...secretPaths]).retrieveStagedChanges(
+    null,
+    null,
+  );
+  expect(staged?.stagedFiles).toEqual(['src/app.ts']);
+  expect(calls.flat().some(arg => arg.includes('env') || arg.includes('pem'))).toBe(false);
+
+  // Only secret files staged: empty snapshot that still reports them (not "nothing staged").
+  const onlySecret = await makeService(['.env']).retrieveStagedChanges(null, null);
+  expect(onlySecret?.stagedFiles).toEqual([]);
+  expect(onlySecret?.excludedPaths).toEqual(['.env']);
+  // Glob syntax has no negation, so `.env.example` is excluded as well.
+  const example = await makeService(['.env.example']).retrieveStagedChanges(null, null);
+  expect(example?.excludedPaths).toEqual(['.env.example']);
+  // Silent default excludes alone keep the "nothing to analyse" null.
+  expect(await makeService(['dist/a.js']).retrieveStagedChanges(null, null)).toBeNull();
+});
+
 test('exclude-files: project excludes omit analysis without reporting excluded paths', async function () {
   const repository = await mkdtemp(join(tmpdir(), 'gcm-project-exclude-'));
   try {
@@ -504,6 +546,35 @@ test('exclude-files: a real commit includes excluded paths only after acknowledg
     expect(await runGitInRepository(repository, ['show', 'HEAD:secrets.txt'])).toBe(
       'hunter2_should_still_commit\n',
     );
+  } finally {
+    await rm(repository, { recursive: true, force: true });
+  }
+});
+
+test('exclude-files: staged default secret files are reported, dist stays silent', async () => {
+  const repository = await mkdtemp(join(tmpdir(), 'gcm-exclude-secret-'));
+  try {
+    await runGitInRepository(repository, ['init', '-q']);
+    await mkdir(join(repository, 'src'));
+    await mkdir(join(repository, 'dist'));
+    await writeFile(join(repository, 'src/a.ts'), 'export const a = 1;\n');
+    await writeFile(join(repository, '.env'), 'TOKEN=hunter2_secret\n');
+    await writeFile(join(repository, '.npmrc'), '//registry/:_authToken=npm_secret\n');
+    await writeFile(join(repository, 'dist/x.js'), 'dist_content\n');
+    await runGitInRepository(repository, ['add', '-A']);
+    const requests: string[][] = [];
+    const gitService = createGitService({
+      gitCommandRunner: args => {
+        requests.push(args);
+        return spawnGitStream(['-C', repository, ...args]);
+      },
+    });
+    const staged = await gitService.retrieveStagedChanges(null, null);
+    expect(staged?.stagedFiles).toEqual(['src/a.ts']);
+    expect(staged?.excludedPaths?.sort()).toEqual(['.env', '.npmrc']);
+    expect(staged?.stagedDiff).not.toContain('hunter2_secret');
+    expect(staged?.stagedDiff).not.toContain('npm_secret');
+    expect(requests.some(args => args.includes('.env') && args.includes('diff'))).toBe(false);
   } finally {
     await rm(repository, { recursive: true, force: true });
   }
