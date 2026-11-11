@@ -37,7 +37,7 @@ Start every reply with `cebreus+gcm`.
 - Prefer standard library and existing dependencies; add code or dependencies only when they remove real complexity.
 - Every non-trivial change needs runnable validation. Prefer deletion and smallest correct solution.
 - Project history uses Conventional Commits.
-- Commits are forbidden by default. Exception: commit only fully verified atomic chunk to safeguard it before risky change, and never commit this repository's work.
+- Commits are forbidden by default. Exception: commit only after the user approves a proposal with `YES` (e.g. via `/cebreus-commit`), or to safeguard a fully verified atomic chunk before a risky change.
 
 ## Workflow
 

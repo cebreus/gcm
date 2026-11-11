@@ -19,6 +19,8 @@ Old checkout: `/Users/cebreus/.scripts/gcm`, HEAD `9d96167cb3f0f9df9b0a38f647c8f
 | Research documents                                          | Preserved; benchmark marked historical and insufficient to select production defaults.                                                                                     |
 | Serena project configuration and scratch/cache material     | Machine-specific; retain in recovery archive, not target product.                                                                                                          |
 
+Note: the FreeLLMAPI parts of the `free-router` and availability-fallback rows are superseded by e4a701d, which removed the `free-router` to `kilo-auto` fallback. The Gemini fallback remains.
+
 ## Evidence and recovery
 
 Before changes, target passed 501 tests outside the sandbox. Old checkout passed all

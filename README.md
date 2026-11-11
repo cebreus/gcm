@@ -6,7 +6,7 @@ Review every result before any Git write.
 
 ## Requirements
 
-- [Bun](https://bun.sh/) 1.4+
+- [Bun](https://bun.sh/) 1.4+ to build or to run from source; the built `dist/gcm` is a standalone executable
 - Git
 - [Google Gemini API key](https://aistudio.google.com/app/apikey), FreeLLMAPI, or LM Studio
 
@@ -21,6 +21,10 @@ bun run ./gcm.ts --help
 ```
 
 Create key in [Google AI Studio](https://aistudio.google.com/app/apikey), replace `your_api_key_here` with it, run `export` command. Applies only to current terminal; add same line to `~/.zshrc` to keep after restart. Never commit or share key.
+
+`bun run build` compiles a standalone executable to `dist/gcm`; put it on `PATH` as `gcm`. The executable does not load `bunfig.toml` or `.env` from the working directory, so a repository you run it in cannot inject preload scripts or `GCM_*` settings. A project `.env` therefore does not configure `gcm`; set variables in the shell environment.
+
+Running from source with `bun run ./gcm.ts` is different: Bun still loads `bunfig.toml` and `.env` from the current directory. Do not run GCM that way inside a repository you do not trust.
 
 ## Use
 
@@ -62,13 +66,15 @@ gcm --print
 gcm --hint 'breaking change: the --foo flag was removed'
 ```
 
-From source checkout, replace `gcm` with `bun run ./gcm.ts`.
+From source checkout, replace `gcm` with `bun run ./gcm.ts` (see the caveat in [Install](#install)).
 
 Interactive flow lets you configure provider and model, regenerate, add hint, switch models, edit or copy message, select available Git action. Selected provider and model saved only after successful Git action.
 
 The initial model is `--model`, then the provider's model variable (`GCM_MODEL`, `GCM_FREELLMAPI_MODEL`, `GCM_LM_STUDIO_MODEL`), then the last used model, then the provider default.
 
-The provider is `--provider`, then `GCM_PROVIDER`, then the last used provider, then the first available one.
+The provider is `--provider`, then `GCM_PROVIDER`, then the last used provider, then the first available one. When only the last used provider selected it and that provider cannot be started in a non-interactive run, GCM prints a warning to stderr and uses the first available provider instead. A provider named by `--provider` or `GCM_PROVIDER` that cannot be started still stops the run with an error.
+
+Scope suggestions come from recent commit subjects and from paths: in a monorepo only `apps/<name>/` and `packages/<name>/` are workspace folders and suggest `<name>`; `.github/` suggests `ci`; root `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` and `tsconfig.json` suggest `build`; `src/<dir>/` suggests `<dir>`. Split proposals use the same two workspace folders and put `package.json` and lockfiles into one dependency group proposed as `build(deps)`; other paths follow the documentation, CI, test and top-level-directory rules.
 
 Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Built-in values: `gemini`, `freellmapi`, `lm-studio`; installed CLIs also enable `codex-cli` and `claude-cli`.
 
@@ -83,7 +89,7 @@ See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 | ------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `-c, --commit <hash>`     | Analyse a commit. Default: staged changes.                                                                   |
 | `--commit-range <range>`  | Analyse a first-parent Git revision range, oldest first; requires `--non-interactive`.                       |
-| `-e, --exclude <pattern>` | Exclude matching paths; repeat or comma-separate patterns. Default: `dist/**` and nested `dist` directories. |
+| `-e, --exclude <pattern>` | Exclude matching paths; repeat or comma-separate patterns. For built-in excludes, see [Security](#security). |
 | `--model <name>`          | Select a model from the active provider.                                                                     |
 | `--provider <name>`       | Select an available API or local CLI provider.                                                               |
 | `--hint <text>`           | Add an instruction for generation.                                                                           |
@@ -120,9 +126,9 @@ retries; an API model fallback starts a new request deadline.
 `--providers-list` returns `0` when all providers are available, `1` when only some are
 available, and `2` when none are available. Checks do not load LM Studio models.
 
-`--print` cannot be combined with `--apply`, `--commit-range`, `--models-list`, or `--providers-list`. A message truncated by the output limit is refused with a non-zero exit. Errors, logs and progress are written to stderr; stdout carries only results.
+`--print` cannot be combined with `--apply`, `--commit-range`, `--models-list`, or `--providers-list`. A message truncated by the output limit is refused with a non-zero exit. Errors, warnings, logs, the generation banner and progress are written to stderr. With `--print`, stdout carries only the generated message, so scripts can capture it directly. Without `--print`, stdout also carries the generated-message box, notes, lists (`--models-list`, `--providers-list`), `--help`, `--version` and the interactive prompts, so do not parse it.
 
-`--exclude` patterns case-sensitive, match whole path, support `*` and `?`. Excluded files stay staged, will commit; GCM asks confirmation before writing. Generated `dist` files are omitted from analysis but commit normally. Merge commit analysed against first parent.
+`--exclude` patterns case-sensitive, match whole path, support `*` and `?`. Excluded files stay staged, will commit; GCM asks confirmation before writing. Files matching the built-in excludes (`dist` and secret-bearing files, see [Security](#security)) are omitted from analysis but commit normally, without that confirmation. Merge commit analysed against first parent.
 
 If a provider returns no usable text after retries, GCM reports an error and performs no write action.
 
@@ -149,13 +155,19 @@ exit 0
 - **Unreachable target, detached `HEAD`, staged index, or Git operation in progress:** generate read-only mode.
 - **Conflicts or unverifiable snapshot:** stop before generation or writing.
 
-GCM never runs rebase. Before writing, it revalidates repository state. Hook changes in a normal commit are reported; an unsafe `amend!` is rolled back only when its verified parent is unchanged, preserving hook changes in the index. GCM waits for commit hooks without a time limit.
+GCM never runs rebase. Before writing, it revalidates repository state. Hook changes in a normal commit are reported; an unsafe `amend!` is rolled back only when its verified parent is unchanged, preserving hook changes in the index. GCM waits for commit hooks without a time limit, and hook output larger than the Git output limit (`GCM_MAX_BUFFER`) no longer interrupts the commit: GCM keeps reading and discards the excess.
 
 Rationale detail: [commit consistency](docs/adr/0002-commit-action-consistency.md), [first-parent analysis](docs/adr/0003-first-parent-commit-analysis.md).
 
 ## Security
 
-Analysed diff is sent to the selected provider. Whitespace noise is ignored when a change has other content; a whitespace-only change is analysed as is. LM Studio stays on the configured loopback URL. Known Google, AWS, GitHub, GitLab, npm, Stripe, Slack, OpenAI-style keys, JWTs, PEM blocks, URL passwords, secret-named environment assignments and quoted secret literals redacted, but pattern-based redaction can't recognise every secret. The diff is untrusted, so the model's reply is too: trailers (`Co-authored-by`, `Signed-off-by`, ...) and issue-closing keywords it produces are dropped, and only `BREAKING CHANGE:` footers are kept.
+Analysed diff is sent to the selected provider. Whitespace noise is ignored when a change has other content; a whitespace-only change is analysed as is. LM Studio stays on the configured loopback URL. Known Google, AWS, GitHub, GitLab, npm, Stripe, Slack, OpenAI-style keys, JWTs, PEM blocks, URL passwords, secret-named environment assignments and quoted secret literals redacted. Redaction also covers `Bearer` tokens, Google OAuth `ya29.` tokens, Stripe test keys, unquoted `key: value` / `key = value` pairs with a secret-like name, and a private key block cut off before its end marker. Redaction is best-effort and pattern-based: it can't recognise every secret, for example an unquoted `password: value` whose value contains no digit.
+
+Files that usually hold secrets are excluded from analysis by default, next to `dist/**` and nested `dist` directories: `.env` and `.env.*` in any directory, `*.pem`, `*.key`, `*.p12`, `*.pfx`, and `id_rsa*` / `id_ed25519*` in any directory. `.env.example` and `.env.sample` match `.env.*` and are excluded too. Excluded files are neither sent nor listed in the request; they stay staged and commit normally. When every staged file is excluded, GCM reports no staged changes.
+
+`codex-cli` and `claude-cli` are started without `GOOGLE_GEMINI_API_KEY`, `GCM_FREELLMAPI_TOKEN` and `LM_API_TOKEN` in their environment.
+
+The diff is untrusted, so the model's reply is too. After the subject line, GCM drops every line that starts with a denylisted trailer (`Co-authored-by`, `Signed-off-by`, `Reviewed-by`, `Acked-by`, `Tested-by`, `Skip-checks`, `Release-As`, `Co-developed-by`, `Reported-by`, `Suggested-by`, `Helped-by`, `Cc`, `Change-Id`) and every line that contains a closing keyword with an issue reference (`Closes #12`, `fixes owner/repo#3`, `Resolves https://...`), wherever it sits. CI skip markers (`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]`, `***NO_CI***`) are removed from the whole reply, nested ones included. `BREAKING CHANGE:` footers and ordinary prose such as `Note:` lines are kept.
 
 `--debug` prints redacted request/response traces to the console, each body capped at 32 KiB. Traces cover the HTTP providers (Gemini, FreeLLMAPI, LM Studio); `codex-cli` and `claude-cli` produce none. No trace file is written. The traces contain the analysed diff, so avoid `--debug` where the output is kept: a shared terminal, a recorded session or CI logs. See [secret redaction](docs/adr/0004-redact-secrets-leaving-the-machine.md).
 
@@ -166,7 +178,7 @@ Analysed diff is sent to the selected provider. Whitespace noise is ignored when
 | Variable                | Default                 | Purpose                                                |
 | ----------------------- | ----------------------- | ------------------------------------------------------ |
 | `GCM_MODEL`             | `gemini-3.7-flash`      | Gemini model.                                          |
-| `GCM_PROVIDER`          | `gemini`                | API provider or installed `codex-cli` / `claude-cli`.      |
+| `GCM_PROVIDER`          | none                    | Provider; unset: last used, then first available.      |
 | `GCM_FREELLMAPI_URL`    | `http://127.0.0.1:3001` | FreeLLMAPI endpoint URL.                               |
 | `GCM_FREELLMAPI_MODEL`  | `auto`                  | FreeLLMAPI routing model.                              |
 | `GCM_FREELLMAPI_TOKEN`  | none                    | FreeLLMAPI Bearer token.                               |
