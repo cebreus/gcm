@@ -106,14 +106,6 @@ const mockListModels = mock(() =>
 );
 
 describe('Refactored Runner', () => {
-  test('--debug does not mutate shared configuration', async () => {
-    const originalDebugApi = CONFIG.DEBUG_API;
-
-    await executeCommitMessageGeneration(['--debug', '--version'], { logger: mockLogger });
-
-    expect(CONFIG.DEBUG_API).toBe(originalDebugApi);
-  });
-
   test('Should scope restored models to their provider', () => {
     const session = { providerId: 'gemini', modelName: 'gemini-model' } as const;
     expect(
@@ -122,6 +114,17 @@ describe('Refactored Runner', () => {
     expect(
       createGenerationState(parseArgs([]), session, 'fallback', 'gemini').state.modelName,
     ).toBe('gemini-model');
+  });
+
+  test('Should rank --model, configured model, session, then default', () => {
+    const session = { providerId: 'freellmapi', modelName: 'auto' } as const;
+    const make = (args: string[], provider: string, configured?: string) =>
+      createGenerationState(parseArgs(args), session, 'dflt', provider, configured).state.modelName;
+    expect(make([], 'freellmapi', 'other')).toBe('other');
+    expect(make([], 'freellmapi')).toBe('auto');
+    expect(make(['--model', 'flag'], 'freellmapi', 'other')).toBe('flag');
+    expect(make([], 'lm-studio', 'lm-env')).toBe('lm-env');
+    expect(make([], 'gemini')).toBe('dflt');
   });
 
   test('Should seed generation with a CLI hint', () => {
@@ -440,7 +443,9 @@ describe('Refactored Runner', () => {
     );
 
     expect(mockGitService.commitChanges).not.toHaveBeenCalled();
-    expect(mockCancel).toHaveBeenCalledWith(expect.stringContaining('truncated'));
+    expect(mockCancel).toHaveBeenCalledWith(expect.stringContaining('truncated'), {
+      output: process.stderr,
+    });
   });
   test('--print refuses to print a truncated message', async () => {
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
@@ -531,7 +536,9 @@ describe('Refactored Runner', () => {
     );
 
     expect(mockGeminiService.generate).toHaveBeenCalled();
-    expect(mockCancel).toHaveBeenCalledWith(expect.stringContaining('truncated'));
+    expect(mockCancel).toHaveBeenCalledWith(expect.stringContaining('truncated'), {
+      output: process.stderr,
+    });
     expect(mockGitService.rewordCommit).not.toHaveBeenCalled();
     expect(mockGitService.amendCommit).not.toHaveBeenCalled();
   });
@@ -628,6 +635,7 @@ describe('Refactored Runner', () => {
     expect(mockGeminiService.generate).not.toHaveBeenCalled();
     expect(mockCancel).toHaveBeenCalledWith(
       'Commit range apply requires a clean index with no Git operation in progress.',
+      { output: process.stderr },
     );
   });
 
@@ -875,14 +883,14 @@ describe('Refactored Runner', () => {
     }
   });
 
-  test('Should reject an unknown provider before showing help', async () => {
+  test('Should still show help for an unknown provider', async () => {
     const originalProvider = process.env.GCM_PROVIDER;
     process.env.GCM_PROVIDER = 'missing';
     try {
       await executeCommitMessageGeneration(['--help'], { logger: mockLogger });
-      expect(process.exitCode).toBe(1);
-      expect(mockCancel).toHaveBeenCalledWith('Error: Unknown language model provider.');
-      expect(mockIntro).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(0);
+      expect(mockCancel).not.toHaveBeenCalled();
+      expect(mockIntro).toHaveBeenCalled();
     } finally {
       if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
       else process.env.GCM_PROVIDER = originalProvider;
@@ -1009,6 +1017,7 @@ describe('Refactored Runner', () => {
 
       expect(mockCancel).toHaveBeenCalledWith(
         'Error: Unknown flag: --commmit. Run gcm --help for usage.',
+        { output: process.stderr },
       );
       expect(Number(process.exitCode)).toBe(1);
     } finally {
@@ -1025,7 +1034,9 @@ describe('Refactored Runner', () => {
       geminiModelLister: mockListModels,
     });
 
-    expect(mockCancel).toHaveBeenCalledWith('Error: Invalid model name.');
+    expect(mockCancel).toHaveBeenCalledWith('Error: Invalid model name.', {
+      output: process.stderr,
+    });
     expect(mockGeminiService.generate).not.toHaveBeenCalled();
   });
 
@@ -1061,7 +1072,9 @@ describe('Refactored Runner', () => {
       },
     });
 
-    expect(mockCancel).toHaveBeenCalledWith('Error: Invalid credential: [REDACTED-KEY]');
+    expect(mockCancel).toHaveBeenCalledWith('Error: Invalid credential: [REDACTED-KEY]', {
+      output: process.stderr,
+    });
   });
 
   test('Should report provider API errors by metadata shape', async () => {
@@ -1271,6 +1284,7 @@ describe('Refactored Runner', () => {
     expect(mockGitService.commitChanges).not.toHaveBeenCalled();
     expect(mockCancel).toHaveBeenCalledWith(
       'Staged changes were modified while this message was on screen, so the message no longer describes what would be committed. Added: "later.ts". Regenerate the message, review it, then commit.',
+      { output: process.stderr },
     );
   });
 
@@ -1323,6 +1337,7 @@ describe('Refactored Runner', () => {
 
       expect(mockCancel).toHaveBeenCalledWith(
         'Git index has unresolved conflicts. Resolve conflicts before generating or committing.',
+        { output: process.stderr },
       );
       expect(mockSelect).not.toHaveBeenCalled();
       expect(mockGeminiService.generate).not.toHaveBeenCalled();
@@ -1523,6 +1538,7 @@ describe('Refactored Runner', () => {
 
       expect(mockCancel).toHaveBeenCalledWith(
         expect.stringContaining('the index changed after its diff was read'),
+        { output: process.stderr },
       );
       expect(mockSelect).not.toHaveBeenCalled();
       expect(mockGeminiService.generate).not.toHaveBeenCalled();

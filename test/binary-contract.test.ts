@@ -180,12 +180,12 @@ async function runInteractiveBinary(args: string[], cwd: string): Promise<Binary
 
 function expectCleanInputError(result: BinaryResult, message: string): void {
   expect(result.exitCode).not.toBe(0);
-  const lines = result.stdout.trim().split('\n');
+  const lines = result.stderr.trim().split('\n');
   expect(lines).toHaveLength(1);
   expect(lines[0]).toContain(message);
-  expect(result.stderr).toBe('');
-  expect(result.stdout).not.toContain('at ');
-  expect(result.stdout).not.toContain('function(');
+  expect(result.stdout).toBe('');
+  expect(result.stderr).not.toContain('at ');
+  expect(result.stderr).not.toContain('function(');
 }
 
 beforeAll(async () => {
@@ -457,7 +457,7 @@ test('binary contract: GCM_MAX_BUFFER limits Git output', async () => {
 });
 
 test('binary contract: an invalid configuration value is reported without a stack trace', async () => {
-  const result = await runSubprocess([binaryPath, '--version'], gitRepository, undefined, {
+  const result = await runSubprocess([binaryPath, '--providers-list'], gitRepository, undefined, {
     GCM_MAX_HUNKS: 'abc',
   });
 
@@ -472,7 +472,7 @@ test('binary contract: invalid project configuration stops generation', async fu
   try {
     const result = await runBinaryWithProvider([], gitRepository);
     expect(result.exitCode).toBe(1);
-    expect(result.stdout.trim().split('\n').at(-1)).toContain(
+    expect(result.stderr.trim().split('\n').at(-1)).toContain(
       'Error: Invalid .gcmrc.json: unknown key "model".',
     );
   } finally {
@@ -528,28 +528,25 @@ test('binary contract: reports no staged changes without calling Gemini', async 
   const result = await runBinary([], gitRepository, 'not-a-real-key');
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain('No staged changes found');
-  expect(result.stdout).toContain('Use "git add" to stage files.');
-  expect(result.stderr).toBe('');
+  expect(result.stderr).toContain('No staged changes found');
+  expect(result.stderr).toContain('Use "git add" to stage files.');
 });
 
 test('binary contract: reports a missing Gemini API key', async () => {
   const result = await runBinary([], excludeRepository);
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain('GOOGLE_GEMINI_API_KEY');
-  expect(result.stderr).toBe('');
+  expect(result.stderr).toContain('GOOGLE_GEMINI_API_KEY');
 });
 
 test('binary contract: reports conflicts before showing settings', async () => {
   const result = await runBinary([], conflictRepository, 'not-a-real-key');
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain(
+  expect(result.stderr).toContain(
     'Git index has unresolved conflicts. Resolve conflicts before generating or committing.',
   );
   expect(result.stdout).not.toContain('Settings:');
-  expect(result.stderr).toBe('');
 });
 
 test('binary contract: an unconfigured run still shows configuration', async () => {
@@ -564,17 +561,15 @@ test('binary contract: refuses whitespace-only staged changes without an API key
   const result = await runBinary([], whitespaceRepository);
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain('Only whitespace-only staged changes detected in 1 file(s).');
-  expect(result.stdout).not.toContain('GOOGLE_GEMINI_API_KEY');
-  expect(result.stderr).toBe('');
+  expect(result.stderr).toContain('Only whitespace-only staged changes detected in 1 file(s).');
+  expect(result.stderr).not.toContain('GOOGLE_GEMINI_API_KEY');
 });
 
 test('binary contract: reports when the working directory is not a git repository', async () => {
   const result = await runBinary([], nonRepository, 'not-a-real-key');
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain('Not inside a git repository');
-  expect(result.stderr).toBe('');
+  expect(result.stderr).toContain('Not inside a git repository');
 });
 
 for (const inputCase of [
@@ -611,14 +606,14 @@ test('binary contract: rejects a lone positional argument', async () => {
   const result = await runBinary(['-']);
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain('Unexpected positional argument');
+  expect(result.stderr).toContain('Unexpected positional argument');
 });
 
 test('binary contract: rejects positional arguments after --', async () => {
   const result = await runBinary(['--', '--', '--commmit']);
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain('Unexpected positional argument');
+  expect(result.stderr).toContain('Unexpected positional argument');
 });
 
 test('binary contract: excludes a dash-prefixed sentinel from the changed-file set', async () => {
@@ -627,15 +622,87 @@ test('binary contract: excludes a dash-prefixed sentinel from the changed-file s
   expect(result.exitCode).not.toBe(0);
   expect(result.stdout).toContain('Excluded 1 file(s) matching patterns: -generated/*');
   expect(result.stdout).toContain('Found 1 file(s) changed');
-  expect(result.stdout).toContain('GOOGLE_GEMINI_API_KEY');
+  expect(result.stderr).toContain('GOOGLE_GEMINI_API_KEY');
   expect(result.stdout).not.toContain('Missing value for flag: --exclude');
-  expect(result.stderr).toBe('');
+  expect(result.stderr).not.toContain('Missing value for flag: --exclude');
 });
 
 test('binary contract: accepts an exclude pattern with a space', async () => {
   const result = await runBinary(['--exclude', 'path with space/*']);
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout).toContain('No staged changes found');
+  expect(result.stderr).toContain('No staged changes found');
   expect(result.stdout).not.toContain('Missing value for flag: --exclude');
 });
+
+test('binary contract: --debug and GCM_DEBUG_API print API traces to stderr', async () => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/file.txt`, 'third\n');
+  await runCommand(['git', 'add', 'file.txt'], repository);
+
+  const quiet = await runBinaryWithProvider(['--print'], repository);
+  expect(quiet.stderr).not.toContain('Gemini API request');
+  expect(quiet.stderr).not.toContain('Gemini API response');
+
+  const flagged = await runBinaryWithProvider(['--print', '--debug'], repository);
+  const environment = await runBinaryWithProvider(['--print'], repository, {
+    GCM_DEBUG_API: 'true',
+  });
+  for (const result of [flagged, environment]) {
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe('fix: corrected message\n');
+    expect(result.stderr).toContain('Gemini API request');
+    expect(result.stderr).toContain('Gemini API response');
+  }
+});
+
+test('binary contract: an argument error goes to stderr only', async () => {
+  const result = await runBinary(['--bogus']);
+
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe('');
+  expect(result.stderr).toContain('Unknown flag: --bogus');
+});
+
+test('binary contract: a missing repository is reported on stderr only', async () => {
+  const result = await runBinary([], nonRepository, 'not-a-real-key');
+
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).not.toContain('Not inside a git repository');
+  expect(result.stderr).toContain('Not inside a git repository');
+});
+
+test('binary contract: --apply without --non-interactive is reported on stderr only', async () => {
+  const result = await runBinary(['--apply'], excludeRepository, 'not-a-real-key');
+
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe('');
+  expect(result.stderr).toContain('--apply');
+});
+
+test('binary contract: --version ignores invalid configuration', async () => {
+  const result = await runSubprocess([binaryPath, '--version'], nonRepository, undefined, {
+    GCM_TEMP: 'abc',
+  });
+
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toBe(`gcm ${packageVersion}\n`);
+});
+
+const misconfigurations: Array<Record<string, string>> = [
+  { GCM_TEMP: 'abc' },
+  { GCM_PROVIDER: 'bogus' },
+];
+for (const environment of misconfigurations) {
+  test(`binary contract: --help survives ${Object.keys(environment)[0]} misconfiguration`, async () => {
+    const result = await runSubprocess(
+      [binaryPath, '--help'],
+      nonRepository,
+      undefined,
+      environment,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('--commit-range');
+  });
+}

@@ -207,7 +207,9 @@ test('integration: a token-limit failure surfaces instead of retrying silently',
     geminiModelLister: mockListModels,
   });
 
-  expect(mockCancel).toHaveBeenCalledWith('An unexpected error occurred: Error: MAX_TOKENS');
+  expect(mockCancel).toHaveBeenCalledWith('An unexpected error occurred: Error: MAX_TOKENS', {
+    output: process.stderr,
+  });
   expect(process.exitCode).toBe(1);
   expect(mockCallGemini).toHaveBeenCalledTimes(1);
 });
@@ -307,6 +309,7 @@ test('integration: should not send whitespace-only staged changes to AI', async 
     expect(mockCallGemini).not.toHaveBeenCalled();
     expect(mockCancel).toHaveBeenCalledWith(
       'Only whitespace-only staged changes detected in 2 file(s). Nothing to send to AI.',
+      { output: process.stderr },
     );
     expect(Number(process.exitCode)).toBe(1);
   } finally {

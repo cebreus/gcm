@@ -186,13 +186,14 @@ function validateValueFlag(
   aliases: string[],
   valueFlag: string,
   value: string | undefined,
+  isInlineValue: boolean,
 ): void {
   if (aliases.at(-1) !== valueFlag) {
     throw createArgumentValidationError(`Value-taking flag must be last in cluster: ${flag}`);
   }
   const valueDefinition = flagsByAlias.get(valueFlag)?.name;
   const allowsDashPrefixedValue =
-    valueDefinition === 'exclude' || valueDefinition === 'commitRange';
+    valueDefinition === 'exclude' || (valueDefinition === 'commitRange' && isInlineValue);
   if (
     !value ||
     value === '--' ||
@@ -233,7 +234,7 @@ function validateArgs(argv: string[]): void {
     const valueFlag = findValueFlag(aliases);
     if (!valueFlag) continue;
     const value = equalsIndex === -1 ? argv[index + 1] : argument.slice(equalsIndex + 1);
-    validateValueFlag(flag, aliases, valueFlag, value);
+    validateValueFlag(flag, aliases, valueFlag, value, equalsIndex !== -1);
     validateValueDefinition(valueFlag, seenValueFlags);
     index += Number(equalsIndex === -1);
   }

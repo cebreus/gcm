@@ -44,6 +44,10 @@ import {
 } from './generation.js';
 import { runCommitBatch } from './batch-generation.js';
 
+function reportCancel(message: string): void {
+  cancel(message, { output: process.stderr });
+}
+
 function paint(code: string): (message: string) => string {
   return message => `${code}${message}${C.reset}`;
 }
@@ -115,6 +119,18 @@ ${options}
   process.stdout.write(helpText.trim() + '\n');
 }
 
+const providerModelEnv: Record<string, string | undefined> = {
+  gemini: 'GCM_MODEL',
+  freellmapi: 'GCM_FREELLMAPI_MODEL',
+  'lm-studio': 'GCM_LM_STUDIO_MODEL',
+};
+
+function configuredModelFor(providerId: string): string | undefined {
+  const name = providerModelEnv[providerId];
+  const value = name ? process.env[name] : undefined;
+  return value === '' ? undefined : value;
+}
+
 export interface RunnerOptions extends ProviderFactoryOptions {
   isInteractive?: boolean;
   logger?: Logger;
@@ -133,7 +149,7 @@ function createRunnerDialogue(
       confirm,
       note,
       outro,
-      cancel,
+      cancel: reportCancel,
       isCancel,
     },
     clipboard: {
@@ -197,10 +213,7 @@ function createRunnerOutput(
       if (printOnly) return;
       s.stop(message);
     },
-    cancel: message => {
-      if (printOnly) cancel(message, { output: process.stderr });
-      else cancel(message);
-    },
+    cancel: reportCancel,
     note: (message, title) => {
       if (!printOnly) note(message, title);
     },
@@ -227,7 +240,7 @@ async function maybeHandleModelsList(
     providerLabel: provider.label,
     readinessError: provider.readinessError,
     models: () => provider.models(),
-    output: { cancel, note, outro },
+    output: { cancel: reportCancel, note, outro },
   });
 }
 
@@ -236,7 +249,7 @@ function buildLoggerConfig(parsedArgs: ParsedOptions, config: Config): LoggerCon
     LOG_LEVEL: config.LOG_LEVEL,
     LOG_TO_STDERR: parsedArgs.print,
   };
-  if (parsedArgs.verbose) loggerConfig.LOG_LEVEL = 'debug';
+  if (parsedArgs.verbose || parsedArgs.debug || config.DEBUG_API) loggerConfig.LOG_LEVEL = 'debug';
   return loggerConfig;
 }
 
@@ -246,9 +259,7 @@ function parseArgsOrReport(argv: string[]): ParsedOptions | null {
   } catch (error) {
     if (!isArgumentValidationError(error)) throw error;
     const message = `Error: ${error.message}. Run gcm --help for usage.`;
-    if (argv.some(arg => arg === '--print' || arg.startsWith('--print=')))
-      cancel(message, { output: process.stderr });
-    else cancel(message);
+    reportCancel(message);
     return null;
   }
 }
@@ -345,19 +356,22 @@ export async function executeCommitMessageGeneration(
   const parsedArgs = parseArgsOrReport(argv ?? process.argv.slice(2));
   let exitCode = 0;
   if (parsedArgs) {
-    const config = loadConfig(process.env);
-    const loggerConfig = buildLoggerConfig(parsedArgs, config);
-    const logger = opts.logger ?? createLogger(loggerConfig);
-    const isInteractive = opts.isInteractive ?? Boolean(process.stdin.isTTY);
-    const printOutput = parsedArgs.print ? { output: process.stderr } : undefined;
-    const reportCancel = parsedArgs.print
-      ? (message: string) => cancel(message, { output: process.stderr })
-      : cancel;
     if (parsedArgs.version) {
       process.stdout.write(`${pkg.name} ${pkg.version}\n`);
       process.exitCode = 0;
       return;
     }
+    let config: Config;
+    try {
+      config = loadConfig(process.env);
+    } catch (error) {
+      if (!parsedArgs.help) throw error;
+      config = loadConfig({}); // --help stays usable; provider text falls back to defaults
+    }
+    const loggerConfig = buildLoggerConfig(parsedArgs, config);
+    const logger = opts.logger ?? createLogger(loggerConfig);
+    const isInteractive = opts.isInteractive ?? Boolean(process.stdin.isTTY);
+    const printOutput = parsedArgs.print ? { output: process.stderr } : undefined;
     // Checked before any provider is built, because GCM_MODEL becomes a
     // provider's default model and would otherwise surface as "unavailable".
     // --help never resolves a model, so it stays usable.
@@ -397,7 +411,9 @@ export async function executeCommitMessageGeneration(
       process.exitCode = 1;
       return;
     }
-    const helpFactory = factories.find(factory => factory.id === providerId);
+    const helpFactory =
+      factories.find(factory => factory.id === providerId) ??
+      (parsedArgs.help ? factories[0] : undefined);
     if (!helpFactory) {
       reportCancel('Error: Unknown language model provider.');
       process.exitCode = 1;
@@ -476,6 +492,7 @@ export async function executeCommitMessageGeneration(
         session,
         provider.defaultModel,
         provider.id,
+        configuredModelFor(provider.id),
       );
       if (activeParsedArgs.commitRange) {
         const outcome = await runCommitRangeCommand({

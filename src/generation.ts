@@ -95,9 +95,10 @@ export function createGenerationState(
   session: GCMSession,
   defaultModel: string,
   providerId: string,
+  configuredModel?: string,
 ): { targetCommit: string | null; state: GenerationState } {
   const sessionModel = session.providerId === providerId ? session.modelName : null;
-  const initialModelName = parsedArgs.model ?? sessionModel ?? defaultModel;
+  const initialModelName = parsedArgs.model ?? configuredModel ?? sessionModel ?? defaultModel;
   return {
     targetCommit: parsedArgs.commit ?? null,
     state: {

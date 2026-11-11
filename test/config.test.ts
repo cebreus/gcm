@@ -133,19 +133,19 @@ test('config: reads only FreeLLMAPI-specific names', async () => {
 });
 
 test('CLI names an invalid GCM_TEMP setting', async () => {
-  const result = await runCli({ GCM_TEMP: 'garbage' });
+  const result = await runCli({ GCM_TEMP: 'garbage' }, ['--providers-list']);
   expect(result.exitCode).not.toBe(0);
   expect(result.stderr).toContain('Invalid GCM_TEMP');
 });
 
 test('CLI names an invalid GCM_MAX_BUFFER setting', async () => {
-  const result = await runCli({ GCM_MAX_BUFFER: '-2' });
+  const result = await runCli({ GCM_MAX_BUFFER: '-2' }, ['--providers-list']);
   expect(result.exitCode).not.toBe(0);
   expect(result.stderr).toContain('Invalid GCM_MAX_BUFFER');
 });
 
 test('CLI names an invalid GCM_MAX_RETRIES setting', async () => {
-  const result = await runCli({ GCM_MAX_RETRIES: '20' });
+  const result = await runCli({ GCM_MAX_RETRIES: '20' }, ['--providers-list']);
   expect(result.exitCode).not.toBe(0);
   expect(result.stderr).toContain('Invalid GCM_MAX_RETRIES');
 });

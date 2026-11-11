@@ -70,6 +70,15 @@ test('cli: accepts a non-interactive commit range', () => {
   expect(result.commitRange).toBe('base^..HEAD');
 });
 
+test('cli: rejects a dash-prefixed token as the commit range value', () => {
+  expect(() => parseArgs(['--commit-range', '--all', '--non-interactive', '--apply'])).toThrow(
+    'Missing value for flag: --commit-range',
+  );
+  expect(() => parseArgs(['--commit-range', '-5', '--non-interactive'])).toThrow(
+    'Missing value for flag: --commit-range',
+  );
+});
+
 test('cli: validates commit range combinations before execution', () => {
   expect(() => parseArgs(['--commit-range', 'base..HEAD'])).toThrow(
     '--commit-range requires --non-interactive',
