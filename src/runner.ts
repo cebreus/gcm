@@ -370,7 +370,6 @@ export async function executeCommitMessageGeneration(
     const loggerConfig = buildLoggerConfig(parsedArgs, config);
     const logger = opts.logger ?? createLogger(loggerConfig);
     const isInteractive = opts.isInteractive ?? Boolean(process.stdin.isTTY);
-    const printOutput = parsedArgs.print ? { output: process.stderr } : undefined;
     // Checked before any provider is built, because GCM_MODEL becomes a
     // provider's default model and would otherwise surface as "unavailable".
     // --help never resolves a model, so it stays usable.
