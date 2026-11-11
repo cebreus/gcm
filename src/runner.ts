@@ -62,7 +62,7 @@ const C = {
   magenta: '\x1b[35m',
 };
 
-function showHelp(providerLabel: string) {
+function showHelp(providerLabel: string, providerIds: string[]) {
   const optionWidth = Math.max(...CLI_OPTION_DEFINITIONS.map(option => option.usage.length));
   const descriptionLine = new RegExp(`.{1,${80 - optionWidth - 8}}(?:\\s|$)`, 'g');
   const options = CLI_OPTION_DEFINITIONS.map(option => {
@@ -91,7 +91,7 @@ ${options}
     ${C.bright}Provider:${C.reset}
       Use ${C.cyan}--provider <name>${C.reset}, choose in interactive Settings,
       or set ${C.cyan}GCM_PROVIDER${C.reset}.
-      Available values: gemini, freellmapi, lm-studio.
+      Available values: ${providerIds.join(', ')}.
       Example: ${C.cyan}GCM_PROVIDER=lm-studio gcm${C.reset}
 
     ${C.bright}Examples:${C.reset}
@@ -421,7 +421,10 @@ export async function executeCommitMessageGeneration(
     }
     if (parsedArgs.help) {
       intro(`${C.bright}${helpFactory.label} Commit Message Helper v${pkg.version}${C.reset}`);
-      showHelp(helpFactory.label);
+      showHelp(
+        helpFactory.label,
+        factories.map(factory => factory.id),
+      );
       process.exitCode = 0;
       return;
     }

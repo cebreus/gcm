@@ -1,6 +1,6 @@
 # GCM
 
-Generate Conventional Commit messages from staged changes or existing commits with Gemini, OpenAI-compatible APIs, or LM Studio.
+Generate Conventional Commit messages from staged changes or existing commits with Gemini, OpenAI-compatible APIs, LM Studio, or the local `codex-cli` / `claude-cli`.
 
 Review every result before any Git write.
 
@@ -66,7 +66,9 @@ From source checkout, replace `gcm` with `bun run ./gcm.ts`.
 
 Interactive flow lets you configure provider and model, regenerate, add hint, switch models, edit or copy message, select available Git action. Selected provider and model saved only after successful Git action.
 
-Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Supported values: `gemini`, `freellmapi`, `lm-studio`.
+The initial model is `--model`, then the provider's model variable (`GCM_MODEL`, `GCM_FREELLMAPI_MODEL`, `GCM_LM_STUDIO_MODEL`), then the last used model, then the provider default.
+
+Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Built-in values: `gemini`, `freellmapi`, `lm-studio`; installed CLIs also enable `codex-cli` and `claude-cli`.
 
 Model catalogues must publish authoritative limits. Gemini exposes separate input/output limits;
 FreeLLMAPI and LM Studio expose a shared context window.
@@ -81,7 +83,7 @@ See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 | `--commit-range <range>`  | Analyse a first-parent Git revision range, oldest first; requires `--non-interactive`.                       |
 | `-e, --exclude <pattern>` | Exclude matching paths; repeat or comma-separate patterns. Default: `dist/**` and nested `dist` directories. |
 | `--model <name>`          | Select a model from the active provider.                                                                     |
-| `--provider <name>`       | Select `gemini`, `freellmapi`, or `lm-studio`.                                                               |
+| `--provider <name>`       | Select an available API or local CLI provider.                                                               |
 | `--hint <text>`           | Add an instruction for generation.                                                                           |
 | `--models-list`           | List available text-generation models and exit.                                                              |
 | `--providers-list`        | Actively check available AI providers and exit.                                                              |
@@ -89,14 +91,34 @@ See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 | `--print`                 | Print only the generated message to stdout; implies `--non-interactive`.                                     |
 | `--apply`                 | Perform the available Git action; requires `--non-interactive`.                                              |
 | `-v, --verbose`           | Show debug-level console logs. Default: off.                                                                 |
-| `-d, --debug`             | Log redacted API request and response bodies. Default: off.                                                  |
+| `-d, --debug`             | Log redacted API request and response bodies. Default: off. Implies debug-level logs.                        |
 | `-h, --help`              | Show built-in help.                                                                                          |
 | `--version`               | Show the version.                                                                                            |
+
+Local CLI providers `codex-cli` and `claude-cli` are registered when their binaries are
+on PATH. They check existing CLI login status before use. GCM does not switch to an API
+provider when CLI authentication fails. Codex offers Luna, Sol and Terra, with Luna as
+default and Sol as its availability fallback. Claude offers Haiku, Sonnet, Opus and
+Fable, with Haiku as default and Sonnet as its availability fallback. Model access still
+depends on the CLI version, account and configured backend.
+
+CLI generation is ephemeral, runs outside the repository, disables CLI tools and
+customizations where supported, redacts recognised credentials, and bounds output.
+Primary and fallback CLI attempts share a 90-second deadline. Unsupported safety flags
+fail the request; GCM does not retry without them.
+
+For API generation, selecting `gemini-3.5-flash-lite` enables an availability fallback
+to `gemini-3.5-flash`; selecting `free-router` enables one to `kilo-auto`. The fallback
+must exist in the provider catalogue and cover the primary model's token limits.
+Authentication and malformed responses do not trigger model switching. Existing API
+defaults remain unchanged; the historical pilot benchmark is not sufficient evidence
+to replace them. Each API chat request has a 90-second timeout, including its transport
+retries; an API model fallback starts a new request deadline.
 
 `--providers-list` returns `0` when all providers are available, `1` when only some are
 available, and `2` when none are available. Checks do not load LM Studio models.
 
-`--print` cannot be combined with `--apply`, `--commit-range`, `--models-list`, or `--providers-list`. A message truncated by the output limit is refused with a non-zero exit.
+`--print` cannot be combined with `--apply`, `--commit-range`, `--models-list`, or `--providers-list`. A message truncated by the output limit is refused with a non-zero exit. Errors are written to stderr; stdout carries only results.
 
 `--exclude` patterns case-sensitive, match whole path, support `*` and `?`. Excluded files stay staged, will commit; GCM asks confirmation before writing. Generated `dist` files are omitted from analysis but commit normally. Merge commit analysed against first parent.
 
@@ -131,9 +153,9 @@ Rationale detail: [commit consistency](docs/adr/0002-commit-action-consistency.m
 
 ## Security
 
-Analysed diff is sent to the selected provider. LM Studio stays on the configured loopback URL. Known Google, AWS, GitHub, Slack, OpenAI-style keys, JWTs, PEM blocks redacted, but pattern-based redaction can't recognise every secret.
+Analysed diff is sent to the selected provider. LM Studio stays on the configured loopback URL. Known Google, AWS, GitHub, GitLab, npm, Stripe, Slack, OpenAI-style keys, JWTs, PEM blocks, URL passwords, secret-named environment assignments and quoted secret literals redacted, but pattern-based redaction can't recognise every secret.
 
-`--debug` prints redacted request/response traces to the console, each body capped at 32 KiB. No trace file is written. The traces contain the analysed diff, so avoid `--debug` where the output is kept: a shared terminal, a recorded session or CI logs. See [secret redaction](docs/adr/0004-redact-secrets-leaving-the-machine.md).
+`--debug` prints redacted request/response traces to the console, each body capped at 32 KiB. Traces cover the HTTP providers (Gemini, FreeLLMAPI, LM Studio); `codex-cli` and `claude-cli` produce none. No trace file is written. The traces contain the analysed diff, so avoid `--debug` where the output is kept: a shared terminal, a recorded session or CI logs. See [secret redaction](docs/adr/0004-redact-secrets-leaving-the-machine.md).
 
 ## Configuration
 
@@ -142,7 +164,7 @@ Analysed diff is sent to the selected provider. LM Studio stays on the configure
 | Variable                | Default                 | Purpose                                                |
 | ----------------------- | ----------------------- | ------------------------------------------------------ |
 | `GCM_MODEL`             | `gemini-3.7-flash`      | Gemini model.                                          |
-| `GCM_PROVIDER`          | `gemini`                | Provider: `gemini`, `freellmapi`, or `lm-studio`.      |
+| `GCM_PROVIDER`          | `gemini`                | API provider or installed `codex-cli` / `claude-cli`.      |
 | `GCM_FREELLMAPI_URL`    | `http://127.0.0.1:3001` | FreeLLMAPI endpoint URL.                               |
 | `GCM_FREELLMAPI_MODEL`  | `auto`                  | FreeLLMAPI routing model.                              |
 | `GCM_FREELLMAPI_TOKEN`  | none                    | FreeLLMAPI Bearer token.                               |

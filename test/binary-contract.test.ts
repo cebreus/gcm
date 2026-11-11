@@ -318,6 +318,73 @@ test.skipIf(expectPath === null)(
   },
 );
 
+for (const provider of ['codex', 'claude']) {
+  for (const mode of ['print', 'apply', 'auth', 'truncated']) {
+    test(`binary contract: ${provider} CLI ${mode}`, async function () {
+      const repository = await createCommittedRepository();
+      await Bun.write(`${repository}/file.txt`, 'third\n');
+      await runCommand(['git', 'add', 'file.txt'], repository);
+      const head = (await runCommand(['git', 'rev-parse', 'HEAD'], repository)).stdout;
+      const staged = (await runCommand(['git', 'diff', '--cached'], repository)).stdout;
+      const bin = `${binaryDirectory}/fake-${provider}-${mode}`;
+      const executable = `${bin}/${provider}`;
+      await Bun.write(
+        executable,
+        `#!/usr/bin/env bun
+const args = process.argv.slice(2);
+if (args.includes('status')) {
+  console.log(JSON.stringify({ loggedIn: process.env.FAKE_CLI_MODE !== 'auth' }));
+  process.exit(process.env.FAKE_CLI_MODE === 'auth' ? 1 : 0);
+}
+if (process.cwd() === process.env.FAKE_REPOSITORY) throw new Error('CLI must not run in repository');
+const prompt = await Bun.stdin.text();
+if (!prompt.includes('third')) throw new Error('missing staged context');
+const count = process.env.FAKE_CLI_MODE === 'truncated' ? 900000 : 8;
+if (${JSON.stringify(provider)} === 'codex') {
+  if (!args.includes('--ephemeral') || !args.includes('read-only') || !args.includes('shell_tool')) throw new Error('unsafe Codex arguments');
+  console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'fix: local CLI message' } }));
+  console.log(JSON.stringify({ type: 'turn.completed', usage: { output_tokens: count } }));
+} else {
+  if (!args.includes('--safe-mode') || args[args.indexOf('--tools') + 1] !== '') throw new Error('unsafe Claude arguments');
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'fix: local CLI message', usage: { output_tokens: count } }));
+}
+`,
+      );
+      await runCommand(['chmod', '+x', executable], repository);
+      const result = await runSubprocess(
+        [
+          'bun',
+          binaryPath,
+          '--provider',
+          `${provider}-cli`,
+          ...(mode === 'apply' ? ['--non-interactive', '--apply'] : ['--print']),
+        ],
+        repository,
+        undefined,
+        {
+          PATH: `${bin}:${Bun.env.PATH ?? '/usr/bin:/bin'}`,
+          FAKE_CLI_MODE: mode,
+          FAKE_REPOSITORY: repository,
+        },
+      );
+      if (mode === 'auth' || mode === 'truncated') {
+        expect(result.exitCode).toBe(1);
+        expect(result.stdout).toBe('');
+      } else {
+        expect(result.exitCode).toBe(0);
+        if (mode === 'print') expect(result.stdout.trim()).toBe('fix: local CLI message');
+      }
+      if (mode === 'apply') {
+        expect((await readSubjects(repository))[0]).toBe('fix: local CLI message');
+        expect((await runCommand(['git', 'status', '--porcelain'], repository)).stdout).toBe('');
+      } else {
+        expect((await runCommand(['git', 'rev-parse', 'HEAD'], repository)).stdout).toBe(head);
+        expect((await runCommand(['git', 'diff', '--cached'], repository)).stdout).toBe(staged);
+      }
+    });
+  }
+}
+
 test('binary contract: non-interactive generation stays read-only without --apply', async () => {
   const repository = await createCommittedRepository();
   await Bun.write(`${repository}/file.txt`, 'third\n');

@@ -94,7 +94,7 @@ export const CLI_OPTION_DEFINITIONS = [
     name: 'provider',
     aliases: ['--provider'],
     usage: '--provider <name>',
-    description: 'Use gemini, freellmapi, or lm-studio.',
+    description: 'Use another available AI provider.',
     takesValue: true,
   },
   {

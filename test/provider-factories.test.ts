@@ -2,6 +2,68 @@ import { expect, test } from 'bun:test';
 import { createProviderFactories } from '../src/provider-factories.js';
 import { loadConfig } from '../gcm.config.js';
 
+test('local CLI registration follows installed binaries without probing during help', async function () {
+  const calls: string[][] = [];
+  const factories = createProviderFactories(
+    {
+      which: function (command) {
+        return command === 'codex' ? '/fake/codex' : null;
+      },
+      localCliRun: async function (request) {
+        calls.push(request.cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    },
+    { log: function () {} },
+    false,
+    loadConfig({}),
+  );
+  expect(factories.map(factory => factory.id)).toEqual([
+    'gemini',
+    'freellmapi',
+    'lm-studio',
+    'codex-cli',
+  ]);
+  expect(calls).toEqual([]);
+  const provider = await factories.at(-1)?.create({ probeOnly: true });
+  expect(provider?.id).toBe('codex-cli');
+  expect(calls).toEqual([['/fake/codex', 'login', 'status']]);
+});
+
+test('Claude factory refuses a logged-out CLI even when status exits zero', async function () {
+  const factories = createProviderFactories(
+    {
+      which: function (command) {
+        return command === 'claude' ? '/fake/claude' : null;
+      },
+      localCliRun: async function () {
+        return { exitCode: 0, stdout: JSON.stringify({ loggedIn: false }), stderr: '' };
+      },
+    },
+    { log: function () {} },
+    false,
+    loadConfig({}),
+  );
+  await expect(factories.at(-1)?.create({ probeOnly: true })).rejects.toThrow('login is required');
+});
+
+test('injected factories keep precedence over local CLI discovery', function () {
+  const factories: [] = [];
+  expect(
+    createProviderFactories(
+      {
+        languageModelProviderFactories: factories,
+        which: function () {
+          throw new Error('must not discover');
+        },
+      },
+      { log: function () {} },
+      false,
+      loadConfig({}),
+    ),
+  ).toBe(factories);
+});
+
 test('LM Studio factory reads its URL when the factory runs', async function () {
   let staleRequests = 0;
   const staleServer = Bun.serve({

@@ -16,7 +16,7 @@ providers, so every change to generation had to be made and tested twice.
 
 ## Decision
 
-All providers generate over the same OpenAI-compatible chat transport.
+The HTTP providers (Gemini, FreeLLMAPI, LM Studio) generate over the same OpenAI-compatible chat transport.
 Gemini uses `POST /v1beta/openai/chat/completions` on
 `generativelanguage.googleapis.com` with bearer authentication.
 
@@ -36,4 +36,4 @@ system prompt asks for a bare commit message and the parser validates exactly
 that, rejecting anything without a Conventional Commit subject. Gemini thinking-token counts are no longer reported,
 because the compatible endpoint does not break them out, and thinking tokens
 count against the request's output cap. `--debug` logs redacted request and
-response bodies through a fetch wrapper rather than to a file.
+response bodies of the HTTP providers through a fetch wrapper rather than to a file; `codex-cli` and `claude-cli` spawn local processes and trace nothing.
