@@ -399,7 +399,11 @@ export async function executeCommitMessageGeneration(
     const session = await loadSession();
     const gitService =
       opts.gitService ?? createGitService({ maxBytes: config.CHILD_PROCESS_MAX_BUFFER });
-    const requestedProviderId = parsedArgs.provider ?? config.PROVIDER;
+    // Session file is local but may be stale or hand-edited: its provider counts only if a factory exists for it.
+    const sessionProviderId = factories.some(factory => factory.id === session.providerId)
+      ? session.providerId
+      : undefined;
+    const requestedProviderId = parsedArgs.provider ?? config.PROVIDER ?? sessionProviderId;
     let providerId = opts.languageModelProvider
       ? opts.languageModelProvider.id
       : (requestedProviderId ?? factories[0]?.id);

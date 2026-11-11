@@ -68,6 +68,8 @@ Interactive flow lets you configure provider and model, regenerate, add hint, sw
 
 The initial model is `--model`, then the provider's model variable (`GCM_MODEL`, `GCM_FREELLMAPI_MODEL`, `GCM_LM_STUDIO_MODEL`), then the last used model, then the provider default.
 
+The provider is `--provider`, then `GCM_PROVIDER`, then the last used provider, then the first available one.
+
 Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Built-in values: `gemini`, `freellmapi`, `lm-studio`; installed CLIs also enable `codex-cli` and `claude-cli`.
 
 Model catalogues must publish authoritative limits. Gemini exposes separate input/output limits;

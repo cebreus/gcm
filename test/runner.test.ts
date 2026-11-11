@@ -911,7 +911,7 @@ describe('Refactored Runner', () => {
     }
   });
 
-  test('Should keep Gemini as default when a prior session used LM Studio', async () => {
+  test('Should show the session provider in help when nothing else selects one', async () => {
     const originalProvider = process.env.GCM_PROVIDER;
     delete process.env.GCM_PROVIDER;
     mockLoadSession.mockResolvedValueOnce({
@@ -920,11 +920,103 @@ describe('Refactored Runner', () => {
     });
     try {
       await executeCommitMessageGeneration(['--help'], { logger: mockLogger });
-      expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('Gemini'));
+      expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('LM Studio'));
     } finally {
       if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
       else process.env.GCM_PROVIDER = originalProvider;
     }
+  });
+
+  describe('provider precedence', () => {
+    const ids = ['gemini', 'freellmapi', 'lm-studio'];
+    async function createdProviders(
+      args: string[],
+      env: string | undefined,
+      sessionProvider: string | null,
+      sessionModel: string | null = null,
+    ): Promise<{ created: string[]; generate: ReturnType<typeof mock> }> {
+      const originalProvider = process.env.GCM_PROVIDER;
+      if (env === undefined) delete process.env.GCM_PROVIDER;
+      else process.env.GCM_PROVIDER = env;
+      mockLoadSession.mockResolvedValueOnce({
+        providerId: sessionProvider,
+        modelName: sessionModel,
+      });
+      mockGitService.retrieveStagedChanges.mockResolvedValue({
+        stagedDiff: 'diff',
+        stagedFiles: ['a.ts'],
+        truncated: false,
+      });
+      mockContextService.constructLLMPromptContext.mockResolvedValue({
+        promptContext: 'ctx',
+        processedDiffContent: 'diff',
+        tokens: 10,
+      });
+      mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+      const created: string[] = [];
+      const generate = mock(() => Promise.resolve({ text: 'test: msg', usage: {} }));
+      const limits = { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 };
+      try {
+        await executeCommitMessageGeneration(args, {
+          logger: mockLogger,
+          gitService: mockGitService,
+          contextService: mockContextService,
+          languageModelProviderFactories: ids.map(id => ({
+            id,
+            label: id,
+            create: async () => {
+              created.push(id);
+              return {
+                id,
+                label: id,
+                defaultModel: 'dflt',
+                models: async () =>
+                  ['dflt', 'saved-model'].map(name => ({ name, label: name, limits })),
+                service: { generate },
+              };
+            },
+          })),
+        });
+      } finally {
+        if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
+        else process.env.GCM_PROVIDER = originalProvider;
+      }
+      return { created, generate };
+    }
+
+    test('Should use the session provider without flag or environment', async () => {
+      expect((await createdProviders([], undefined, 'lm-studio')).created).toEqual(['lm-studio']);
+    });
+
+    test('Should rank GCM_PROVIDER above the session provider', async () => {
+      expect((await createdProviders([], 'freellmapi', 'lm-studio')).created).toEqual([
+        'freellmapi',
+      ]);
+    });
+
+    test('Should rank --provider above environment and session', async () => {
+      const { created } = await createdProviders(
+        ['--provider', 'gemini'],
+        'freellmapi',
+        'lm-studio',
+      );
+      expect(created).toEqual(['gemini']);
+    });
+
+    test('Should ignore an unknown session provider silently', async () => {
+      mockCancel.mockClear();
+      expect((await createdProviders([], undefined, 'ghost')).created).toEqual(['gemini']);
+      expect(mockCancel).not.toHaveBeenCalled();
+    });
+
+    test('Should use the first provider without a session', async () => {
+      expect((await createdProviders([], undefined, null)).created).toEqual(['gemini']);
+    });
+
+    test('Should use the session model of the session provider', async () => {
+      const { generate } = await createdProviders([], undefined, 'lm-studio', 'saved-model');
+      expect(generate).toHaveBeenCalledWith(expect.objectContaining({ modelName: 'saved-model' }));
+    });
   });
 
   test('Should keep explicit model and mode prompt-free with multiple providers', async () => {

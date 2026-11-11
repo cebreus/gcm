@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'fs/promises';
 import pkg from '../package.json';
 
@@ -188,7 +188,12 @@ function expectCleanInputError(result: BinaryResult, message: string): void {
   expect(result.stderr).not.toContain('function(');
 }
 
+// Binary runs share HOME=tempRoot; a saved session would now pick the next test's provider.
+const sharedSession = `${tempRoot}/.gcm-session.json`;
+afterEach(() => rm(sharedSession, { force: true }));
+
 beforeAll(async () => {
+  await rm(sharedSession, { force: true });
   binaryDirectory = await mkdtemp(`${tempRoot}/gcm-binary-contract-build-`);
   binaryPath = `${binaryDirectory}/gcm`;
   gitRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-repository-`);
@@ -809,3 +814,20 @@ for (const environment of misconfigurations) {
     expect(result.stdout).toContain('--commit-range');
   });
 }
+
+test('binary contract: a saved session provider selects the provider', async () => {
+  const home = await mkdtemp(`${tempRoot}/gcm-binary-contract-home-`);
+  try {
+    await Bun.write(
+      `${home}/.gcm-session.json`,
+      JSON.stringify({ providerId: 'lm-studio', modelName: null }),
+    );
+    const result = await runSubprocess([binaryPath, '--help'], nonRepository, undefined, {
+      HOME: home,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(clean(result.stdout + result.stderr)).toContain('LM Studio Commit Message Helper');
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

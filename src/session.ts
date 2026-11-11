@@ -8,7 +8,11 @@ export interface GCMSession {
 }
 
 const EMPTY_SESSION: GCMSession = { providerId: null, modelName: null };
-const SESSION_FILE = join(homedir(), '.gcm-session.json');
+// Read per call: Bun caches homedir() at start, so a HOME set later would be ignored.
+function sessionFile(): string {
+  const home = process.env.HOME ?? '';
+  return join(home === '' ? homedir() : home, '.gcm-session.json');
+}
 
 function isModelName(value: unknown): value is string | null {
   return value === null || isLanguageModelName(value);
@@ -23,7 +27,7 @@ function isSession(value: unknown): value is GCMSession {
 
 export async function loadSession(): Promise<GCMSession> {
   try {
-    const file = Bun.file(SESSION_FILE);
+    const file = Bun.file(sessionFile());
     if (await file.exists()) {
       const session: unknown = await file.json();
       if (isSession(session)) return session;
@@ -36,7 +40,7 @@ export async function loadSession(): Promise<GCMSession> {
 
 export async function saveSession(session: GCMSession): Promise<void> {
   try {
-    await Bun.write(SESSION_FILE, JSON.stringify(session, null, 2));
+    await Bun.write(sessionFile(), JSON.stringify(session, null, 2));
   } catch {
     // Ignore errors
   }
