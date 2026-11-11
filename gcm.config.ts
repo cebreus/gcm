@@ -7,6 +7,14 @@ import {
 } from './src/config-values.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from './src/model-registry.js';
 
+const LOG_LEVELS = ['debug', 'info', 'warn', 'error'];
+
+function logLevel(value: string | undefined): string {
+  const level = stringOrDefault(value, 'info');
+  if (!LOG_LEVELS.includes(level)) throw new Error('Invalid GCM_LOG_LEVEL');
+  return level;
+}
+
 export function loadConfig(env: Record<string, string | undefined>) {
   const retry = normalizeRetryConfig(
     {
@@ -52,14 +60,14 @@ export function loadConfig(env: Record<string, string | undefined>) {
       DEFAULT_MAX_OUTPUT_TOKENS,
       'GCM_MAX_OUTPUT_TOKENS',
     ),
-    LOG_LEVEL: stringOrDefault(env.GCM_LOG_LEVEL, 'info'),
+    LOG_LEVEL: logLevel(env.GCM_LOG_LEVEL),
     DEBUG_API: env.GCM_DEBUG_API === 'true',
     AUTO_CHANGESET: env.GCM_AUTO_CHANGESET === 'true',
     MAX_RETRIES: retry.maxRetries,
     RETRY_BASE_MS: retry.retryBaseMs,
     RETRY_MAX_MS: retry.retryMaxMs,
     FREELLMAPI_URL: stringOrDefault(env.GCM_FREELLMAPI_URL, 'http://127.0.0.1:3001'),
-    FREELLMAPI_MODEL: env.GCM_FREELLMAPI_MODEL ?? 'auto',
+    FREELLMAPI_MODEL: stringOrDefault(env.GCM_FREELLMAPI_MODEL, 'auto'),
     FREELLMAPI_TOKEN: env.GCM_FREELLMAPI_TOKEN,
     PROVIDER: env.GCM_PROVIDER,
     LM_STUDIO_URL: stringOrDefault(env.GCM_LM_STUDIO_URL, 'http://127.0.0.1:1234'),

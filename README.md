@@ -173,7 +173,7 @@ The diff is untrusted, so the model's reply is too. After the subject line, GCM 
 
 ## Configuration
 
-`GCM_MODEL`, `GCM_TEMP` only model/temperature names. Invalid or out-of-range numeric values stop GCM with an `Invalid <NAME>` error.
+`GCM_MODEL`, `GCM_TEMP` only model/temperature names. Invalid or out-of-range numeric values and an unknown `GCM_LOG_LEVEL` stop GCM with an `Invalid <NAME>` error.
 
 | Variable                | Default                 | Purpose                                                |
 | ----------------------- | ----------------------- | ------------------------------------------------------ |
@@ -191,7 +191,7 @@ The diff is untrusted, so the model's reply is too. After the subject line, GCM 
 | `GCM_MAX_HUNKS`         | `40`                    | Maximum hunks when a large diff is summarised.         |
 | `GCM_TOKEN_BYTES_RATIO` | `3.5`                   | Estimated bytes per input token.                       |
 | `GCM_MAX_OUTPUT_TOKENS` | `8192`                  | Response-token policy; the model cap also applies.     |
-| `GCM_LOG_LEVEL`         | `info`                  | Console log level.                                     |
+| `GCM_LOG_LEVEL`         | `info`                  | Console log level: `debug`, `info`, `warn`, `error`.   |
 | `GCM_DEBUG_API`         | `false`                 | Enable API trace logging.                              |
 | `GCM_AUTO_CHANGESET`    | `false`                 | Prepare a Changeset during interactive staged commits. |
 | `GCM_MAX_RETRIES`       | `3`                     | Retries for transient provider failures.               |

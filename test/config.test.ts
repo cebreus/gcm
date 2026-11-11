@@ -188,3 +188,13 @@ test('--version wins over --models-list', async function () {
   expect(result.exitCode).toBe(0);
   expect(result.stdout.trim()).toMatch(/^gcm \S+$/);
 });
+
+test('config: an empty GCM_FREELLMAPI_MODEL uses the default', async () => {
+  await expect(readConfig({ GCM_FREELLMAPI_MODEL: '' })).resolves.toEqual(DEFAULT_CONFIG);
+});
+
+test('CLI names an invalid GCM_LOG_LEVEL setting', async () => {
+  const result = await runCli({ GCM_LOG_LEVEL: 'nonsense' }, ['--providers-list']);
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr).toContain('Invalid GCM_LOG_LEVEL');
+});
