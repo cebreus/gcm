@@ -214,7 +214,7 @@ beforeAll(async () => {
         return new Response(JSON.stringify({ error: { message: 'quota exhausted' } }), { status: Number(process.env.FAKE_CHAT_STATUS) });
       }
       return new Response(JSON.stringify({
-choices: [{ finish_reason: process.env.FAKE_FINISH_REASON ?? 'stop', message: { role: 'assistant', content: 'fix: corrected message' } }],
+choices: [{ finish_reason: process.env.FAKE_FINISH_REASON ?? 'stop', message: { role: 'assistant', content: process.env.FAKE_CHAT_CONTENT ?? 'fix: corrected message' } }],
         usage: { prompt_tokens: 10, completion_tokens: 4 }
       }));
     } as typeof fetch;`,
@@ -814,6 +814,21 @@ for (const environment of misconfigurations) {
     expect(result.stdout).toContain('--commit-range');
   });
 }
+
+test('binary contract: --apply drops a trailer the model asserted', async () => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/file.txt`, 'third\n');
+  await runCommand(['git', 'add', 'file.txt'], repository);
+
+  const result = await runBinaryWithProvider(['--non-interactive', '--apply'], repository, {
+    FAKE_CHAT_CONTENT: 'fix: corrected message\n\nBody.\n\nCo-authored-by: Evil <evil@example.com>',
+  });
+
+  expect(result.exitCode).toBe(0);
+  const body = (await runCommand(['git', 'log', '-1', '--format=%B'], repository)).stdout;
+  expect(body).toContain('Body.');
+  expect(body).not.toContain('Co-authored-by');
+});
 
 test('binary contract: a saved session provider selects the provider', async () => {
   const home = await mkdtemp(`${tempRoot}/gcm-binary-contract-home-`);
