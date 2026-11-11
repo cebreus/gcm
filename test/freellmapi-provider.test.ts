@@ -498,3 +498,66 @@ test('createFreeLlmApiProvider tries the next catalogue after duplicate identifi
     await server.stop(true);
   }
 });
+
+const TRACE_SECRET = `ghp_${'a1B2'.repeat(9)}`;
+
+async function collectFreeLlmApiTrace(options: {
+  debugApi?: boolean;
+  configDebug?: boolean;
+}): Promise<{ message: string; meta?: Record<string, unknown> }[]> {
+  const entries: { message: string; meta?: Record<string, unknown> }[] = [];
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: async function (request) {
+      if (request.method === 'GET') {
+        return Response.json({ data: [{ id: 'auto', context_window: 24_000 }] });
+      }
+      return Response.json({
+        choices: [{ message: { content: `feat: ${TRACE_SECRET}` }, finish_reason: 'stop' }],
+        usage: {},
+      });
+    },
+  });
+  try {
+    const provider = await createFreeLlmApiProviderWithConfig({
+      baseUrl: server.url.origin,
+      config: { ...loadConfig({}), DEBUG_API: options.configDebug === true },
+      debugApi: options.debugApi,
+      logger: {
+        log: function (_level: string, message: string, meta?: Record<string, unknown>) {
+          entries.push({ message, meta });
+        },
+      },
+    });
+    await provider.service.generate({
+      promptContext: `diff ${TRACE_SECRET}`,
+      systemPrompt: 'rules',
+      meta: {},
+      modelName: 'auto',
+      maxOutputTokens: 1_024,
+    });
+  } finally {
+    await server.stop(true);
+  }
+  return entries;
+}
+
+test.each([
+  ['debugApi flag', { debugApi: true }],
+  ['config.DEBUG_API', { configDebug: true }],
+])('FreeLLMAPI traces redacted request and response with %s', async function (_name, options) {
+  const entries = await collectFreeLlmApiTrace(options);
+
+  expect(entries.map(entry => entry.message)).toEqual([
+    'FreeLLMAPI API request',
+    'FreeLLMAPI API response',
+  ]);
+  expect(String(entries[0]?.meta?.body)).toContain('diff ');
+  expect(entries[1]?.meta?.status).toBe(200);
+  expect(JSON.stringify(entries)).not.toContain(TRACE_SECRET);
+});
+
+test('FreeLLMAPI logs no trace when debug is off', async function () {
+  expect(await collectFreeLlmApiTrace({})).toEqual([]);
+});

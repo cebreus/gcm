@@ -1,5 +1,6 @@
 import {
   createLanguageModelApiError,
+  isModelUnavailableError,
   isLanguageModelApiError,
   isLanguageModelName,
   type LanguageModelGenerateParams,
@@ -14,14 +15,18 @@ import {
 import type { Config } from '../gcm.config.js';
 import { isRecord } from './utils.js';
 import {
+  canUseFallbackModel,
   collectSortedModels,
   readPositiveTokenCount,
   requireDistinctModels,
   type ModelSpec,
 } from './model-registry.js';
-import { parseProviderBaseUrl } from './provider-http.js';
+import type { Logger } from './logger.js';
+import { parseProviderBaseUrl, withRequestTrace } from './provider-http.js';
 
 const DEFAULT_FREELLMAPI_MODEL = 'auto';
+const FALLBACK_FROM_MODEL = 'free-router';
+const FALLBACK_TO_MODEL = 'kilo-auto';
 
 function parseModelId(entry: unknown): string | null {
   if (typeof entry === 'string' && isLanguageModelName(entry)) return entry;
@@ -167,6 +172,9 @@ export async function createFreeLlmApiProvider(options: {
   model?: string;
   token?: string;
   config: Config;
+  logger?: Logger;
+  debugApi?: boolean;
+  onFallback?: (from: string, to: string) => void;
 }): Promise<LanguageModelProvider> {
   const url = parseProviderBaseUrl(options.baseUrl, 'FreeLLMAPI', {
     allowHttps: true,
@@ -177,6 +185,10 @@ export async function createFreeLlmApiProvider(options: {
   }
 
   const config = options.config;
+  const fetchImpl =
+    options.logger && (options.debugApi === true || config.DEBUG_API)
+      ? withRequestTrace(options.logger, globalThis.fetch, 'FreeLLMAPI', options.token)
+      : undefined;
   const { models } = await discoverModels(url, config, options.token);
 
   if (options.model && !models.some(model => model.name === options.model)) {
@@ -192,17 +204,38 @@ export async function createFreeLlmApiProvider(options: {
     );
   }
 
-  async function generate(params: LanguageModelGenerateParams) {
-    const model = byName.get(params.modelName);
+  async function generateWithModel(params: LanguageModelGenerateParams, modelName: string) {
+    const model = byName.get(modelName);
     if (!model) throw new Error('Unknown FreeLLMAPI model');
 
     return generateOpenAiCompatibleChat({
       providerLabel: 'FreeLLMAPI',
       url: resolveChatEndpoint(url),
       token: options.token,
-      params,
+      params: { ...params, modelName },
+      fetchImpl,
       config,
     });
+  }
+
+  async function generate(params: LanguageModelGenerateParams) {
+    try {
+      return await generateWithModel(params, params.modelName);
+    } catch (error) {
+      const primary = byName.get(FALLBACK_FROM_MODEL);
+      const fallback = byName.get(FALLBACK_TO_MODEL);
+      if (
+        params.modelName !== FALLBACK_FROM_MODEL ||
+        !primary ||
+        !fallback ||
+        !canUseFallbackModel(primary.limits, fallback.limits) ||
+        !isModelUnavailableError(error)
+      ) {
+        throw error;
+      }
+      options.onFallback?.(FALLBACK_FROM_MODEL, FALLBACK_TO_MODEL);
+      return generateWithModel(params, FALLBACK_TO_MODEL);
+    }
   }
 
   return {

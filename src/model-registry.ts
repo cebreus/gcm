@@ -10,6 +10,22 @@ export interface ModelSpec {
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
 
+export function canUseFallbackModel(
+  primary: ModelTokenLimits,
+  fallback: ModelTokenLimits,
+): boolean {
+  if (primary.kind !== fallback.kind) return false;
+  if (primary.kind === 'shared-context' && fallback.kind === 'shared-context') {
+    return fallback.contextWindowTokens >= primary.contextWindowTokens;
+  }
+  return (
+    primary.kind === 'separate' &&
+    fallback.kind === 'separate' &&
+    fallback.maxInputTokens >= primary.maxInputTokens &&
+    fallback.maxOutputTokens >= primary.maxOutputTokens
+  );
+}
+
 /** Parses a raw provider catalogue into specs, dropping unusable entries and sorting by name. */
 export function collectSortedModels(
   rawEntries: readonly unknown[],

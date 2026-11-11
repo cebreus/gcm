@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import {
   generateOpenAiCompatibleChat,
   requestLanguageModelJson,
@@ -7,6 +7,33 @@ import { requestProviderText } from '../src/provider-http.js';
 import { loadConfig } from '../gcm.config.js';
 
 const retry = { maxRetries: 2, retryBaseMs: 10, retryMaxMs: 100 };
+
+test('chat generation gives slow models a 90-second request deadline', async function () {
+  const timeout = spyOn(AbortSignal, 'timeout');
+  try {
+    await generateOpenAiCompatibleChat({
+      providerLabel: 'Test provider',
+      url: new URL('https://example.test/v1/chat/completions'),
+      config: loadConfig({}),
+      params: {
+        meta: {},
+        modelName: 'test-model',
+        systemPrompt: 'rules',
+        promptContext: 'diff',
+        maxOutputTokens: 100,
+      },
+      fetchImpl: async function (_input, init) {
+        expect(init?.signal?.aborted).toBe(false);
+        return Response.json({
+          choices: [{ message: { content: 'fix: handle slow models' }, finish_reason: 'stop' }],
+        });
+      },
+    });
+    expect(timeout).toHaveBeenCalledWith(90_000);
+  } finally {
+    timeout.mockRestore();
+  }
+});
 
 test('provider transport retries transient HTTP failures', async function () {
   let calls = 0;

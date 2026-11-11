@@ -3,6 +3,7 @@ import {
   createLanguageModelApiError,
   getModelSpecValidationError,
   isLanguageModelApiError,
+  isModelUnavailableError,
 } from '../src/language-model-service.js';
 
 test('language model errors require an explicit discriminator', function () {
@@ -30,4 +31,14 @@ test('model validation accepts provider-specific ids and rejects unsafe runtime 
       limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
     }),
   ).toBeNull();
+});
+
+test('authentication and bad-request statuses never count as model unavailable', function () {
+  for (const status of [400, 401, 403]) {
+    const error = createLanguageModelApiError('rejected', { status, availability: true });
+    expect(isModelUnavailableError(error)).toBeFalse();
+  }
+  for (const status of [404, 503]) {
+    expect(isModelUnavailableError(createLanguageModelApiError('down', { status }))).toBeTrue();
+  }
 });

@@ -76,7 +76,9 @@ export async function requestLanguageModelJson(params: {
       fetchImpl: params.fetchImpl,
     });
   } catch (error) {
-    throw createLanguageModelApiError(requestFailureMessage(providerLabel, error));
+    throw createLanguageModelApiError(requestFailureMessage(providerLabel, error), {
+      availability: error instanceof Error && error.name === 'TimeoutError',
+    });
   }
   const redacted = sanitizeLanguageModelErrorText(result.body, token);
   const snippet = new TextDecoder().decode(
@@ -119,7 +121,7 @@ export async function generateOpenAiCompatibleChat(options: {
   const payload = await requestLanguageModelJson({
     providerLabel,
     url: options.url,
-    timeoutMs: 60_000,
+    timeoutMs: 90_000,
     token: options.token,
     fetchImpl: options.fetchImpl,
     config: options.config,

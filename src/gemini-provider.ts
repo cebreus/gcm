@@ -2,47 +2,24 @@ import type { Config } from '../gcm.config.js';
 import { listGeminiModels } from './gemini-models.js';
 import {
   createLanguageModelApiError,
+  isModelUnavailableError,
   getModelSpecValidationError,
   type LanguageModelGenerateParams,
   type LanguageModelProvider,
   type LanguageModelService,
 } from './language-model-service.js';
 import type { Logger } from './logger.js';
-import { requireDistinctModels, type ModelSpec } from './model-registry.js';
+import { canUseFallbackModel, requireDistinctModels, type ModelSpec } from './model-registry.js';
 import { generateOpenAiCompatibleChat } from './openai-compatible-client.js';
-import { readResponseBody, type ProviderFetch } from './provider-http.js';
-import { redactSensitiveText } from './utils.js';
+import { withRequestTrace, type ProviderFetch } from './provider-http.js';
 
-const MAX_TRACED_BODY_CHARS = 32 * 1024;
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+const FALLBACK_MODEL = 'gemini-3.5-flash';
 
 const CHAT_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 
 const UNSUPPORTED_MODEL_PATTERN =
   /(^gemini-2\.5-|preview|experimental|embedding|image|tts|audio|live|robotics|computer-use|veo|imagen|nano-banana|omni|transcribe)/i;
-
-// Redaction runs before truncation: slicing first can cut a secret short of
-// the pattern that would have matched it and log the remainder verbatim.
-function traceBody(body: string): string {
-  return redactSensitiveText(body).slice(0, MAX_TRACED_BODY_CHARS);
-}
-
-function withRequestTrace(logger: Logger, fetchImpl: ProviderFetch): ProviderFetch {
-  return async (input, init) => {
-    logger.log('debug', 'Gemini API request', {
-      url: String(input),
-      body: traceBody(String(init?.body ?? '')),
-    });
-    const response = await fetchImpl(input, init);
-    const body = await readResponseBody(response.clone())
-      .then(traceBody)
-      .catch(() => '[response body too large]');
-    logger.log('debug', 'Gemini API response', {
-      status: response.status,
-      body,
-    });
-    return response;
-  };
-}
 
 function selectCompatibleModels(discovered: ModelSpec[]): ModelSpec[] {
   const compatible: ModelSpec[] = [];
@@ -73,7 +50,9 @@ export function createGeminiProvider(options: {
     options.listModels ?? ((credential: string) => listGeminiModels(credential, config));
   const traced = options.debugApi === true || config.DEBUG_API;
   const baseFetch = options.fetchImpl ?? globalThis.fetch;
-  const fetchImpl = traced ? withRequestTrace(options.logger, baseFetch) : baseFetch;
+  const fetchImpl = traced
+    ? withRequestTrace(options.logger, baseFetch, 'Gemini', apiKey)
+    : baseFetch;
   let cataloguePromise: Promise<ModelSpec[]> | null = null;
 
   function loadModels(): Promise<ModelSpec[]> {
@@ -88,17 +67,38 @@ export function createGeminiProvider(options: {
     return cataloguePromise;
   }
 
-  async function generate(params: LanguageModelGenerateParams) {
-    const known = (await loadModels()).some(candidate => candidate.name === params.modelName);
+  async function generateWithModel(params: LanguageModelGenerateParams, modelName: string) {
+    const known = (await loadModels()).some(candidate => candidate.name === modelName);
     if (!known) throw new Error('Unknown Gemini model');
     return generateOpenAiCompatibleChat({
       providerLabel: 'Gemini',
       url: new URL(CHAT_URL),
       token: apiKey,
-      params,
+      params: { ...params, modelName },
       fetchImpl,
       config,
     });
+  }
+
+  async function generate(params: LanguageModelGenerateParams) {
+    try {
+      return await generateWithModel(params, params.modelName);
+    } catch (error) {
+      if (!isModelUnavailableError(error)) throw error;
+      const models = await loadModels();
+      const primary = models.find(model => model.name === DEFAULT_MODEL);
+      const fallback = models.find(model => model.name === FALLBACK_MODEL);
+      if (
+        params.modelName !== DEFAULT_MODEL ||
+        !primary ||
+        !fallback ||
+        !canUseFallbackModel(primary.limits, fallback.limits)
+      ) {
+        throw error;
+      }
+      options.logger.log('info', `${DEFAULT_MODEL} unavailable; retrying with ${FALLBACK_MODEL}`);
+      return generateWithModel(params, FALLBACK_MODEL);
+    }
   }
 
   return {

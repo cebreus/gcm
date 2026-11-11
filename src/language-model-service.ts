@@ -39,6 +39,15 @@ export function isLanguageModelApiError(error: unknown): error is LanguageModelA
   );
 }
 
+export function isModelUnavailableError(error: unknown): boolean {
+  if (!isLanguageModelApiError(error)) return false;
+  const status = Number(error.metadata.status);
+  if ([400, 401, 403].includes(status)) return false;
+  return (
+    error.metadata.availability === true || [404, 408, 429, 500, 502, 503, 504].includes(status)
+  );
+}
+
 export function isLanguageModelProviderId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(value);
 }
