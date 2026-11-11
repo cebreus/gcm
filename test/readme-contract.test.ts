@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { CLI_OPTION_DEFINITIONS } from '../src/cli';
 import { SECRET_FILE_EXCLUDE_PATTERNS } from '../src/constants';
 import { parseLanguageModelOutput } from '../src/parser';
-import { parseProjectConfig } from '../src/project-config';
+import { PROJECT_CONFIG_KEYS, parseProjectConfig } from '../src/project-config';
 
 // README is the user-facing contract. These tests fail when it and the code disagree,
 // so a later change cannot silently flip a documented decision in either direction.
@@ -95,7 +95,7 @@ test('README options table lists exactly the CLI options', () => {
 
 test('README project configuration keys are accepted, others rejected', () => {
   const keys = tableColumn('| Key ');
-  expect(keys).toEqual(['types', 'scopes', 'exclude', 'instructions']);
+  expect(new Set(keys)).toEqual(PROJECT_CONFIG_KEYS);
   const values: Record<string, unknown> = {
     types: ['feat'],
     scopes: ['cli'],

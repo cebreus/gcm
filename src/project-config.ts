@@ -7,7 +7,12 @@ export interface ProjectConfig {
   instructions?: string;
 }
 
-const KEYS = new Set(['types', 'scopes', 'exclude', 'instructions']);
+export const PROJECT_CONFIG_KEYS: ReadonlySet<string> = new Set([
+  'types',
+  'scopes',
+  'exclude',
+  'instructions',
+]);
 const IDENTIFIER = /^[a-z][a-z0-9-]*$/;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/;
 
@@ -40,7 +45,7 @@ export function parseProjectConfig(text: string): ProjectConfig {
   }
   if (!isRecord(value)) throw new Error('must be an object');
   for (const key of Object.keys(value)) {
-    if (!KEYS.has(key)) throw new Error(`unknown key "${key}"`);
+    if (!PROJECT_CONFIG_KEYS.has(key)) throw new Error(`unknown key "${key}"`);
   }
   const config: ProjectConfig = {};
   if (value.types !== undefined) config.types = parseStringArray(value.types, 'types');
