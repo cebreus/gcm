@@ -147,3 +147,21 @@ test('logger: serialises circular and bigint metadata without throwing', () => {
   expect(output).toContain('"token":"[REDACTED]"');
   expect(output).toContain('"self":"[Circular]"');
 });
+
+test('logger: keeps token counts but redacts token values', () => {
+  const logger = createLogger({ LOG_LEVEL: 'info' });
+  logger.log('info', 'usage', {
+    promptTokens: 212,
+    outputTokens: 9,
+    accessToken: 'plain-access',
+    secretTokens: 123456,
+    promptTokensKey: 654321,
+  });
+
+  const output = stderrWriteMock.mock.calls.map(call => String(call[0])).join('');
+  expect(output).toContain('"promptTokens":212');
+  expect(output).toContain('"outputTokens":9');
+  expect(output).not.toContain('plain-access');
+  expect(output).not.toContain('123456');
+  expect(output).not.toContain('654321');
+});

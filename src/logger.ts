@@ -16,6 +16,7 @@ export interface Logger {
 const DEFAULT_LEVEL = 'info';
 
 const SENSITIVE_KEY_PATTERN = /key|token|pass|secret/i;
+const TOKEN_COUNT_KEYS = new Set(['promptTokens', 'outputTokens']);
 
 const levels: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
@@ -60,7 +61,12 @@ function redactForLogs(value: unknown, seen = new WeakSet<object>()): unknown {
 function sanitiseMetaForLogs(meta: LogMetadata): LogMetadata {
   const out: LogMetadata = {};
   for (const key of Object.keys(meta)) {
-    out[key] = SENSITIVE_KEY_PATTERN.test(key) ? '[REDACTED-KEY]' : redactForLogs(meta[key]);
+    // Usage counts, not credentials; any other key or value type stays redacted.
+    const isTokenCount = TOKEN_COUNT_KEYS.has(key) && typeof meta[key] === 'number';
+    out[key] =
+      SENSITIVE_KEY_PATTERN.test(key) && !isTokenCount
+        ? '[REDACTED-KEY]'
+        : redactForLogs(meta[key]);
   }
   return out;
 }
