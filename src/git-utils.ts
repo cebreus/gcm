@@ -4,6 +4,7 @@ import { MAX_CHILD_OUTPUT_BYTES } from './constants.js';
 interface SpawnGitOptions {
   maxBytes?: number;
   execName?: string;
+  /** 0 disables the timeout and never kills on output volume (user-owned hooks); otherwise 1 ms to 10 minutes, default 120 s. */
   timeoutMs?: number;
   allowTruncated?: boolean;
 }
@@ -68,7 +69,10 @@ async function spawnCore(
   defaultMaxBytes = 1024 * 1024,
 ): Promise<{ truncated: boolean }> {
   const maxBytes = integerInRange(options.maxBytes, 1, MAX_CHILD_OUTPUT_BYTES, defaultMaxBytes);
-  const timeoutMs = integerInRange(options.timeoutMs, 1, 10 * 60 * 1000, 120_000);
+  const timeoutMs =
+    options.timeoutMs === 0
+      ? undefined
+      : integerInRange(options.timeoutMs, 1, 10 * 60 * 1000, 120_000);
   const execName = options.execName ?? 'git';
   const child = Bun.spawn({
     cmd: [execName, ...args],
@@ -80,10 +84,13 @@ async function spawnCore(
   let truncated = false;
   let timedOut = false;
   const killState = { killed: false };
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    void killSpawnedChild(child, killState);
-  }, timeoutMs);
+  const timeout =
+    timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          timedOut = true;
+          void killSpawnedChild(child, killState);
+        }, timeoutMs);
 
   const stdoutTask = (async (): Promise<void> => {
     const reader = child.stdout?.getReader();
@@ -99,6 +106,8 @@ async function spawnCore(
       bytes += value.byteLength;
       if (bytes > maxBytes) {
         truncated = true;
+        // Hooks may outlive the cap: keep draining so git can finish its write.
+        if (options.timeoutMs === 0) continue;
         await killSpawnedChild(child, killState);
         break;
       }

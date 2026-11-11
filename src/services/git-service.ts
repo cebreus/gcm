@@ -324,7 +324,7 @@ async function commitChanges(
 ): Promise<void> {
   await assertCommitWriteSafety(runGit, logger, safety);
   if (logger) logger.log('debug', 'Executing git commit');
-  await runGit(['commit', '-m', message]);
+  await runGit(['commit', '-m', message], { timeoutMs: 0, allowTruncated: true });
   await warnIfCommittedTreeChanged(runGit, logger, safety);
 }
 
@@ -365,7 +365,7 @@ async function amendCommit(
 ): Promise<void> {
   await assertCommitWriteSafety(runGit, logger, safety);
   logger?.log('debug', 'Executing git commit --amend');
-  await runGit(['commit', '--amend', '-m', message]);
+  await runGit(['commit', '--amend', '-m', message], { timeoutMs: 0, allowTruncated: true });
   await warnIfCommittedTreeChanged(runGit, logger, safety);
 }
 
@@ -383,7 +383,10 @@ async function rewordCommit(
   await assertCommitWriteSafety(runGit, logger, safety);
   logger?.log('debug', `Creating amend! commit for ${target.hash}`);
   const previousHead = (await runGit(['rev-parse', '--verify', 'HEAD'])).text.trim();
-  await runGit(['commit', '--allow-empty', '-m', `amend! ${target.hash}`, '-m', message]);
+  await runGit(['commit', '--allow-empty', '-m', `amend! ${target.hash}`, '-m', message], {
+    timeoutMs: 0,
+    allowTruncated: true,
+  });
   try {
     await assertAmendCommitIsEmpty(runGit);
   } catch (error) {

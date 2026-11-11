@@ -147,7 +147,7 @@ exit 0
 - **Unreachable target, detached `HEAD`, staged index, or Git operation in progress:** generate read-only mode.
 - **Conflicts or unverifiable snapshot:** stop before generation or writing.
 
-GCM never runs rebase. Before writing, it revalidates repository state. Hook changes in a normal commit are reported; an unsafe `amend!` is rolled back only when its verified parent is unchanged, preserving hook changes in the index.
+GCM never runs rebase. Before writing, it revalidates repository state. Hook changes in a normal commit are reported; an unsafe `amend!` is rolled back only when its verified parent is unchanged, preserving hook changes in the index. GCM waits for commit hooks without a time limit.
 
 Rationale detail: [commit consistency](docs/adr/0002-commit-action-consistency.md), [first-parent analysis](docs/adr/0003-first-parent-commit-analysis.md).
 
