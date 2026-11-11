@@ -49,32 +49,50 @@ function isSecretLiteral(value: string): boolean {
 }
 
 export function redactSensitiveTextForPrompt(text: string): string {
-  return redactAuthorizationCredentials(text)
-    .replace(
-      /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_.+/=]{16,}\b/g,
-      '[REDACTED-JWT]',
-    )
-    .replace(
-      /\b(?:AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{31,}|gh[opusr]_[A-Za-z0-9]{36}|npm_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20,}|[sr]k_live_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{60,}|sk-(?:proj-)?[A-Za-z0-9_-]{32,}|AQ\.[A-Za-z0-9_-]{24,}|xoxb-[0-9]{6,}-[0-9]{6,}-[A-Za-z0-9-]{24,})\b/g,
-      (value: string): string => (hasSecretEntropy(value) ? '[REDACTED-KEY]' : value),
-    )
-    .replace(/\b([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/[^\s:/@]*:)[^\s/@]+@/g, '$1[REDACTED]@')
-    .replace(
-      /^([+ -]?[ \t]*(?:export[ \t]+)?[A-Z0-9_.-]*(?:SECRET|PASSWORD|PASSWD|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY)[A-Z0-9_.-]*=)(?:(["'])([^"'\n]*)\2|([^\s"']+))/gim,
-      (match: string, head: string, quote?: string, quoted?: string, bare?: string): string => {
-        const value = quoted ?? bare ?? '';
-        const mark = quote ?? '';
-        return isSecretLiteral(value) && !/^[$<]/.test(value)
-          ? `${head}${mark}[REDACTED]${mark}`
-          : match;
-      },
-    )
-    .replace(
-      /((?:secret|password|passwd|token|api_?key|access_?key|private_?key)["']?\s*[:=]\s*)(["'])([^"'\s]+)\2/gi,
-      (match: string, head: string, quote: string, value: string): string =>
-        isSecretLiteral(value) ? `${head}${quote}[REDACTED]${quote}` : match,
-    )
-    .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED-PEM]');
+  return (
+    redactAuthorizationCredentials(text)
+      .replace(
+        /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_.+/=]{16,}\b/g,
+        '[REDACTED-JWT]',
+      )
+      .replace(
+        /\b(?:AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{31,}|gh[opusr]_[A-Za-z0-9]{36}|npm_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20,}|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{60,}|sk-(?:proj-)?[A-Za-z0-9_-]{32,}|AQ\.[A-Za-z0-9_-]{24,}|xox[abprs]-[A-Za-z0-9-]{20,}|ya29\.[A-Za-z0-9_-]{20,})\b/g,
+        (value: string): string => (hasSecretEntropy(value) ? '[REDACTED-KEY]' : value),
+      )
+      .replace(/\b(Bearer[ \t]+)(?=[\w.~+/=-]*\d)[\w.~+/=-]{16,}/g, '$1[REDACTED]')
+      .replace(/\b([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/[^\s:/@]*:)[^\s/@]+@/g, '$1[REDACTED]@')
+      .replace(
+        /^([+ -]?[ \t]*(?:export[ \t]+)?[A-Z0-9_.-]*(?:SECRET|PASSWORD|PASSWD|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY)[A-Z0-9_.-]*=)(?:(["'])([^"'\n]*)\2|([^\s"']+))/gim,
+        (match: string, head: string, quote?: string, quoted?: string, bare?: string): string => {
+          const value = quoted ?? bare ?? '';
+          const mark = quote ?? '';
+          return isSecretLiteral(value) && !/^[$<]/.test(value)
+            ? `${head}${mark}[REDACTED]${mark}`
+            : match;
+        },
+      )
+      .replace(
+        // Unquoted `key: value` / `key = value`; the digit requirement spares code references.
+        /^([+ -]?[ \t]*(?:export[ \t]+)?(?:[A-Z0-9_.-]*[_.-])?(?:SECRET|PASSWORD|PASSWD|PASS|PWD|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY)(?:[_.-][A-Za-z0-9_.-]*)?[ \t]*[:=][ \t]*)([^\s"',;]+)/gim,
+        (match: string, head: string, value: string): string =>
+          isSecretLiteral(value) &&
+          /\d/.test(value) &&
+          !/^(?:[$<\/~]|\.\/|process\.env|os\.environ|env\.)|[([{]/.test(value)
+            ? `${head}[REDACTED]`
+            : match,
+      )
+      .replace(
+        /((?:secret|password|passwd|token|api_?key|access_?key|private_?key)[A-Za-z0-9_.-]*["']?\s*[:=]\s*)(["'])([^"'\s]+)\2/gi,
+        (match: string, head: string, quote: string, value: string): string =>
+          isSecretLiteral(value) ? `${head}${quote}[REDACTED]${quote}` : match,
+      )
+      .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED-PEM]')
+      // Unterminated block: take only following key-like lines (capped), never the rest of the text.
+      .replace(
+        /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\r?\n[+ -]?(?:[A-Za-z0-9+/=]{1,100}|[A-Za-z-]{1,20}: ?[A-Za-z0-9,.+/=-]{1,100})(?=\r?$)){0,40}/gm,
+        '[REDACTED-PEM]',
+      )
+  );
 }
 
 export function sanitizeTerminalText(text: string): string {
@@ -122,7 +140,9 @@ export function pushHunkToTop(array: Hunk[], hunk: Hunk, maxSize: number): void 
  * ASCII characters and internal control markers.
  */
 export function sanitizeForDisplay(text: string): string {
-  return stripTerminalControlSequences(text.replace(/^[ \t]+/, '').replace(/[ \t]+$/, ''));
+  let end = text.length;
+  while (end > 0 && (text[end - 1] === ' ' || text[end - 1] === '\t')) end -= 1;
+  return stripTerminalControlSequences(text.slice(0, end).replace(/^[ \t]+/, ''));
 }
 
 export function formatCommitMessage(message: string): string {

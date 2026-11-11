@@ -318,12 +318,115 @@ test('utils: prompt redaction leaves ordinary code and placeholders untouched', 
   for (const input of inputs) expect(redactSensitiveTextForPrompt(input)).toBe(input);
 });
 
+test('utils: prompt redaction covers unquoted, spaced and vendor secrets', () => {
+  const cases: [string, string][] = [
+    ['+password: hunter2correct', '+password: [REDACTED]'],
+    ['+  token: abcdefghij12345', '+  token: [REDACTED]'],
+    ['MY_PASSWORD = abcdefgh1234', 'MY_PASSWORD = [REDACTED]'],
+    ['DB_PASS=abcdefgh1234', 'DB_PASS=[REDACTED]'],
+    ['pass=abcdefgh1234', 'pass=[REDACTED]'],
+    ['token=abcdefgh1234', 'token=[REDACTED]'],
+    ['DB_PWD: abcdefgh1234', 'DB_PWD: [REDACTED]'],
+    ['curl -H "x: Bearer abcdefghijklmnop1234"', 'curl -H "x: Bearer [REDACTED]"'],
+    ['xoxb-' + '123456789012-123456789012-aB3dE5gH7jK9mN1pQ3rS5tU7', '[REDACTED-KEY]'],
+    ['xoxp-' + '123456789012-aB3dE5gH7jK9mN1pQ3rS5tU7', '[REDACTED-KEY]'],
+    ['xoxa-2-' + 'aB3dE5gH7jK9mN1pQ3rS5tU7', '[REDACTED-KEY]'],
+    ['sk_test_' + 'aB3dE5gH7jK9mN1p', '[REDACTED-KEY]'],
+    ['rk_test_' + 'aB3dE5gH7jK9mN1p', '[REDACTED-KEY]'],
+    ['ya29.' + 'aB3dE5gH7jK9mN1pQ3rS5tU7', '[REDACTED-KEY]'],
+    ['a\n-----BEGIN RSA PRIVATE KEY-----\nMIIabc\ndef', 'a\n[REDACTED-PEM]'],
+    [
+      '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n-----BEGIN PRIVATE KEY-----\nxyz',
+      '[REDACTED-PEM]\n[REDACTED-PEM]',
+    ],
+  ];
+  for (const [input, expected] of cases) expect(redactSensitiveTextForPrompt(input)).toBe(expected);
+});
+
+test('utils: prompt redaction leaves non-secret values untouched', () => {
+  const inputs = [
+    'password: ""',
+    'token: null',
+    'password: string',
+    'passwordField = input.value',
+    'password = req.body.password',
+    'password: ${DB_PASSWORD}',
+    'token: process.env.TOKEN_VALUE2',
+    'DB_PASS=short1',
+    'password: [REDACTED]',
+    'bypass = abcdefgh1234',
+    'passenger: abcdefgh1234',
+    'Bearer authentication scheme',
+    'Bearer token',
+    'ya29.short',
+    '-----BEGIN CERTIFICATE-----\nabc',
+  ];
+  for (const input of inputs) expect(redactSensitiveTextForPrompt(input)).toBe(input);
+});
+
 test('utils: prompt redaction runs in linear time on abusive input', () => {
   const inputs = ['A_'.repeat(100_000) + '=', '://a:'.repeat(40_000), '"'.repeat(200_000)];
   for (const input of inputs) {
     const start = performance.now();
     redactSensitiveTextForPrompt(input);
     expect(performance.now() - start).toBeLessThan(1000);
+  }
+});
+
+test('utils: prompt redaction truncated PEM keeps surrounding text', () => {
+  const cases: [string, string][] = [
+    [
+      'see -----BEGIN RSA PRIVATE KEY----- mention and more code after',
+      'see [REDACTED-PEM] mention and more code after',
+    ],
+    [
+      'k = "-----BEGIN PRIVATE KEY-----"\nconst next = 1;\n+++ b/other.ts',
+      'k = "[REDACTED-PEM]"\nconst next = 1;\n+++ b/other.ts',
+    ],
+    [
+      '+-----BEGIN PRIVATE KEY-----\n+MIIEvQIBADANBg\n+kqhkiG9w0BAQE=\n+const x = 1;',
+      '+[REDACTED-PEM]\n+const x = 1;',
+    ],
+    [
+      '-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nMIIabc\nafter code here',
+      '[REDACTED-PEM]\nafter code here',
+    ],
+  ];
+  for (const [input, expected] of cases) expect(redactSensitiveTextForPrompt(input)).toBe(expected);
+  const long =
+    '-----BEGIN PRIVATE KEY-----\n' + 'A'.repeat(64).concat('\n').repeat(500) + 'tail code';
+  const out = redactSensitiveTextForPrompt(long);
+  expect(out.startsWith('[REDACTED-PEM]')).toBe(true);
+  expect(out.endsWith('tail code')).toBe(true);
+});
+
+test('utils: prompt redaction handles key-name suffixes and skips code-like values', () => {
+  const redacted: [string, string][] = [
+    ['SECRET_KEY = "django-insecure-abc123xyz"', 'SECRET_KEY = "[REDACTED]"'],
+    ['SECRET_KEY: abc123xyz456', 'SECRET_KEY: [REDACTED]'],
+    ['secret_key: "abcd1234efgh"', 'secret_key: "[REDACTED]"'],
+    ['DB_PASSWORD_HASH: abc123xyz456', 'DB_PASSWORD_HASH: [REDACTED]'],
+  ];
+  for (const [input, expected] of redacted)
+    expect(redactSensitiveTextForPrompt(input)).toBe(expected);
+  const untouched = [
+    'password = getPass1()',
+    'passwd: /etc/passwd2',
+    'PWD=/home/user2',
+    'token: tokens[0]1',
+    'token: ./dir/file1.txt',
+    'token: ~/file1.txt',
+    'token: {a1b2c3d4e5}',
+    'token: foo.bar1.baz()',
+  ];
+  for (const input of untouched) expect(redactSensitiveTextForPrompt(input)).toBe(input);
+});
+
+test('utils: prompt redaction is fast on 100k-character lines', () => {
+  for (const input of ['a'.repeat(100_000), ' '.repeat(100_000)]) {
+    const start = performance.now();
+    redactSensitiveTextForPrompt(input);
+    expect(performance.now() - start).toBeLessThan(100);
   }
 });
 
@@ -341,4 +444,15 @@ test('utils: estimateTokenCount - should handle unicode characters', () => {
   expect(estimateTokenCount('你好', ratio)).toBe(2); // 6 bytes / 4 -> ceil(1.5) = 2
   // 'a你好b' is 8 bytes
   expect(estimateTokenCount('a你好b', ratio)).toBe(2); // 8 bytes / 4 -> ceil(2) = 2
+});
+
+test('utils: sanitizeForDisplay - trims in linear time on long whitespace runs', () => {
+  const single = 'a' + ' '.repeat(200_000) + 'x';
+  const multi = ('a' + ' '.repeat(50_000) + '\n').repeat(4) + 'b' + ' \t'.repeat(100_000) + 'x';
+  const start = performance.now();
+  expect(sanitizeForDisplay(single)).toBe(single);
+  expect(sanitizeForDisplay(multi)).toBe(multi);
+  expect(sanitizeForDisplay('  a \t b \t \n ')).toBe('a \t b \t \n');
+  expect(sanitizeForDisplay('x' + ' \t'.repeat(100_000))).toBe('x');
+  expect(performance.now() - start).toBeLessThan(200);
 });
