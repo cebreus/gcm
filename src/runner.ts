@@ -30,7 +30,11 @@ import {
   isCancel,
   cancel,
 } from '@clack/prompts';
-import { sanitizeForDisplay, sanitizeTerminalText } from './utils.js';
+import {
+  sanitizeForDisplay,
+  sanitizeTerminalText,
+  stripTerminalControlSequences,
+} from './utils.js';
 import clipboardy from 'clipboardy';
 import pkg from '../package.json';
 import {
@@ -65,6 +69,11 @@ const C = {
   yellow: '\x1b[33m',
   magenta: '\x1b[35m',
 };
+
+// Styling only for a terminal; a redirected stdout gets plain text.
+function forStdout(text: string): string {
+  return process.stdout.isTTY ? text : stripTerminalControlSequences(text);
+}
 
 function showHelp(providerLabel: string, providerIds: string[]) {
   const optionWidth = Math.max(...CLI_OPTION_DEFINITIONS.map(option => option.usage.length));
@@ -120,7 +129,7 @@ ${options}
         and never runs rebase.
 
     `;
-  process.stdout.write(helpText.trim() + '\n');
+  process.stdout.write(forStdout(helpText.trim() + '\n'));
 }
 
 const providerModelEnv: Record<string, string | undefined> = {
@@ -429,7 +438,11 @@ export async function executeCommitMessageGeneration(
       return;
     }
     if (parsedArgs.help) {
-      intro(`${C.bright}${helpFactory.label} Commit Message Helper v${pkg.version}${C.reset}`);
+      intro(
+        forStdout(
+          `${C.bright}${helpFactory.label} Commit Message Helper v${pkg.version}${C.reset}`,
+        ),
+      );
       showHelp(
         helpFactory.label,
         factories.map(factory => factory.id),

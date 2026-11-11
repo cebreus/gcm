@@ -164,6 +164,13 @@ test('an unsafe GCM_MODEL stops --providers-list with the real reason', async fu
   expect(result.stdout + result.stderr).toContain('Invalid GCM_MODEL');
 });
 
+test('--help to a non-terminal stdout has no escape sequences', async function () {
+  const result = await runCli({}, ['--help']);
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain('Usage');
+  expect(result.stdout).not.toContain('\u001b[');
+});
+
 test('an unsafe GCM_MODEL still lets the CLI answer --help', async function () {
   const result = await runCli(UNSAFE_MODEL, ['--help']);
   expect(result.exitCode).toBe(0);
