@@ -1,0 +1,206 @@
+{
+  "date": "2026-11-09",
+  "commits": {
+    "85303e6": "fix(generation): recover from provider API failures",
+    "2b12aed": "feat(release): add automatic changesets for commits"
+  },
+  "codexPrompt": "You generate concise, evidence-grounded Conventional Commit messages from git diffs. Output only the commit message. Subject format: type(scope): summary. Allowed types: feat, fix, refactor, perf, style, docs, test, build, ci, chore. Subject starts lowercase after colon, imperative, no trailing period, max 60 characters. Optional body only when needed, at least two distinct single-line bullets. Use only diff facts; never invent motivation, performance, security, migration, or breaking status.",
+  "runs": [
+    {
+      "provider": "google",
+      "model": "gemini-3.5-flash-lite",
+      "commit": "85303e6",
+      "exitCode": 0,
+      "latencySeconds": 1.1,
+      "inputTokens": 5091,
+      "outputTokens": 41,
+      "output": "fix(generation): recover from provider API failures\n\n- Offer retry or model switch with clear timeout details\n- Return recoverable commit-hook failures to review\n- Preserve non-interactive failures and safety refusals"
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.5-flash-lite",
+      "commit": "2b12aed",
+      "exitCode": 0,
+      "latencySeconds": 1.3,
+      "inputTokens": 13194,
+      "outputTokens": 77,
+      "output": "feat(release): add automatic changesets for commits\n\n- Proposed changesets are generated from the staged diff when the GCM_AUTO_CHANGESET flag is enabled.\n- Users can choose to commit with the proposed changeset, or without it by providing an allowed skip reason.\n- Generated changeset files are removed if the commit fails and HEAD remains unchanged, preserving repository state."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.5-flash",
+      "commit": "85303e6",
+      "exitCode": 0,
+      "latencySeconds": 7.0,
+      "inputTokens": 5091,
+      "outputTokens": 36,
+      "output": "fix(generation): recover from provider API failures\n\n- Prompt for retry or model selection when interactive API requests fail\n- Return to review dialogue when non-refusal commit actions fail"
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.5-flash",
+      "commit": "2b12aed",
+      "exitCode": 0,
+      "latencySeconds": 9.4,
+      "inputTokens": 13194,
+      "outputTokens": 66,
+      "output": "feat(release): add automatic changesets for commits\n\n- Generate proposed changesets from staged diff evidence when GCM_AUTO_CHANGESET is enabled.\n- Prompt interactive users to commit with the note or select a skip reason to omit it.\n- Remove created changeset files if the commit fails while HEAD remains unchanged."
+    },
+    {
+      "provider": "freellmapi",
+      "model": "free-router",
+      "commit": "85303e6",
+      "exitCode": 0,
+      "latencySeconds": 15.1,
+      "inputTokens": 4652,
+      "outputTokens": 956,
+      "output": "fix(generation): recover from provider API failures"
+    },
+    {
+      "provider": "freellmapi",
+      "model": "free-router",
+      "commit": "2b12aed",
+      "exitCode": 0,
+      "latencySeconds": 5.8,
+      "inputTokens": 11901,
+      "outputTokens": 540,
+      "output": "feat(release): add automatic changesets for commits"
+    },
+    {
+      "provider": "freellmapi",
+      "model": "kilo-auto",
+      "commit": "85303e6",
+      "exitCode": 0,
+      "latencySeconds": 15.2,
+      "inputTokens": 4652,
+      "outputTokens": 1817,
+      "output": "fix(generation): recover from provider API failures\n\n- Interactive failures offer retry or model switch after surfacing sanitized API error details\n- Commit action failures return to review interactively; refusals and non-interactive failures still fail"
+    },
+    {
+      "provider": "freellmapi",
+      "model": "kilo-auto",
+      "commit": "2b12aed",
+      "exitCode": 0,
+      "latencySeconds": 17.7,
+      "inputTokens": 11901,
+      "outputTokens": 1759,
+      "output": "feat(release): add automatic changeset generation\n\n- GCM_AUTO_CHANGESET=true prepares a proposed Changeset from the staged diff before the interactive commit choice is offered\n- An included changeset is written and staged only if the refreshed index matches the reviewed snapshot plus that note, and is removed if the commit fails while HEAD is unchanged\n- Committing without a changeset requires an explicit allowed skip reason and appends Changeset: none and Changeset-Reason trailers"
+    },
+    {
+      "provider": "codex-cli",
+      "model": "gpt-6-luna",
+      "commit": "85303e6",
+      "exitCode": 0,
+      "latencySeconds": 8.1,
+      "inputTokens": 27872,
+      "outputTokens": 14,
+      "output": "fix(generation): recover from API and commit failures"
+    },
+    {
+      "provider": "codex-cli",
+      "model": "gpt-6-luna",
+      "commit": "2b12aed",
+      "exitCode": 0,
+      "latencySeconds": 8.2,
+      "inputTokens": 34728,
+      "outputTokens": 14,
+      "output": "feat(release): add automatic changesets for commits"
+    },
+    {
+      "provider": "codex-cli",
+      "model": "gpt-6.1-sol",
+      "commit": "85303e6",
+      "exitCode": 0,
+      "latencySeconds": 8.4,
+      "inputTokens": 32221,
+      "outputTokens": 47,
+      "output": "fix(generation): recover from interactive failures\n\n- Offer retry or model selection after provider API errors\n- Return failed commit actions to review while preserving edited messages\n- Keep non-interactive failures and commit refusals terminal"
+    },
+    {
+      "provider": "codex-cli",
+      "model": "gpt-6.1-sol",
+      "commit": "2b12aed",
+      "exitCode": 0,
+      "latencySeconds": 8.6,
+      "inputTokens": 39077,
+      "outputTokens": 55,
+      "output": "feat(release): add opt-in changesets for staged commits\n\n- Require an allowed skip reason when committing without a changeset\n- Verify the index matches the reviewed snapshot plus the selected note\n- Remove unchanged generated notes on failure only while HEAD is unchanged"
+    },
+    {
+      "provider": "codex-cli",
+      "model": "gpt-6.1-terra",
+      "commit": "85303e6",
+      "exitCode": 0,
+      "latencySeconds": 8.2,
+      "inputTokens": 32573,
+      "outputTokens": 36,
+      "output": "fix(generation): recover from interactive failures\n\n- Offer retry or model selection after provider API errors\n- Return failed commit actions to review while preserving safety refusals"
+    },
+    {
+      "provider": "codex-cli",
+      "model": "gpt-6.1-terra",
+      "commit": "2b12aed",
+      "exitCode": 0,
+      "latencySeconds": 10.8,
+      "inputTokens": 39429,
+      "outputTokens": 41,
+      "output": "feat(release): add automatic changesets for commits\n\n- Require an allowed reason when committing without a changeset\n- Verify the staged snapshot and retain changesets when commit outcomes are uncertain"
+    },
+    {
+      "provider": "freellmapi",
+      "model": "claude-haiku-4-5",
+      "commit": "85303e6",
+      "exitCode": null,
+      "latencySeconds": 30.0,
+      "error": "run did not finish during capture window"
+    },
+    {
+      "provider": "freellmapi",
+      "model": "claude-haiku-4-5",
+      "commit": "2b12aed",
+      "exitCode": 0,
+      "latencySeconds": 7.6,
+      "output": "feat(release): add automatic changesets for commits\n\n- Proposes a Changeset from the staged diff during interactive commits when enabled.\n- Appends skip reasons or stages the Changeset file based on user review actions."
+    },
+    {
+      "provider": "freellmapi",
+      "model": "claude-sonnet-4-5",
+      "commit": "85303e6",
+      "exitCode": 0,
+      "latencySeconds": 9.6,
+      "output": "fix(generation): recover from provider API failures\n\n- Prompt for retry or model selection when interactive generation requests fail\n- Return to review prompt when non-refusal commit action fails"
+    },
+    {
+      "provider": "freellmapi",
+      "model": "claude-sonnet-4-5",
+      "commit": "2b12aed",
+      "exitCode": 0,
+      "latencySeconds": 9.3,
+      "output": "feat(release): support automatic changesets for interactive commits\n\n- generate a changeset draft from the staged diff when GCM_AUTO_CHANGESET is enabled\n- allow users to commit with the changeset or skip it by providing a skip reason\n- append skip trailers to the commit message when the changeset is skipped\n- clean up generated changeset draft files if the commit command fails"
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.8-flash",
+      "commit": "85303e6",
+      "exitCode": 1,
+      "latencySeconds": 90.0,
+      "error": "request timed out"
+    },
+    {
+      "provider": "google",
+      "model": "gemini-pro-latest",
+      "commit": "85303e6",
+      "exitCode": 1,
+      "latencySeconds": 8.3,
+      "error": "HTTP 429"
+    },
+    {
+      "provider": "google",
+      "model": "gemini-4-argon",
+      "commit": "85303e6",
+      "exitCode": 1,
+      "latencySeconds": 8.2,
+      "error": "HTTP 429"
+    }
+  ]
+}
