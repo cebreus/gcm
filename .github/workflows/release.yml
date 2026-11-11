@@ -41,10 +41,10 @@ jobs:
       - name: Build standalone binaries
         run: |
           mkdir -p dist/bin
-          bun build ./gcm.ts --compile --target=bun-darwin-arm64 --outfile dist/bin/gcm-darwin-arm64 --minify
-          bun build ./gcm.ts --compile --target=bun-darwin-x64 --outfile dist/bin/gcm-darwin-x64 --minify
-          bun build ./gcm.ts --compile --target=bun-linux-x64 --outfile dist/bin/gcm-linux-x64 --minify
-          bun build ./gcm.ts --compile --target=bun-linux-arm64 --outfile dist/bin/gcm-linux-arm64 --minify
+          bun build ./gcm.ts --compile --target=bun-darwin-arm64 --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile dist/bin/gcm-darwin-arm64 --minify
+          bun build ./gcm.ts --compile --target=bun-darwin-x64 --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile dist/bin/gcm-darwin-x64 --minify
+          bun build ./gcm.ts --compile --target=bun-linux-x64 --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile dist/bin/gcm-linux-x64 --minify
+          bun build ./gcm.ts --compile --target=bun-linux-arm64 --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile dist/bin/gcm-linux-arm64 --minify
 
       - name: Generate SHA-256 checksums
         run: |
