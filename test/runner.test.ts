@@ -1040,6 +1040,7 @@ describe('Refactored Runner', () => {
           await executeCommitMessageGeneration(args, {
             logger: mockLogger,
             isInteractive,
+            gitService: mockGitService,
             languageModelProviderFactories: factories('lm-studio', error),
           });
         } finally {
@@ -1684,6 +1685,7 @@ describe('Refactored Runner', () => {
       snapshot: { tree: 'index-tree', entries: [] },
     });
     mockGitService.getRepositoryState
+      .mockResolvedValueOnce({}) // repository check before provider creation
       .mockResolvedValueOnce({
         hasStagedChanges: true,
         hasUnmergedPaths: false,

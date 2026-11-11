@@ -437,6 +437,17 @@ export async function executeCommitMessageGeneration(
       process.exitCode = 0;
       return;
     }
+    if (!parsedArgs.modelsList) {
+      // Cheap local probe first: a run outside a repository must not reach any provider.
+      try {
+        await gitService.getRepositoryState(logger);
+      } catch (error) {
+        if (!/Not a git repository/i.test(String(error))) throw error;
+        reportCancel('Error: Not inside a git repository.');
+        process.exitCode = 1;
+        return;
+      }
+    }
     let providerSwitched = false;
     let previousProviderId: string | null = null;
     // Only the saved session picked the provider: a non-interactive failure may fall back to the default.
