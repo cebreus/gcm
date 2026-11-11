@@ -172,6 +172,10 @@ test('parser: nested CI skip markers collapse fully', () => {
   expect(parseLanguageModelOutput('feat: x [skip[skip ci] ci]')).toBe('feat: x');
 });
 
+test('parser: [actions skip] is removed', () => {
+  expect(parseLanguageModelOutput('feat: x [actions skip]')).toBe('feat: x');
+});
+
 test('parser: a CI marker in the subject cannot leave an invalid subject', () => {
   expect(() => parseLanguageModelOutput('feat: [skip ci]\n\nBody.')).toThrow(
     'invalid Conventional Commit subject',

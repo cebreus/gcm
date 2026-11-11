@@ -456,3 +456,8 @@ test('utils: sanitizeForDisplay - trims in linear time on long whitespace runs',
   expect(sanitizeForDisplay('x' + ' \t'.repeat(100_000))).toBe('x');
   expect(performance.now() - start).toBeLessThan(200);
 });
+
+test('utils: secret literal entropy boundary is 8 distinct characters', () => {
+  expect(redactSensitiveTextForPrompt('password = "abcdefgh"')).toBe('password = "[REDACTED]"');
+  expect(redactSensitiveTextForPrompt('password = "abcdefgg"')).toBe('password = "abcdefgg"');
+});

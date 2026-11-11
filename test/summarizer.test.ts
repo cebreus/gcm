@@ -17,7 +17,6 @@ async function summarizerBasicTest(): Promise<void> {
   );
   expect(res.text).toContain('File: src/foo.js');
   expect(res.text).toContain('File: styles/main.css');
-  console.log('  summarizerBasicTest -> passed');
 }
 test('summarizer: basic', summarizerBasicTest);
 
@@ -35,7 +34,6 @@ async function summarizerBinarySkipTest(): Promise<void> {
   expect(res.text).toContain('images/pic.jpg');
   expect(res.text).toContain('images/photo.heic');
   expect(res.text).toContain('File: src/foo.js');
-  console.log('  summarizerBinarySkipTest -> passed');
 }
 test('summarizer: binary files are skipped and summarised concisely', summarizerBinarySkipTest);
 
@@ -58,9 +56,20 @@ async function summarizerLargeSkipGroupTest(): Promise<void> {
   expect(res.text).toMatch(/\.\.\. and 5 more/);
   // small folder should list all
   expect(res.text).toContain('assets/icons/');
-  console.log('  summarizerLargeSkipGroupTest -> passed');
 }
 test('summarizer: large skip groups are limited per-folder', summarizerLargeSkipGroupTest);
+
+test('summarizer: a skip group of exactly 15 files is listed in full', () => {
+  const files = Array.from({ length: 15 }, (_, i) => ({
+    file: `assets/exact/img_${i}.jpg`,
+    lines: [],
+    truncated: false,
+    skipped: true,
+  }));
+  const res = summarizeDiff('', files, policy);
+  expect(res.text).not.toContain('showing');
+  expect(res.text).toContain('assets/exact/img_14.jpg');
+});
 
 test('summarizer: caps Unicode output by UTF-8 bytes', async () => {
   const result = summarizeDiff('', [facts('a.ts', ['@@ -1 +1 @@\n', `+${'ě'.repeat(40)}\n`])], {

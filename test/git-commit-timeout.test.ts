@@ -43,7 +43,10 @@ test('commit waits for a hook that outlasts the default timeout', async () => {
 const nap = ['-c', 'alias.nap=!sleep 0.4', 'nap'];
 
 test('spawnGitStream timeoutMs 0 means no timeout', async () => {
-  await spawnGitStream(nap, { timeoutMs: 0 });
+  const started = Date.now();
+  const result = await spawnGitStream(nap, { timeoutMs: 0 });
+  expect(Date.now() - started).toBeGreaterThanOrEqual(350);
+  expect(result.truncated).toBeFalse();
 });
 
 test('spawnGitStream kills a command that exceeds timeoutMs', async () => {
