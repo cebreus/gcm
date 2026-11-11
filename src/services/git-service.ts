@@ -83,7 +83,6 @@ function buildFileListArgs(commitHash: string | null): string[] {
     ? [
         'show',
         '--first-parent',
-        '-w',
         '--name-status',
         '--pretty=format:',
         '-z',
@@ -93,11 +92,31 @@ function buildFileListArgs(commitHash: string | null): string[] {
     : ['diff', '--staged', '--name-status', '-z', '--find-renames'];
 }
 
-function buildDiffArgs(commitHash: string | null): string[] {
+function buildDiffArgs(commitHash: string | null, ignoreWhitespace = true): string[] {
   const plain = ['--no-color', '--no-ext-diff', '--no-textconv', '--find-renames'];
+  const w = ignoreWhitespace ? ['-w'] : [];
   return commitHash
-    ? ['show', '--first-parent', '-w', ...plain, commitHash]
-    : ['diff', '--staged', '-w', ...plain];
+    ? ['show', '--first-parent', ...w, ...plain, commitHash]
+    : ['diff', '--staged', ...w, ...plain];
+}
+
+// `-w` keeps noise down, but empties a whitespace-only change (indentation is meaning in YAML/Python).
+async function readDiff(
+  runGit: GitCommandRunner,
+  commitHash: string | null,
+  pathspec: string[],
+): Promise<Awaited<ReturnType<GitCommandRunner>>> {
+  const read = (ignoreWhitespace: boolean) =>
+    runGit(
+      [...buildDiffArgs(commitHash, ignoreWhitespace), '--', ...pathspec.map(literalPathspec)],
+      {
+        allowTruncated: true,
+      },
+    );
+  const result = await read(true);
+  // `git show` prints the commit message even when the `-w` diff is empty.
+  const empty = commitHash ? !/^diff --git /m.test(result.text) : result.text.trim() === '';
+  return empty ? read(false) : result;
 }
 
 function parseFileList(text: string): string[] {
@@ -264,14 +283,7 @@ async function retrieveStagedChanges(
     return null;
   }
   const diff = commitHash
-    ? {
-        result: await runGit(
-          [...buildDiffArgs(commitHash), '--', ...pathspec.map(literalPathspec)],
-          {
-            allowTruncated: true,
-          },
-        ),
-      }
+    ? { result: await readDiff(runGit, commitHash, pathspec) }
     : await readStableStagedDiff(runGit, pathspec, logger);
   const diffRes = diff.result;
   if (diffRes.truncated) logger?.log('warn', 'Diff output was truncated due to size limits.');
@@ -295,9 +307,7 @@ async function readStableStagedDiff(
     const entries = await getIndexEntries(runGit, logger);
     const beforeDiff = await getIndexTree(runGit, logger);
     if (beforeEntries !== beforeDiff) continue;
-    const result = await runGit([...buildDiffArgs(null), '--', ...pathspec.map(literalPathspec)], {
-      allowTruncated: true,
-    });
+    const result = await readDiff(runGit, null, pathspec);
     const afterDiff = await getIndexTree(runGit, logger);
     if (beforeDiff === afterDiff) return { result, snapshot: { tree: afterDiff, entries } };
   }

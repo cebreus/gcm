@@ -153,7 +153,7 @@ Rationale detail: [commit consistency](docs/adr/0002-commit-action-consistency.m
 
 ## Security
 
-Analysed diff is sent to the selected provider. LM Studio stays on the configured loopback URL. Known Google, AWS, GitHub, GitLab, npm, Stripe, Slack, OpenAI-style keys, JWTs, PEM blocks, URL passwords, secret-named environment assignments and quoted secret literals redacted, but pattern-based redaction can't recognise every secret.
+Analysed diff is sent to the selected provider. Whitespace noise is ignored when a change has other content; a whitespace-only change is analysed as is. LM Studio stays on the configured loopback URL. Known Google, AWS, GitHub, GitLab, npm, Stripe, Slack, OpenAI-style keys, JWTs, PEM blocks, URL passwords, secret-named environment assignments and quoted secret literals redacted, but pattern-based redaction can't recognise every secret.
 
 `--debug` prints redacted request/response traces to the console, each body capped at 32 KiB. Traces cover the HTTP providers (Gemini, FreeLLMAPI, LM Studio); `codex-cli` and `claude-cli` produce none. No trace file is written. The traces contain the analysed diff, so avoid `--debug` where the output is kept: a shared terminal, a recorded session or CI logs. See [secret redaction](docs/adr/0004-redact-secrets-leaving-the-machine.md).
 

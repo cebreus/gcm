@@ -624,12 +624,12 @@ test('binary contract: an unconfigured run still shows configuration', async () 
   expect(result.stderr).toBe('');
 });
 
-test('binary contract: refuses whitespace-only staged changes without an API key', async () => {
-  const result = await runBinary([], whitespaceRepository);
+test('binary contract: analyses whitespace-only staged changes as is', async () => {
+  const result = await runBinaryWithProvider(['--print'], whitespaceRepository);
 
-  expect(result.exitCode).not.toBe(0);
-  expect(result.stderr).toContain('Only whitespace-only staged changes detected in 1 file(s).');
-  expect(result.stderr).not.toContain('GOOGLE_GEMINI_API_KEY');
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.trim().length).toBeGreaterThan(0);
+  expect(result.stderr).not.toContain('whitespace-only');
 });
 
 test('binary contract: reports when the working directory is not a git repository', async () => {

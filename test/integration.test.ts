@@ -147,7 +147,7 @@ async function mockSpawnStreamImpl(args: string[]): Promise<{ text: string; trun
       truncated: false,
     };
   }
-  if (cmd.includes('show --first-parent -w') && cmd.includes('--name-status')) {
+  if (cmd.includes('show --first-parent') && cmd.includes('--name-status')) {
     return { text: 'M\0src/index.js', truncated: false };
   }
   if (cmd.includes('show --first-parent -w') && cmd.includes('a1b2c3d')) {
@@ -274,48 +274,54 @@ test('integration: should handle concurrent execution safety', async () => {
   expect(mockCallGemini).toHaveBeenCalledTimes(2);
 });
 
-test('integration: should not send whitespace-only staged changes to AI', async () => {
-  async function whitespaceOnlyStagedSpawn(
-    args: string[],
-  ): Promise<{ text: string; truncated: boolean }> {
-    const cmd = args.join(' ');
-    if (cmd.includes('rev-parse --is-inside-work-tree')) {
+for (const plainDiff of ['', '-  a\n+    a\n']) {
+  test(`integration: ${plainDiff ? 'sends' : 'does not send'} whitespace-only staged changes to AI`, async () => {
+    async function whitespaceOnlyStagedSpawn(
+      args: string[],
+    ): Promise<{ text: string; truncated: boolean }> {
+      const cmd = args.join(' ');
+      if (cmd.includes('rev-parse --is-inside-work-tree')) {
+        return { text: '', truncated: false };
+      }
+      if (cmd.includes('diff --staged') && cmd.includes('--name-status')) {
+        return { text: 'M\0docs/README.md\0M\0docs/guide.md', truncated: false };
+      }
+      if (cmd.includes('diff --staged') && !cmd.includes(' -w ')) {
+        return { text: plainDiff, truncated: false };
+      }
       return { text: '', truncated: false };
     }
-    if (cmd.includes('diff --staged') && cmd.includes('--name-status')) {
-      return { text: 'M\0docs/README.md\0M\0docs/guide.md', truncated: false };
+
+    const gitService = createGitService({ gitCommandRunner: whitespaceOnlyStagedSpawn });
+    const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
+    const originalExitCode = process.exitCode;
+    process.exitCode = undefined;
+
+    try {
+      await runnerRun([], {
+        logger: mockLoggerInstance,
+        gitService,
+        geminiService,
+        contextService,
+        geminiModelLister: mockListModels,
+      });
+
+      if (plainDiff) {
+        expect(mockCallGemini).toHaveBeenCalled();
+        return;
+      }
+      expect(mockGetCommitContextHints).not.toHaveBeenCalled();
+      expect(mockCallGemini).not.toHaveBeenCalled();
+      expect(mockCancel).toHaveBeenCalledWith(
+        'Only whitespace-only staged changes detected in 2 file(s). Nothing to send to AI.',
+        { output: process.stderr },
+      );
+      expect(Number(process.exitCode)).toBe(1);
+    } finally {
+      process.exitCode = originalExitCode;
     }
-    if (cmd.includes('diff --staged -w')) {
-      return { text: '', truncated: false };
-    }
-    return { text: '', truncated: false };
-  }
-
-  const gitService = createGitService({ gitCommandRunner: whitespaceOnlyStagedSpawn });
-  const contextService = createContextService({ summarizeLargeDiff: mockSummarizeLargeDiff });
-  const originalExitCode = process.exitCode;
-  process.exitCode = undefined;
-
-  try {
-    await runnerRun([], {
-      logger: mockLoggerInstance,
-      gitService,
-      geminiService,
-      contextService,
-      geminiModelLister: mockListModels,
-    });
-
-    expect(mockGetCommitContextHints).not.toHaveBeenCalled();
-    expect(mockCallGemini).not.toHaveBeenCalled();
-    expect(mockCancel).toHaveBeenCalledWith(
-      'Only whitespace-only staged changes detected in 2 file(s). Nothing to send to AI.',
-      { output: process.stderr },
-    );
-    expect(Number(process.exitCode)).toBe(1);
-  } finally {
-    process.exitCode = originalExitCode;
-  }
-});
+  });
+}
 
 test('integration: should handle real git repository state', async () => {
   // This test would require a real git repo, but we can mock it

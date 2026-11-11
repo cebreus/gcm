@@ -147,3 +147,45 @@ test('getRepositoryState reports a conflicted merge as in progress', async () =>
   expect(state.inProgressOperation).toBe('merge');
   expect(state.hasUnmergedPaths).toBeTrue();
 });
+
+const yaml = 'a:\n  b: 1\n  c: 2\nd: 3\n';
+
+async function commitBase(text: string, name = 'config.yml'): Promise<void> {
+  await git(['reset', '-q', '--hard', 'HEAD']);
+  await Bun.write(join(repository, name), text);
+  await git(['add', name]);
+  await git(['commit', '-q', '-m', 'base']);
+}
+
+for (const [form, commit] of [
+  ['staged', null],
+  ['commit', 'HEAD'],
+] as const) {
+  test(`${form} indentation-only change is read without -w`, async () => {
+    await commitBase(yaml);
+    await Bun.write(join(repository, 'config.yml'), 'a:\n    b: 1\n    c: 2\nd: 3\n');
+    await git(['add', 'config.yml']);
+    const diff = await diffFor(commit);
+    expect(diff).toContain('-  b: 1\n');
+    expect(diff).toContain('+    b: 1\n');
+  });
+
+  test(`${form} real edit plus whitespace noise still ignores the noise`, async () => {
+    await commitBase(yaml);
+    await Bun.write(join(repository, 'config.yml'), 'a:\n    b: 1\n  c: 2\nd: 4\n');
+    await git(['add', 'config.yml']);
+    const diff = await diffFor(commit);
+    expect(diff).toContain('+d: 4');
+    expect(diff).not.toContain('+    b: 1');
+  });
+
+  test(`${form} pure mode change keeps its diff`, async () => {
+    await commitBase(yaml);
+    await git(['config', 'core.fileMode', 'true']);
+    await Bun.spawn(['chmod', '+x', join(repository, 'config.yml')]).exited;
+    await git(['add', 'config.yml']);
+    const diff = await diffFor(commit);
+    expect(diff).toContain('old mode 100644');
+    expect(diff).toContain('new mode 100755');
+  });
+}
