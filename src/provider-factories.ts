@@ -66,9 +66,6 @@ export function createProviderFactories(
           config,
           logger,
           debugApi,
-          onFallback: function (from, to) {
-            logger.log('info', `${from} unavailable; retrying with ${to}`);
-          },
         }),
     },
     {

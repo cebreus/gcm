@@ -108,7 +108,7 @@ Primary and fallback CLI attempts share a 90-second deadline. Unsupported safety
 fail the request; GCM does not retry without them.
 
 For API generation, selecting `gemini-3.5-flash-lite` enables an availability fallback
-to `gemini-3.5-flash`; selecting `free-router` enables one to `kilo-auto`. The fallback
+to `gemini-3.5-flash`. The fallback
 must exist in the provider catalogue and cover the primary model's token limits.
 Authentication and malformed responses do not trigger model switching. Existing API
 defaults remain unchanged; the historical pilot benchmark is not sufficient evidence
@@ -124,7 +124,7 @@ available, and `2` when none are available. Checks do not load LM Studio models.
 
 If a provider returns no usable text after retries, GCM reports an error and performs no write action.
 
-LM Studio uses `gemma-4-e4b-it-mlx` by default and waits for LM Studio to load it. If Gemma is unavailable or cannot load, GCM visibly reports the fallback and selects an already loaded model, then the first compatible model. An explicit `GCM_LM_STUDIO_MODEL` is strict: if it is missing or cannot load, GCM stops instead of silently changing models. In the interactive flow you can then select another provider; non-interactive use exits with an error.
+Without `GCM_LM_STUDIO_MODEL`, LM Studio uses the first loaded model in alphabetical order; if none is loaded, GCM loads the first compatible model in that order and stops if that load fails. An explicit `GCM_LM_STUDIO_MODEL` is strict: if it is missing or cannot load, GCM stops instead of silently changing models. In the interactive flow you can then select another provider; non-interactive use exits with an error.
 
 ## Git hook
 
@@ -169,7 +169,7 @@ Analysed diff is sent to the selected provider. Whitespace noise is ignored when
 | `GCM_FREELLMAPI_MODEL`  | `auto`                  | FreeLLMAPI routing model.                              |
 | `GCM_FREELLMAPI_TOKEN`  | none                    | FreeLLMAPI Bearer token.                               |
 | `GCM_LM_STUDIO_URL`     | `http://127.0.0.1:1234` | LM Studio loopback URL.                                |
-| `GCM_LM_STUDIO_MODEL`   | Gemma, then fallback    | Strict LM Studio model override.                       |
+| `GCM_LM_STUDIO_MODEL`   | Loaded, else first      | Strict LM Studio model override.                       |
 | `LM_API_TOKEN`          | none                    | Optional LM Studio API token.                          |
 | `GCM_TEMP`              | `1`                     | Temperature from 0 to 1.                               |
 | `GCM_MAX_BUFFER`        | `50 MiB`                | Maximum Git output.                                    |

@@ -174,68 +174,80 @@ test('LM Studio loads an explicit unloaded model, waits, and refreshes its conte
   }
 });
 
-test('LM Studio prefers and loads Gemma when no model is explicitly configured', async function () {
-  let loaded = false;
+function catalogueServer(models: Array<{ key: string; loaded: boolean }>, loadStatus = 200) {
+  const posts: unknown[] = [];
+  const loadedKeys = new Set(models.filter(m => m.loaded).map(m => m.key));
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch: async function (request) {
       if (request.method === 'POST') {
-        expect(await request.json()).toEqual({ model: 'gemma-4-e4b-it-mlx' });
-        loaded = true;
+        const body = (await request.json()) as { model: string };
+        posts.push(body);
+        if (loadStatus !== 200)
+          return Response.json({ error: 'load failed' }, { status: loadStatus });
+        loadedKeys.add(body.model);
         return Response.json({ type: 'llm', status: 'loaded' });
       }
       return Response.json({
-        models: [
-          {
-            key: 'qwen3-4b-instruct-2507',
-            type: 'llm',
-            max_context_length: 8192,
-            loaded_instances: [],
-          },
-          {
-            key: 'gemma-4-e4b-it-mlx',
-            type: 'llm',
-            max_context_length: 131_072,
-            loaded_instances: loaded ? [{ config: { context_length: 32_768 } }] : [],
-          },
-        ],
+        models: models.map(m => ({
+          key: m.key,
+          type: 'llm',
+          max_context_length: 8_192,
+          loaded_instances: loadedKeys.has(m.key) ? [{ config: { context_length: 8_192 } }] : [],
+        })),
       });
     },
   });
+  return { server, posts };
+}
+
+test('LM Studio defaults to the already loaded model without a load request', async function () {
+  const { server, posts } = catalogueServer([
+    { key: 'alpha', loaded: false },
+    { key: 'beta', loaded: true },
+  ]);
   try {
     const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
-    expect(provider.defaultModel).toBe('gemma-4-e4b-it-mlx');
-    expect(loaded).toBe(true);
+    expect(provider.defaultModel).toBe('beta');
+    expect(posts).toEqual([]);
   } finally {
     await server.stop(true);
   }
 });
 
-test('LM Studio reports a visible fallback when preferred Gemma is unavailable', async function () {
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: function () {
-      return Response.json({
-        models: [
-          {
-            key: 'qwen3-4b-instruct-2507',
-            type: 'llm',
-            max_context_length: 8_192,
-            loaded_instances: [{ config: { context_length: 8_192 } }],
-          },
-        ],
-      });
-    },
-  });
+test('LM Studio loads the first catalogue model when none is loaded', async function () {
+  const { server, posts } = catalogueServer([
+    { key: 'beta', loaded: false },
+    { key: 'alpha', loaded: false },
+  ]);
   try {
     const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
+    expect(provider.defaultModel).toBe('alpha');
+    expect(posts).toEqual([{ model: 'alpha' }]);
+  } finally {
+    await server.stop(true);
+  }
+});
 
-    expect(provider.defaultModel).toBe('qwen3-4b-instruct-2507');
-    expect(provider.selectionNotice).toBe(
-      'gemma-4-e4b-it-mlx is unavailable; using qwen3-4b-instruct-2507',
-    );
+test('LM Studio surfaces the load error of the first catalogue model', async function () {
+  const { server } = catalogueServer([{ key: 'alpha', loaded: false }], 500);
+  try {
+    await expect(createLmStudioProvider({ baseUrl: server.url.origin })).rejects.toThrow();
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test('LM Studio gives no preference to Gemma over a loaded model', async function () {
+  const { server, posts } = catalogueServer([
+    { key: 'gemma-4-e4b-it-mlx', loaded: false },
+    { key: 'qwen', loaded: true },
+  ]);
+  try {
+    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
+    expect(provider.defaultModel).toBe('qwen');
+    expect(posts).toEqual([]);
   } finally {
     await server.stop(true);
   }
@@ -273,7 +285,14 @@ test('LM Studio maps chat requests and responses without putting its token in th
       });
       if (request.method === 'GET') {
         return Response.json({
-          models: [{ key: 'local-model', type: 'llm', max_context_length: 16_384 }],
+          models: [
+            {
+              key: 'local-model',
+              type: 'llm',
+              max_context_length: 16_384,
+              loaded_instances: [{ config: { context_length: 16_384 } }],
+            },
+          ],
         });
       }
       return Response.json({
@@ -400,7 +419,14 @@ test('LM Studio refuses generation redirects before reaching their target', asyn
     fetch: function (request) {
       if (request.method === 'GET') {
         return Response.json({
-          models: [{ key: 'local-model', type: 'llm', max_context_length: 16_384 }],
+          models: [
+            {
+              key: 'local-model',
+              type: 'llm',
+              max_context_length: 16_384,
+              loaded_instances: [{ config: { context_length: 16_384 } }],
+            },
+          ],
         });
       }
       return Response.redirect(target.url, 302);
@@ -425,7 +451,14 @@ test('LM Studio rejects oversized response bodies', async function () {
     fetch: function (request) {
       if (request.method === 'GET') {
         return Response.json({
-          models: [{ key: 'local-model', type: 'llm', max_context_length: 16_384 }],
+          models: [
+            {
+              key: 'local-model',
+              type: 'llm',
+              max_context_length: 16_384,
+              loaded_instances: [{ config: { context_length: 16_384 } }],
+            },
+          ],
         });
       }
       return new Response('x'.repeat(1024 * 1024 + 1));
@@ -452,7 +485,14 @@ test('LM Studio normalizes HTTP errors without leaking configured or response se
     fetch: function (request) {
       if (request.method === 'GET') {
         return Response.json({
-          models: [{ key: 'local-model', type: 'llm', max_context_length: 16_384 }],
+          models: [
+            {
+              key: 'local-model',
+              type: 'llm',
+              max_context_length: 16_384,
+              loaded_instances: [{ config: { context_length: 16_384 } }],
+            },
+          ],
         });
       }
       return new Response(
@@ -508,7 +548,14 @@ test.each([
     fetch: function (request) {
       if (request.method === 'GET') {
         return Response.json({
-          models: [{ key: 'local-model', type: 'llm', max_context_length: 16_384 }],
+          models: [
+            {
+              key: 'local-model',
+              type: 'llm',
+              max_context_length: 16_384,
+              loaded_instances: [{ config: { context_length: 16_384 } }],
+            },
+          ],
         });
       }
       return generatedResponse.clone();

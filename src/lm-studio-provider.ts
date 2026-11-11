@@ -21,8 +21,6 @@ import {
 import type { Config } from '../gcm.config.js';
 import { isRecord } from './utils.js';
 
-const PREFERRED_LM_STUDIO_MODEL = 'gemma-4-e4b-it-mlx';
-
 function parseModel(value: unknown): ModelSpec | null {
   if (!isRecord(value) || value.type !== 'llm' || !isLanguageModelName(value.key)) return null;
   const loadedContexts = Array.isArray(value.loaded_instances)
@@ -139,24 +137,11 @@ export async function createLmStudioProvider(options: {
       throw createLanguageModelApiError('LM Studio model did not report loaded state');
     }
   }
-  let selectedModel =
-    options.model ?? models.find(model => model.name === PREFERRED_LM_STUDIO_MODEL)?.name;
-  let selectionNotice: string | undefined;
-  if (selectedModel && !options.probeOnly) {
-    try {
-      await loadModel(selectedModel);
-    } catch (error) {
-      if (options.model) throw error;
-      selectionNotice = `${PREFERRED_LM_STUDIO_MODEL} could not be loaded`;
-      selectedModel = undefined;
-    }
-  }
+  const selectedModel =
+    options.model ?? models.find(model => loadedModelIds.has(model.name))?.name ?? models[0].name;
+  if (!options.probeOnly) await loadModel(selectedModel);
   const byName = new Map(models.map(model => [model.name, model]));
-  const defaultModel =
-    selectedModel ?? models.find(model => loadedModelIds.has(model.name))?.name ?? models[0].name;
-  if (!options.model && defaultModel !== PREFERRED_LM_STUDIO_MODEL) {
-    selectionNotice = `${selectionNotice ?? `${PREFERRED_LM_STUDIO_MODEL} is unavailable`}; using ${defaultModel}`;
-  }
+  const defaultModel = selectedModel;
   if (!byName.has(defaultModel)) throw new Error('Configured LM Studio model is not available');
 
   async function generate(params: LanguageModelGenerateParams) {
@@ -175,7 +160,6 @@ export async function createLmStudioProvider(options: {
   return {
     id: 'lm-studio',
     label: 'LM Studio',
-    selectionNotice,
     defaultModel,
     service: {
       generate,

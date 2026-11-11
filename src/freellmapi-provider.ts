@@ -1,6 +1,5 @@
 import {
   createLanguageModelApiError,
-  isModelUnavailableError,
   isLanguageModelApiError,
   isLanguageModelName,
   type LanguageModelGenerateParams,
@@ -15,7 +14,6 @@ import {
 import type { Config } from '../gcm.config.js';
 import { isRecord } from './utils.js';
 import {
-  canUseFallbackModel,
   collectSortedModels,
   readPositiveTokenCount,
   requireDistinctModels,
@@ -25,8 +23,6 @@ import type { Logger } from './logger.js';
 import { parseProviderBaseUrl, withRequestTrace } from './provider-http.js';
 
 const DEFAULT_FREELLMAPI_MODEL = 'auto';
-const FALLBACK_FROM_MODEL = 'free-router';
-const FALLBACK_TO_MODEL = 'kilo-auto';
 
 function parseModelId(entry: unknown): string | null {
   if (typeof entry === 'string' && isLanguageModelName(entry)) return entry;
@@ -174,7 +170,6 @@ export async function createFreeLlmApiProvider(options: {
   config: Config;
   logger?: Logger;
   debugApi?: boolean;
-  onFallback?: (from: string, to: string) => void;
 }): Promise<LanguageModelProvider> {
   const url = parseProviderBaseUrl(options.baseUrl, 'FreeLLMAPI', {
     allowHttps: true,
@@ -218,24 +213,8 @@ export async function createFreeLlmApiProvider(options: {
     });
   }
 
-  async function generate(params: LanguageModelGenerateParams) {
-    try {
-      return await generateWithModel(params, params.modelName);
-    } catch (error) {
-      const primary = byName.get(FALLBACK_FROM_MODEL);
-      const fallback = byName.get(FALLBACK_TO_MODEL);
-      if (
-        params.modelName !== FALLBACK_FROM_MODEL ||
-        !primary ||
-        !fallback ||
-        !canUseFallbackModel(primary.limits, fallback.limits) ||
-        !isModelUnavailableError(error)
-      ) {
-        throw error;
-      }
-      options.onFallback?.(FALLBACK_FROM_MODEL, FALLBACK_TO_MODEL);
-      return generateWithModel(params, FALLBACK_TO_MODEL);
-    }
+  function generate(params: LanguageModelGenerateParams) {
+    return generateWithModel(params, params.modelName);
   }
 
   return {

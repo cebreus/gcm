@@ -11,7 +11,7 @@ for (const kind of ['gemini', 'freellmapi'] as const) {
     'small-fallback',
     'explicit-model',
   ] as const) {
-    test(`${kind} fallback respects ${scenario}`, async function () {
+    test(`${kind === 'gemini' ? 'gemini fallback respects' : 'freellmapi does not fall back on'} ${scenario}`, async function () {
       const primary = kind === 'gemini' ? 'gemini-3.5-flash-lite' : 'free-router';
       const fallback = kind === 'gemini' ? 'gemini-3.5-flash' : 'kilo-auto';
       const calls: string[] = [];
@@ -69,9 +69,6 @@ for (const kind of ['gemini', 'freellmapi'] as const) {
                 config,
                 baseUrl: server.url.origin,
                 model: primary,
-                onFallback: function (from, to) {
-                  notices.push(`${from} -> ${to}`);
-                },
               });
         const result = provider.service.generate({
           meta: {},
@@ -80,7 +77,7 @@ for (const kind of ['gemini', 'freellmapi'] as const) {
           promptContext: 'diff',
           maxOutputTokens: 100,
         });
-        if (scenario === 'unavailable') {
+        if (scenario === 'unavailable' && kind === 'gemini') {
           await expect(result).resolves.toMatchObject({ text: 'fix: recover availability' });
           expect(calls).toEqual([primary, fallback]);
           expect(notices).toHaveLength(1);

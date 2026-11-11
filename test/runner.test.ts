@@ -665,7 +665,6 @@ describe('Refactored Runner', () => {
     const provider = {
       id: 'local',
       label: 'Local',
-      selectionNotice: 'Preferred model is unavailable; using local-model',
       defaultModel: 'local-model',
       models: async function () {
         return [
@@ -695,11 +694,6 @@ describe('Refactored Runner', () => {
       expect.objectContaining({ providerId: 'local', modelName: 'local-alt' }),
     );
     expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('Local Commit Message Helper'));
-    expect(mockNote).toHaveBeenCalledWith(
-      'Preferred model is unavailable; using local-model',
-      'Model fallback',
-      undefined,
-    );
 
     const originalStdoutWrite = process.stdout.write;
     const helpOutput: string[] = [];

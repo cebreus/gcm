@@ -94,7 +94,6 @@ export interface LanguageModelProvider {
   id: string;
   label: string;
   readinessError?: string;
-  selectionNotice?: string;
   defaultModel: string;
   service: LanguageModelService;
   /** Returns validated models compatible with this application's text-generation contract. */

@@ -467,7 +467,6 @@ export async function executeCommitMessageGeneration(
       }
       if (!parsedArgs.print)
         intro(`${C.bright}${provider.label} Commit Message Helper v${pkg.version}${C.reset}`);
-      if (provider.selectionNotice) note(provider.selectionNotice, 'Model fallback', printOutput);
       const earlyExitCode = await maybeHandleModelsList(parsedArgs, provider);
       if (earlyExitCode !== null) {
         exitCode = earlyExitCode;
