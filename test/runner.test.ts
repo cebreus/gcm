@@ -1273,7 +1273,7 @@ describe('Refactored Runner', () => {
 
   test('Should report argument validation failures without throwing', async () => {
     const originalExitCode = process.exitCode;
-    process.exitCode = undefined;
+    process.exitCode = 0;
 
     try {
       await expect(
@@ -1292,7 +1292,7 @@ describe('Refactored Runner', () => {
       );
       expect(Number(process.exitCode)).toBe(1);
     } finally {
-      process.exitCode = originalExitCode;
+      process.exitCode = originalExitCode ?? 0;
     }
   });
 
@@ -1563,7 +1563,7 @@ describe('Refactored Runner', () => {
     mockGitService.retrieveStagedChanges.mockResolvedValue(null);
     mockSelect.mockResolvedValueOnce('generate'); // Pre-flight
     const originalExitCode = process.exitCode;
-    process.exitCode = undefined;
+    process.exitCode = 0;
 
     try {
       await executeCommitMessageGeneration([], {
@@ -1576,7 +1576,7 @@ describe('Refactored Runner', () => {
       expect(mockGeminiService.generate).not.toHaveBeenCalled();
       expect(Number(process.exitCode)).toBe(1);
     } finally {
-      process.exitCode = originalExitCode;
+      process.exitCode = originalExitCode ?? 0;
     }
   });
 
@@ -1584,7 +1584,7 @@ describe('Refactored Runner', () => {
     const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
     const originalExitCode = process.exitCode;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
-    process.exitCode = undefined;
+    process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['file.ts'],
@@ -1614,7 +1614,7 @@ describe('Refactored Runner', () => {
       expect(mockGeminiService.generate).not.toHaveBeenCalled();
       expect(Number(process.exitCode)).toBe(1);
     } finally {
-      process.exitCode = originalExitCode;
+      process.exitCode = originalExitCode ?? 0;
       if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
       else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
     }
@@ -1825,7 +1825,7 @@ describe('Refactored Runner', () => {
     const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
     const originalExitCode = process.exitCode;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
-    process.exitCode = undefined;
+    process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['file.ts'],
@@ -1855,7 +1855,7 @@ describe('Refactored Runner', () => {
       });
       expect(Number(process.exitCode)).toBe(1);
     } finally {
-      process.exitCode = originalExitCode;
+      process.exitCode = originalExitCode ?? 0;
       if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
       else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
     }
@@ -1865,7 +1865,7 @@ describe('Refactored Runner', () => {
     const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
     const originalExitCode = process.exitCode;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
-    process.exitCode = undefined;
+    process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['file.ts'],
@@ -1892,7 +1892,7 @@ describe('Refactored Runner', () => {
 
       expect(mockLogger.log).toHaveBeenCalledWith('info', 'unparseable response');
     } finally {
-      process.exitCode = originalExitCode;
+      process.exitCode = originalExitCode ?? 0;
       if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
       else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
     }
@@ -1902,7 +1902,7 @@ describe('Refactored Runner', () => {
     const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
     const originalExitCode = process.exitCode;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
-    process.exitCode = undefined;
+    process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['file.ts'],
@@ -1937,7 +1937,7 @@ describe('Refactored Runner', () => {
       expect(mockSelect).toHaveBeenCalledTimes(2);
       expect(Number(process.exitCode)).toBe(0);
     } finally {
-      process.exitCode = originalExitCode;
+      process.exitCode = originalExitCode ?? 0;
       if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
       else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
     }

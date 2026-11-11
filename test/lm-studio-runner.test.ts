@@ -59,7 +59,7 @@ afterAll(async function () {
   if (originalGeminiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
   else process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
   await rm(repository, { recursive: true, force: true });
-  process.exitCode = originalExitCode;
+  process.exitCode = originalExitCode ?? 0;
 });
 
 test('LM Studio runs end to end without a Gemini API key and cancellation creates no commit', async function () {

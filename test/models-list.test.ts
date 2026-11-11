@@ -69,7 +69,7 @@ test('cli: --models-list without API key exits with code 1', async () => {
   const consoleErrorMock = mock(() => {});
   const originalConsoleError = console.error;
   console.error = consoleErrorMock;
-  process.exitCode = undefined;
+  process.exitCode = 0;
   try {
     await executeCommitMessageGeneration(['--models-list']);
     expect(Number(process.exitCode)).toBe(1);
@@ -91,7 +91,7 @@ test('cli: --models-list uses the injected model list failure contract', async (
   let exitCode: number | undefined;
 
   process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
-  process.exitCode = undefined;
+  process.exitCode = 0;
   process.stderr.write = mock((chunk: string | Uint8Array) => {
     stderrChunks.push(String(chunk));
     return true;
@@ -103,7 +103,7 @@ test('cli: --models-list uses the injected model list failure contract', async (
     exitCode = Number(process.exitCode);
   } finally {
     process.stderr.write = originalStderrWrite;
-    process.exitCode = originalExitCode;
+    process.exitCode = originalExitCode ?? 0;
     if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
     else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
   }

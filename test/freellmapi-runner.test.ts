@@ -65,7 +65,7 @@ afterAll(async function () {
   else process.env.LM_API_TOKEN = originalLmToken;
   if (originalGeminiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
   else process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
-  process.exitCode = originalExitCode;
+  process.exitCode = originalExitCode ?? 0;
   await rm(repository, { recursive: true, force: true });
 });
 

@@ -133,7 +133,7 @@ async function runnerFallbackStructuredOutputTest(
   } finally {
     process.stdout.write = originalStdoutWrite;
     process.stderr.write = originalStderrWrite;
-    process.exitCode = originalExitCode;
+    process.exitCode = originalExitCode ?? 0;
     if (origApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
     else process.env.GOOGLE_GEMINI_API_KEY = origApiKey;
   }

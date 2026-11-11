@@ -57,12 +57,12 @@ beforeEach(async () => {
   await git('add', '--', 'app.ts');
   await git('commit', '--quiet', '-m', 'chore: initial');
   process.chdir(repo);
-  process.exitCode = undefined;
+  process.exitCode = 0;
 });
 
 afterEach(async () => {
   process.chdir(originalCwd);
-  process.exitCode = originalExitCode;
+  process.exitCode = originalExitCode ?? 0;
   process.stdout.write = originalStdout;
   process.stderr.write = originalStderr;
   await rm(repo, { recursive: true, force: true });
