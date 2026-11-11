@@ -72,7 +72,7 @@ Interactive flow lets you configure provider and model, regenerate, add hint, sw
 
 The initial model is `--model`, then the provider's model variable (`GCM_MODEL`, `GCM_FREELLMAPI_MODEL`, `GCM_LM_STUDIO_MODEL`), then the last used model, then the provider default.
 
-The provider is `--provider`, then `GCM_PROVIDER`, then the last used provider, then the first available one. When only the last used provider selected it and that provider cannot be started in a non-interactive run, GCM prints a warning to stderr and uses the first available provider instead. A provider named by `--provider` or `GCM_PROVIDER` that cannot be started still stops the run with an error.
+The provider is `--provider`, then `GCM_PROVIDER`, then the last used provider, then the first registered provider (`gemini`). GCM does not check readiness when it picks that default. When only the last used provider selected it and that provider cannot be started in a non-interactive run, GCM prints a warning to stderr and tries the first registered provider instead. Any other provider that cannot be started stops a non-interactive run with an error; an interactive run asks you to select another provider.
 
 Scope suggestions come from recent commit subjects and from paths: in a monorepo only `apps/<name>/` and `packages/<name>/` are workspace folders and suggest `<name>`; `.github/` suggests `ci`; root `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` and `tsconfig.json` suggest `build`; `src/<dir>/` suggests `<dir>`. Split proposals use the same two workspace folders and put `package.json` and lockfiles into one dependency group proposed as `build(deps)`; other paths follow the documentation, CI, test and top-level-directory rules.
 
@@ -128,7 +128,7 @@ available, and `2` when none are available. Checks do not load LM Studio models.
 
 `--print` cannot be combined with `--apply`, `--commit-range`, `--models-list`, or `--providers-list`. A message truncated by the output limit is refused with a non-zero exit. Errors, warnings, logs, the generation banner and progress are written to stderr. With `--print`, stdout carries only the generated message, so scripts can capture it directly. Without `--print`, stdout also carries the generated-message box, notes, lists (`--models-list`, `--providers-list`), `--help`, `--version` and the interactive prompts, so do not parse it.
 
-`--exclude` patterns case-sensitive, match whole path, support `*` and `?`. Excluded files stay staged, will commit; GCM asks confirmation before writing. Files matching the built-in excludes (`dist` and secret-bearing files, see [Security](#security)) are omitted from analysis but commit normally, without that confirmation. Merge commit analysed against first parent.
+`--exclude` patterns case-sensitive, match whole path, support `*` and `?`. Excluded files stay staged, will commit; GCM asks confirmation before writing, and `--non-interactive --apply` refuses to write. Secret-bearing files (see [Security](#security)) are handled the same way. `dist` files are omitted from analysis but commit normally, without that confirmation. Merge commit analysed against first parent.
 
 If a provider returns empty or whitespace-only text, GCM reports an error and performs no write action; such a reply is not retried.
 
@@ -163,7 +163,7 @@ Rationale detail: [commit consistency](docs/adr/0002-commit-action-consistency.m
 
 Analysed diff is sent to the selected provider. Whitespace noise is ignored when a change has other content; a whitespace-only change is analysed as is. LM Studio stays on the configured loopback URL. Known Google, AWS, GitHub, GitLab, npm, Stripe, Slack, OpenAI-style keys, JWTs, PEM blocks, URL passwords, secret-named environment assignments and quoted secret literals redacted. Redaction also covers `Bearer` tokens, Google OAuth `ya29.` tokens, Stripe test keys, unquoted `key: value` / `key = value` pairs with a secret-like name, and a private key block cut off before its end marker. Redaction is best-effort and pattern-based: it can't recognise every secret, for example an unquoted `password: value` whose value contains no digit.
 
-Files that usually hold secrets are excluded from analysis by default, next to `dist/**` and nested `dist` directories: `.env` and `.env.*` in any directory, `*.pem`, `*.key`, `*.p12`, `*.pfx`, and `id_rsa*` / `id_ed25519*` in any directory. `.env.example` and `.env.sample` match `.env.*` and are excluded too. Excluded files are neither sent nor listed in the request; they stay staged and commit normally. When every staged file is excluded, GCM reports no staged changes.
+Files that usually hold secrets are excluded from analysis by default, next to `dist/**` and nested `dist` directories: `.env` and `.env.*` in any directory, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.keystore`, `*.tfvars`, `*.tfstate`, and `.netrc`, `.npmrc`, `id_rsa*` / `id_ed25519*` in any directory. `.env.example` and `.env.sample` match `.env.*` and are excluded too. Excluded files are neither sent nor listed in the request. They stay staged; committing them needs explicit confirmation, and `--non-interactive --apply` refuses. When every staged file is excluded, GCM reports `Only excluded files are staged` and stops.
 
 `codex-cli` and `claude-cli` are started without `GOOGLE_GEMINI_API_KEY`, `GCM_FREELLMAPI_TOKEN` and `LM_API_TOKEN` in their environment.
 
@@ -178,7 +178,7 @@ The diff is untrusted, so the model's reply is too. After the subject line, GCM 
 | Variable                | Default                 | Purpose                                                |
 | ----------------------- | ----------------------- | ------------------------------------------------------ |
 | `GCM_MODEL`             | `gemini-3.7-flash`      | Gemini model.                                          |
-| `GCM_PROVIDER`          | none                    | Provider; unset: last used, then first available.      |
+| `GCM_PROVIDER`          | none                    | Provider; unset: last used, then `gemini`.             |
 | `GCM_FREELLMAPI_URL`    | `http://127.0.0.1:3001` | FreeLLMAPI endpoint URL.                               |
 | `GCM_FREELLMAPI_MODEL`  | `auto`                  | FreeLLMAPI routing model.                              |
 | `GCM_FREELLMAPI_TOKEN`  | none                    | FreeLLMAPI Bearer token.                               |
@@ -187,8 +187,8 @@ The diff is untrusted, so the model's reply is too. After the subject line, GCM 
 | `LM_API_TOKEN`          | none                    | Optional LM Studio API token.                          |
 | `GCM_TEMP`              | `1`                     | Temperature from 0 to 1.                               |
 | `GCM_MAX_BUFFER`        | `50 MiB`                | Maximum Git output.                                    |
-| `GCM_PER_FILE_BUFFER`   | `1 MiB`                 | Maximum per-file diff.                                 |
-| `GCM_MAX_HUNKS`         | `40`                    | Maximum analysed hunks.                                |
+| `GCM_PER_FILE_BUFFER`   | `1 MiB`                 | Maximum per-file diff when a large diff is summarised. |
+| `GCM_MAX_HUNKS`         | `40`                    | Maximum hunks when a large diff is summarised.         |
 | `GCM_TOKEN_BYTES_RATIO` | `3.5`                   | Estimated bytes per input token.                       |
 | `GCM_MAX_OUTPUT_TOKENS` | `8192`                  | Response-token policy; the model cap also applies.     |
 | `GCM_LOG_LEVEL`         | `info`                  | Console log level.                                     |
@@ -236,8 +236,8 @@ model, URL or token. `types` and `scopes` guide prompt; generated results are no
 enforced. Arrays must contain 1–50 items, with 1–100 characters per item. `types`
 and `scopes` use lowercase letters, digits and hyphens, starting with a letter.
 `instructions` accepts up to 2000 characters. Unknown keys are rejected, and an
-invalid file stops gcm. File `exclude` paths are committed normally and silently
-omitted from analysis; `--exclude` also requires confirmation before a Git write.
+invalid file stops gcm. File `exclude` paths are committed normally without
+confirmation and omitted from analysis; GCM logs how many files it excluded; `--exclude` also requires confirmation before a Git write.
 
 ## Development
 
