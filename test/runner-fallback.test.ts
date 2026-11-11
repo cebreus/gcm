@@ -2,10 +2,7 @@ import { test, expect, mock } from 'bun:test';
 import { createLogger } from '../src/logger.ts';
 import runner from '../src/runner.ts';
 import type { SpawnGitStreamResult } from '../src/git-utils.ts';
-import type {
-  LanguageModelResponse,
-  LanguageModelService,
-} from '../src/language-model-service.ts';
+import type { LanguageModelResponse, LanguageModelService } from '../src/language-model-service.ts';
 import type { GitService } from '../src/services/git-service.ts';
 
 void mock.module('@clack/prompts', () => ({
