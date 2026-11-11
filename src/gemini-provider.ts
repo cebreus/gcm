@@ -29,7 +29,7 @@ function selectCompatibleModels(discovered: ModelSpec[]): ModelSpec[] {
     if (UNSUPPORTED_MODEL_PATTERN.test(model.name)) continue;
     const validationError = getModelSpecValidationError(model);
     if (validationError) {
-      throw createLanguageModelApiError(validationError);
+      throw createLanguageModelApiError(validationError, { kind: 'invalid-model' });
     }
     compatible.push(model);
   }

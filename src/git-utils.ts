@@ -1,6 +1,28 @@
 import { integerInRange } from './config-values.js';
 import { MAX_CHILD_OUTPUT_BYTES } from './constants.js';
 
+export type GitFailureKind = 'not-a-repository' | 'unknown-revision';
+
+/** A non-zero git exit; `kind` classifies git's stderr once, here, so callers never read message text. */
+export class GitCommandError extends Error {
+  constructor(
+    message: string,
+    readonly kind?: GitFailureKind,
+  ) {
+    super(message);
+  }
+}
+
+function classifyGitFailure(stderr: string): GitFailureKind | undefined {
+  if (/not a git repository/i.test(stderr)) return 'not-a-repository';
+  if (/unknown revision/i.test(stderr)) return 'unknown-revision';
+  return undefined;
+}
+
+export function isGitFailure(error: unknown, kind: GitFailureKind): boolean {
+  return error instanceof GitCommandError && error.kind === kind;
+}
+
 interface SpawnGitOptions {
   maxBytes?: number;
   execName?: string;
@@ -146,7 +168,10 @@ async function spawnCore(
   }
   if (timedOut) throw new Error('git ' + args.join(' ') + ' timed out');
   if (code !== 0 && !killState.killed) {
-    throw new Error(execName + ' ' + args.join(' ') + ' failed: ' + stderr);
+    throw new GitCommandError(
+      execName + ' ' + args.join(' ') + ' failed: ' + stderr,
+      classifyGitFailure(stderr),
+    );
   }
   return { truncated };
 }

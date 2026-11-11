@@ -17,6 +17,7 @@ import { loadProjectConfig } from './services/project-config-service.js';
 import type { ProjectConfig } from './project-config.js';
 import type { LanguageModelProvider } from './language-model-service.js';
 import { isLanguageModelName } from './language-model-service.js';
+import { isGitFailure } from './git-utils.js';
 import { createProviderFactories, type ProviderFactoryOptions } from './provider-factories.js';
 import { loadSession, saveSession } from './session.js';
 import {
@@ -455,7 +456,7 @@ export async function executeCommitMessageGeneration(
       try {
         await gitService.getRepositoryState(logger);
       } catch (error) {
-        if (!/Not a git repository/i.test(String(error))) throw error;
+        if (!isGitFailure(error, 'not-a-repository')) throw error;
         reportCancel('Error: Not inside a git repository.');
         process.exitCode = 1;
         return;

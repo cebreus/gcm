@@ -44,14 +44,15 @@ export function collectSortedModels(
 export function requireDistinctModels(
   models: ModelSpec[],
   label: string,
-  fail: (message: string) => Error,
+  fail: (message: string, metadata?: { kind: 'no-models' }) => Error,
 ): ModelSpec[] {
   const names = new Set<string>();
   for (const model of models) {
     if (names.has(model.name)) throw fail(`Duplicate ${label} model identifier`);
     names.add(model.name);
   }
-  if (models.length === 0) throw fail(`${label} returned no compatible text models`);
+  if (models.length === 0)
+    throw fail(`${label} returned no compatible text models`, { kind: 'no-models' });
   return models;
 }
 

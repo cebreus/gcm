@@ -58,7 +58,9 @@ async function discoverModels(
     config,
   });
   if (!isRecord(payload) || !Array.isArray(payload.models)) {
-    throw createLanguageModelApiError('Invalid LM Studio model catalogue');
+    throw createLanguageModelApiError('Invalid LM Studio model catalogue', {
+      kind: 'invalid-model',
+    });
   }
   for (const entry of payload.models) {
     if (!isRecord(entry) || entry.type !== 'llm') continue;

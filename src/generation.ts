@@ -13,7 +13,12 @@ import {
   type CommitCapability,
 } from './commit-action-service.js';
 import type { Logger, LogMetadata } from './logger.js';
-import { isLanguageModelApiError, type ModelSpec } from './language-model-service.js';
+import {
+  hasLanguageModelErrorKind,
+  isLanguageModelApiError,
+  type ModelSpec,
+} from './language-model-service.js';
+import { isGitFailure } from './git-utils.js';
 import { resolveTokenBudget } from './model-registry.js';
 import { parseLanguageModelOutput } from './parser.js';
 import { estimateTokenCount, isRecord } from './utils.js';
@@ -86,7 +91,7 @@ function describeLanguageModelApiError(
     // Keep provider error message.
   }
   const safeMessage = output.sanitizeTerminalText(message);
-  return status === 'Unknown' && /timed? out/i.test(message)
+  return status === 'Unknown' && hasLanguageModelErrorKind(error, 'timeout')
     ? safeMessage
     : `API Error (${status}): ${safeMessage}`;
 }
@@ -147,8 +152,9 @@ export async function runGenerationCommand(params: {
   } catch (error: unknown) {
     output.stopProgress('An error occurred');
     const errStr = String(error);
-    if (/Not a git repository/i.test(errStr)) output.cancel('Error: Not inside a git repository.');
-    else if (/unknown revision/i.test(errStr))
+    if (isGitFailure(error, 'not-a-repository'))
+      output.cancel('Error: Not inside a git repository.');
+    else if (isGitFailure(error, 'unknown-revision'))
       output.cancel(`Error: Invalid commit SHA: ${targetCommit}`);
     else if (isLanguageModelApiError(error)) {
       logger.log('debug', `Commit helper failed: ${error.message}`, {
@@ -550,7 +556,7 @@ async function runGenerationCycle(params: {
     } catch (error) {
       if (state.nonInteractive || !isLanguageModelApiError(error)) throw error;
       services.output.stopProgress(
-        /timed? out/i.test(error.message) ? 'Request timed out' : 'Request failed',
+        hasLanguageModelErrorKind(error, 'timeout') ? 'Request timed out' : 'Request failed',
       );
       logger.log('error', `Commit helper request failed: ${error}`, { error: String(error) });
       const recovery = await services.dialogue.recoverGeneration(

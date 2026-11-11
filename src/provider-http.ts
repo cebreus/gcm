@@ -32,6 +32,17 @@ export function parseProviderBaseUrl(
   return url;
 }
 
+export class ResponseBodyTooLargeError extends Error {
+  constructor(message = 'response body too large') {
+    super(message);
+  }
+}
+
+/** Matches how `fetch` reports its own deadline or a caller cancellation. */
+export function isRequestTimeout(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+}
+
 const MAX_RESPONSE_BODY_BYTES = 1024 * 1024;
 
 async function readResponseBody(response: Response): Promise<string> {
@@ -41,7 +52,7 @@ async function readResponseBody(response: Response): Promise<string> {
     new TransformStream<Uint8Array, Uint8Array>({
       transform: (chunk, controller): void => {
         bytesRead += chunk.byteLength;
-        if (bytesRead > MAX_RESPONSE_BODY_BYTES) throw new Error('response body too large');
+        if (bytesRead > MAX_RESPONSE_BODY_BYTES) throw new ResponseBodyTooLargeError();
         controller.enqueue(chunk);
       },
     }),
@@ -119,9 +130,7 @@ function isRetryableStatus(status: number, method = 'GET'): boolean {
 
 function mustStopNetworkRetry(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
-  return (
-    error.name === 'TimeoutError' || error.name === 'AbortError' || /redirect/i.test(error.message)
-  );
+  return isRequestTimeout(error) || /redirect/i.test(error.message);
 }
 
 export async function requestProviderText(params: {

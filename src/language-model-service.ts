@@ -13,6 +13,10 @@ export interface LanguageModelResponse {
   truncated?: boolean;
 }
 
+/** Stored in `metadata.kind` where the error is created; consumers branch on it instead of the message text. */
+export type LanguageModelErrorKind =
+  'timeout' | 'missing-api-key' | 'no-models' | 'invalid-model' | 'connection';
+
 export type LanguageModelApiError = Error & {
   name: 'LanguageModelApiError';
   metadata: Record<string, unknown>;
@@ -37,6 +41,13 @@ export function isLanguageModelApiError(error: unknown): error is LanguageModelA
     error.metadata !== null &&
     !Array.isArray(error.metadata)
   );
+}
+
+export function hasLanguageModelErrorKind(
+  error: unknown,
+  kind: LanguageModelErrorKind,
+): error is LanguageModelApiError {
+  return isLanguageModelApiError(error) && error.metadata.kind === kind;
 }
 
 export function isModelUnavailableError(error: unknown): boolean {

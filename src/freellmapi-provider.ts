@@ -99,8 +99,9 @@ function resolveModelCandidates(url: URL): URL[] {
   });
 }
 
-function candidateCatalogueError(message: string) {
+function candidateCatalogueError(message: string, metadata: { kind?: 'no-models' } = {}) {
   return createLanguageModelApiError(message, {
+    ...metadata,
     candidateFailure: true,
   });
 }

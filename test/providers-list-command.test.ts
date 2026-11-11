@@ -1,6 +1,9 @@
 import { expect, mock, test } from 'bun:test';
 import { runProvidersListCommand } from '../src/providers-list-command.js';
-import type { LanguageModelProvider } from '../src/language-model-service.js';
+import {
+  createLanguageModelApiError,
+  type LanguageModelProvider,
+} from '../src/language-model-service.js';
 
 const model = {
   name: 'model-a',
@@ -78,7 +81,9 @@ test('list providers rejects unusable providers and returns 2', async function (
             id: 'empty',
             label: 'Empty',
             models: async function () {
-              throw new Error('Gemini returned no compatible text models');
+              throw createLanguageModelApiError('Gemini returned no compatible text models', {
+                kind: 'no-models',
+              });
             },
           });
         },
@@ -92,10 +97,10 @@ test('list providers rejects unusable providers and returns 2', async function (
 });
 
 test.each([
-  ['request failed (401)', 'The API key was not accepted.'],
-  ['request timed out', 'The provider took too long to reply.'],
-  ['unknown failure', 'Provider check failed.'],
-])('list providers explains %s', async function (error, expected) {
+  ['request failed (401)', { status: 401 }, 'The API key was not accepted.'],
+  ['request timed out', { kind: 'timeout' }, 'The provider took too long to reply.'],
+  ['unknown failure', {}, 'Provider check failed.'],
+])('list providers explains %s', async function (error, metadata, expected) {
   const note = mock(function (_message: string, _title?: string) {});
   await runProvidersListCommand({
     factories: [
@@ -103,7 +108,7 @@ test.each([
         id: 'failed',
         label: 'Failed',
         create: async function () {
-          throw new Error(error);
+          throw createLanguageModelApiError(error, metadata);
         },
       },
     ],

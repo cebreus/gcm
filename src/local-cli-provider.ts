@@ -107,7 +107,10 @@ export async function runLocalCli(request: LocalCliRunRequest): Promise<LocalCli
       writeInput(),
     ]);
     if (timedOut) {
-      throw createLanguageModelApiError('Local CLI request timed out', { availability: true });
+      throw createLanguageModelApiError('Local CLI request timed out', {
+        availability: true,
+        kind: 'timeout',
+      });
     }
     return { exitCode, stdout, stderr };
   } catch (error) {
@@ -218,11 +221,14 @@ function cliFailure(label: string, result: LocalCliRunResult): never {
   const authenticationFailure = /auth|login|credential|api.?key|unauthorized|forbidden/i.test(
     failureText,
   );
+  // CLI output is external text: classify it here, once, into typed metadata.
+  const timedOut = /timed? out|timeout/i.test(failureText);
   throw createLanguageModelApiError(`${label} failed${detail ? `: ${detail}` : ''}`, {
     exitCode: result.exitCode,
     availability:
       !authenticationFailure &&
-      /unavailable|overload|capacity|rate.?limit|timed? out|timeout|\b429\b/i.test(failureText),
+      (timedOut || /unavailable|overload|capacity|rate.?limit|\b429\b/i.test(failureText)),
+    ...(timedOut ? { kind: 'timeout' } : {}),
   });
 }
 

@@ -1,21 +1,31 @@
-import type { LanguageModelProviderFactory } from './language-model-service.js';
+import {
+  createLanguageModelApiError,
+  hasLanguageModelErrorKind,
+  isLanguageModelApiError,
+  type LanguageModelProviderFactory,
+} from './language-model-service.js';
 
 function formatProbeError(error: unknown): string {
-  const message = String(error).toLowerCase();
-  if (/timed? out|timeout/.test(message)) return 'The provider took too long to reply.';
-  if (/\b(401|403)\b|unauthori[sz]ed|forbidden/.test(message)) {
+  if (
+    hasLanguageModelErrorKind(error, 'timeout') ||
+    (error instanceof Error && error.name === 'TimeoutError')
+  ) {
+    return 'The provider took too long to reply.';
+  }
+  if (
+    isLanguageModelApiError(error) &&
+    (error.metadata.status === 401 || error.metadata.status === 403)
+  ) {
     return 'The API key was not accepted.';
   }
-  if (/api key.*not set|environment variable .* not set/.test(message)) {
-    return 'The API key is not set.';
-  }
-  if (/no compatible|no models found/.test(message)) {
-    return 'No supported models found.';
-  }
-  if (/invalid .*model/.test(message)) {
-    return 'Provider setup is not valid.';
-  }
-  if (/request failed|network|fetch|enotfound|econnrefused/.test(message)) {
+  if (hasLanguageModelErrorKind(error, 'missing-api-key')) return 'The API key is not set.';
+  if (hasLanguageModelErrorKind(error, 'no-models')) return 'No supported models found.';
+  if (hasLanguageModelErrorKind(error, 'invalid-model')) return 'Provider setup is not valid.';
+  // Errors thrown by the runtime itself (DNS, sockets) carry no kind; only these are read by text.
+  if (
+    hasLanguageModelErrorKind(error, 'connection') ||
+    (!isLanguageModelApiError(error) && /network|fetch|enotfound|econnrefused/i.test(String(error)))
+  ) {
     return 'Cannot connect to the provider.';
   }
   return 'Provider check failed.';
@@ -36,7 +46,9 @@ export async function runProvidersListCommand(options: {
     options.factories.map(async factory => {
       try {
         const provider = await factory.create({ probeOnly: true });
-        if (provider.readinessError) throw new Error(provider.readinessError);
+        if (provider.readinessError) {
+          throw createLanguageModelApiError(provider.readinessError, { kind: 'missing-api-key' });
+        }
         const models = await provider.models();
         if (!models.some(model => model.name === provider.defaultModel)) {
           throw new Error('Provider default model is not in its catalogue');

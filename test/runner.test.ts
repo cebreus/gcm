@@ -1387,7 +1387,7 @@ describe('Refactored Runner', () => {
   test('Should present request timeouts without an unknown API status', async () => {
     const error = Object.assign(new Error('FreeLLMAPI request timed out'), {
       name: 'LanguageModelApiError',
-      metadata: {},
+      metadata: { kind: 'timeout' },
     });
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',

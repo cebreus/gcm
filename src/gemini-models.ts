@@ -1,15 +1,24 @@
 import { readPositiveTokenCount, requireDistinctModels, type ModelSpec } from './model-registry.js';
-import { createLanguageModelApiError, isLanguageModelName } from './language-model-service.js';
+import {
+  createLanguageModelApiError,
+  isLanguageModelName,
+  type LanguageModelErrorKind,
+} from './language-model-service.js';
 import { isRecord } from './utils.js';
-import { requestProviderText } from './provider-http.js';
+import {
+  isRequestTimeout,
+  requestProviderText,
+  ResponseBodyTooLargeError,
+} from './provider-http.js';
 import type { Config } from '../gcm.config.js';
 
 const MODELS_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 const MAX_MODEL_PAGES = 20;
 
-function discoveryError(message: string, status?: number): Error {
+function discoveryError(message: string, status?: number, kind?: LanguageModelErrorKind): Error {
   return createLanguageModelApiError(message, {
     ...(status === undefined ? {} : { status }),
+    ...(kind === undefined ? {} : { kind }),
   });
 }
 
@@ -60,20 +69,20 @@ export async function listGeminiModels(
         retryNetworkErrors: true,
       });
     } catch (error) {
-      const timedOut =
-        error instanceof Error && /abort|timeout/i.test(error.name + ' ' + error.message);
-      if (error instanceof Error && error.message === 'response body too large') {
+      if (error instanceof ResponseBodyTooLargeError) {
         throw discoveryError('Gemini model catalogue response body is too large');
       }
-      throw discoveryError(
-        timedOut ? 'Gemini model discovery timed out' : 'Gemini model discovery failed',
-      );
+      if (isRequestTimeout(error)) {
+        throw discoveryError('Gemini model discovery timed out', undefined, 'timeout');
+      }
+      throw discoveryError('Gemini model discovery failed');
     }
     const { response, body } = result;
     if (!response.ok) {
       throw discoveryError(
         'Failed to fetch models: ' + String(response.status) + ' ' + response.statusText,
         response.status,
+        'connection',
       );
     }
     let data: unknown;
@@ -83,17 +92,19 @@ export async function listGeminiModels(
       throw discoveryError('Failed to parse Gemini model catalogue JSON');
     }
     if (!isRecord(data) || !Array.isArray(data.models)) {
-      throw discoveryError('No models found in response');
+      throw discoveryError('No models found in response', undefined, 'no-models');
     }
     for (const value of data.models) {
       const model = parseModel(value);
       if (model) models.push(model);
     }
     if (data.nextPageToken === undefined) {
-      return requireDistinctModels(models, 'Gemini', discoveryError);
+      return requireDistinctModels(models, 'Gemini', (message, metadata) =>
+        discoveryError(message, undefined, metadata?.kind),
+      );
     }
     if (typeof data.nextPageToken !== 'string' || data.nextPageToken.length === 0) {
-      throw discoveryError('Invalid model pagination token');
+      throw discoveryError('Invalid model pagination token', undefined, 'invalid-model');
     }
     pageToken = data.nextPageToken;
   }

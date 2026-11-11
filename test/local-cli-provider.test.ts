@@ -344,6 +344,21 @@ test('local CLI timeout force-kills a process that ignores SIGTERM', async funct
       stdin: '',
       timeoutMs: 20,
     }),
-  ).rejects.toThrow('Local CLI request timed out');
+  ).rejects.toMatchObject({
+    message: 'Local CLI request timed out',
+    metadata: { availability: true, kind: 'timeout' },
+  });
   expect(Date.now() - startedAt).toBeLessThan(2_000);
+});
+
+test('a CLI-reported timeout is typed as a timeout', async function () {
+  const provider = createCodexCliProvider({
+    executable: 'unused',
+    run: async function () {
+      return { exitCode: 1, stderr: 'error: request timed out', stdout: '' };
+    },
+  });
+  await expect(
+    provider.service.generate({ ...generateParams, modelName: 'gpt-6-luna' }),
+  ).rejects.toMatchObject({ metadata: { kind: 'timeout' } });
 });

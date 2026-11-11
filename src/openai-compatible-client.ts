@@ -5,7 +5,12 @@ import {
 } from './language-model-service.js';
 import { isRecord, redactSensitiveTextForPrompt, sanitizeTerminalText } from './utils.js';
 import type { Config } from '../gcm.config.js';
-import { requestProviderText, type ProviderFetch } from './provider-http.js';
+import {
+  isRequestTimeout,
+  requestProviderText,
+  ResponseBodyTooLargeError,
+  type ProviderFetch,
+} from './provider-http.js';
 
 const MAX_ERROR_SNIPPET_BYTES = 4_096;
 
@@ -34,19 +39,15 @@ export function rejectUnsafeModelMetadata(
 ): void {
   for (const value of values) {
     if (typeof value === 'string' && sanitizeLanguageModelErrorText(value, token) !== value) {
-      throw createLanguageModelApiError(message);
+      throw createLanguageModelApiError(message, { kind: 'invalid-model' });
     }
   }
 }
 
 function requestFailureMessage(providerLabel: string, error: unknown): string {
-  if (error instanceof Error) {
-    if (error.name === 'TimeoutError' || error.name === 'AbortError') {
-      return `${providerLabel} request timed out`;
-    }
-    if (error.message === 'response body too large') {
-      return `${providerLabel} response body is too large`;
-    }
+  if (isRequestTimeout(error)) return `${providerLabel} request timed out`;
+  if (error instanceof ResponseBodyTooLargeError) {
+    return `${providerLabel} response body is too large`;
   }
   return `${providerLabel} request failed`;
 }
@@ -76,8 +77,14 @@ export async function requestLanguageModelJson(params: {
       fetchImpl: params.fetchImpl,
     });
   } catch (error) {
+    const kind = isRequestTimeout(error)
+      ? { kind: 'timeout' }
+      : error instanceof ResponseBodyTooLargeError
+        ? {}
+        : { kind: 'connection' };
     throw createLanguageModelApiError(requestFailureMessage(providerLabel, error), {
       availability: error instanceof Error && error.name === 'TimeoutError',
+      ...kind,
     });
   }
   const redacted = sanitizeLanguageModelErrorText(result.body, token);
@@ -87,7 +94,7 @@ export async function requestLanguageModelJson(params: {
   if (!result.response.ok) {
     throw createLanguageModelApiError(
       `${providerLabel} request failed (${result.response.status})`,
-      { status: result.response.status, snippet },
+      { status: result.response.status, snippet, kind: 'connection' },
     );
   }
   try {
