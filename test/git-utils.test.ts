@@ -103,9 +103,22 @@ test('git-utils: limits output by bytes, not characters', async () => {
   }));
 
   expect(await spawnGitLines(['diff'], { maxBytes: 3, allowTruncated: true })).toEqual({
-    lines: [],
+    lines: ['ě'],
     truncated: true,
   });
+});
+
+test('git-utils: draining past the cap does not flush a split character', async () => {
+  mockSpawn.mockImplementationOnce(() => ({
+    stdout: new Response('ěě').body,
+    stderr: new Response('').body,
+    exited: Promise.resolve(0),
+    kill: mock(() => {}),
+  }));
+
+  expect(
+    await spawnGitLines(['diff'], { maxBytes: 3, allowTruncated: true, timeoutMs: 0 }),
+  ).toEqual({ lines: ['ě'], truncated: true });
 });
 
 test('git-utils: uses the default limit for unsafe byte caps', async () => {

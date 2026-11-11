@@ -1,25 +1,49 @@
 import { test, expect } from 'bun:test';
-import { spawnGitStream } from '../src/git-utils';
-import type { SpawnGitStreamResult } from '../src/git-utils';
+import { spawnGitLines, spawnGitStream } from '../src/git-utils';
 
-async function gitUtilsTruncationTest(): Promise<void> {
-  // Generate large output using bash to ensure it's large enough to exceed 1KB
-  const args = [
-    '-c',
-    'for i in {1..500}; do echo "line-$i-with-some-padding-to-make-it-longer"; done',
-  ];
-  const maxBytes = 1024; // 1 KB cap
-  const res: SpawnGitStreamResult = await spawnGitStream(args, {
+const maxBytes = 1024;
+const singleWrite = "head -c 4000 /dev/zero | tr '\\0' 'a'";
+const singleWriteLines = "head -c 4000 /dev/zero | tr '\\0' 'a' | fold -w 99";
+const pacedWrites = "for i in $(seq 1 40); do printf '%099d\\n' 0; done";
+
+test('git-utils: a single oversized write keeps exactly the first maxBytes', async () => {
+  const res = await spawnGitStream(['-c', singleWrite], {
     maxBytes,
     execName: 'bash',
     allowTruncated: true,
   });
-  console.log('  got truncated:', res.truncated);
-  console.log('  actual length:', res.text.length);
   expect(res.truncated).toBe(true);
-  // We expect some content returned but truncated around maxBytes
-  // Allow some buffer for incomplete lines
-  expect(res.text.length).toBeLessThanOrEqual(maxBytes + 2048);
-  expect(res.text).toContain('line-1');
-}
-test('git-utils: truncationTest', gitUtilsTruncationTest);
+  expect(res.text.length).toBe(maxBytes);
+});
+
+test('git-utils: many small writes keep exactly the first maxBytes', async () => {
+  const res = await spawnGitStream(['-c', pacedWrites], {
+    maxBytes,
+    execName: 'bash',
+    allowTruncated: true,
+  });
+  expect(res.truncated).toBe(true);
+  expect(res.text.length).toBe(maxBytes);
+  expect(res.text.startsWith('0')).toBe(true);
+});
+
+test('git-utils: spawnGitLines returns lines from a single oversized write', async () => {
+  const res = await spawnGitLines(['-c', singleWriteLines], {
+    maxBytes,
+    execName: 'bash',
+    allowTruncated: true,
+  });
+  expect(res.truncated).toBe(true);
+  expect(res.lines.length).toBeGreaterThan(0);
+});
+
+test('git-utils: draining (timeoutMs 0) keeps exactly the first maxBytes', async () => {
+  const res = await spawnGitStream(['-c', singleWrite], {
+    maxBytes,
+    execName: 'bash',
+    timeoutMs: 0,
+    allowTruncated: true,
+  });
+  expect(res.truncated).toBe(true);
+  expect(res.text.length).toBe(maxBytes);
+});

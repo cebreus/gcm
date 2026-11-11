@@ -102,17 +102,19 @@ async function spawnCore(
       const { done, value } = await reader.read();
       if (done) {
         const tail = decoder.decode();
-        if (tail) onChunk(tail);
+        if (tail && !truncated) onChunk(tail);
         break;
       }
-      bytes += value.byteLength;
-      if (bytes > maxBytes) {
+      if (truncated) continue;
+      if (bytes + value.byteLength > maxBytes) {
         truncated = true;
+        onChunk(decoder.decode(value.subarray(0, maxBytes - bytes), { stream: true }));
         // Hooks may outlive the cap: keep draining so git can finish its write.
         if (options.timeoutMs === 0) continue;
         await killSpawnedChild(child, killState);
         break;
       }
+      bytes += value.byteLength;
       onChunk(decoder.decode(value, { stream: true }));
     }
   })();
