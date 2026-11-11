@@ -48,6 +48,7 @@ export type GenerationServices = {
     stopProgress(message: string): void;
     cancel(message: string): void;
     note(message: string, title?: string): void;
+    warn(message: string, title?: string): void;
     outro(message: string): void;
     print(message: string): void;
     sanitizeGeneratedText(message: string): string;
@@ -150,7 +151,7 @@ export async function runGenerationCommand(params: {
     else if (/unknown revision/i.test(errStr))
       output.cancel(`Error: Invalid commit SHA: ${targetCommit}`);
     else if (isLanguageModelApiError(error)) {
-      logger.log('debug', `Commit helper failed: ${error}`, {
+      logger.log('debug', `Commit helper failed: ${error.message}`, {
         error: errStr,
         snippet: error.metadata.snippet,
       });
@@ -307,7 +308,7 @@ async function runGenerationWorkflow(params: {
   const { repositoryState, staged } = readyState;
   if (!targetCommit && isWhitespaceOnlyStagedChanges(staged)) {
     services.output.cancel(
-      `Only whitespace-only staged changes detected in ${staged.stagedFiles.length} file(s). Nothing to send to AI.`,
+      `The diff of ${staged.stagedFiles.length} staged file(s) is empty. Nothing to send to AI.`,
     );
     return 'failure';
   }
@@ -458,7 +459,7 @@ function showRepositoryWarnings(
     warnings.push(commitCapability.reason);
   }
   if (!warnings.length) return;
-  output.note(
+  output.warn(
     warnings.map((entry, idx) => `${idx + 1}. ${entry}`).join('\n'),
     'Repository warnings',
   );
@@ -505,7 +506,7 @@ async function loadStagedChanges(params: {
   if (!targetCommit && isWhitespaceOnlyStagedChanges(staged)) {
     services.output.stopProgress(
       services.output.style.yellow(
-        `Found ${staged.stagedFiles.length} staged file(s), but only whitespace changes`,
+        `Found ${staged.stagedFiles.length} staged file(s), but their diff is empty`,
       ),
     );
     return staged;
@@ -732,7 +733,7 @@ async function handleSuccessfulGeneration(params: {
   const parsedOut = parseAndSanitizeResponse(services.output, response.text, logger);
   if (!parsedOut) {
     logger.log('info', services.output.sanitizeTerminalText(response.text));
-    services.output.outro('Failed to parse structured output.');
+    services.output.cancel('Failed to parse structured output.');
     return 'failure';
   }
   const warningIcon = response.truncated ? ` ${services.output.style.yellow('[⚠ TRUNCATED]')}` : '';
@@ -858,7 +859,7 @@ async function commitGeneratedMessage(params: {
     }
     const message = `Failed to apply commit action: ${error instanceof Error ? error.message : String(error)}`;
     if (state.nonInteractive) services.output.cancel(message);
-    else services.output.note(message, 'Commit failed');
+    else services.output.warn(message, 'Commit failed');
     logger.log('error', `Commit action failed: ${error}`);
     return state.nonInteractive ? 'failure' : 'review';
   }

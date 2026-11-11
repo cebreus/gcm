@@ -306,7 +306,7 @@ test('integration: only excluded files staged stops without calling the provider
 });
 
 for (const plainDiff of ['', '-  a\n+    a\n']) {
-  test(`integration: ${plainDiff ? 'sends' : 'does not send'} whitespace-only staged changes to AI`, async () => {
+  test(`integration: ${plainDiff ? 'sends whitespace-only staged changes' : 'does not send an empty staged diff'} to AI`, async () => {
     async function whitespaceOnlyStagedSpawn(
       args: string[],
     ): Promise<{ text: string; truncated: boolean }> {
@@ -344,7 +344,7 @@ for (const plainDiff of ['', '-  a\n+    a\n']) {
       expect(mockGetCommitContextHints).not.toHaveBeenCalled();
       expect(mockCallGemini).not.toHaveBeenCalled();
       expect(mockCancel).toHaveBeenCalledWith(
-        'Only whitespace-only staged changes detected in 2 file(s). Nothing to send to AI.',
+        'The diff of 2 staged file(s) is empty. Nothing to send to AI.',
         { output: process.stderr },
       );
       expect(Number(process.exitCode)).toBe(1);

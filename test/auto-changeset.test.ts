@@ -277,6 +277,7 @@ for (const { includeChangeset, projectExclude } of [
             note: function (_message, title) {
               notes.push(title ?? '');
             },
+            warn: function () {},
             outro: function () {},
             print: function () {},
             sanitizeGeneratedText: function (message) {

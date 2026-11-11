@@ -40,12 +40,18 @@ function isBinaryFile(file: string): boolean {
   return new RegExp(`\\.(${BINARY_EXTENSIONS.join('|')})$`).test(file.toLowerCase());
 }
 
-function diffArgs(targetCommit: string | undefined, options: string[], files: string[]): string[] {
+function diffArgs(
+  targetCommit: string | undefined,
+  options: string[],
+  files: string[],
+  ignoreWhitespace: boolean,
+): string[] {
   const plain = ['--no-color', '--no-ext-diff', '--no-textconv'];
+  const w = ignoreWhitespace ? ['-w'] : [];
   return [
     ...(targetCommit
-      ? ['show', '--first-parent', '--format=', '-w', ...plain, ...options, targetCommit]
-      : ['diff', '--staged', '-w', ...plain, ...options]),
+      ? ['show', '--first-parent', '--format=', ...w, ...plain, ...options, targetCommit]
+      : ['diff', '--staged', ...w, ...plain, ...options]),
     '--',
     ...files.map(literalPathspec),
   ];
@@ -54,12 +60,13 @@ function diffArgs(targetCommit: string | undefined, options: string[], files: st
 async function readFileFacts(
   file: string,
   spawnLinesImpl: NonNullable<RepositorySummaryOptions['spawnLinesImpl']>,
-  targetCommit?: string,
+  targetCommit: string | undefined,
+  ignoreWhitespace: boolean,
   config?: Pick<Config, 'PER_FILE_BUFFER'>,
 ): Promise<DiffFileFacts> {
   if (isBinaryFile(file)) return { file, lines: [], skipped: true, truncated: false };
   const contextLines = isConfigFile(file) ? 0 : 1;
-  const args = diffArgs(targetCommit, [`-U${contextLines}`], [file]);
+  const args = diffArgs(targetCommit, [`-U${contextLines}`], [file], ignoreWhitespace);
   const result = await spawnLinesImpl(args, {
     maxBytes: config?.PER_FILE_BUFFER,
     allowTruncated: true,
@@ -85,8 +92,23 @@ export async function summarizeRepositoryDiff(
     spawnStreamImpl: options?.spawnStreamImpl ?? spawnGitStream,
     targetCommit: options?.targetCommit,
   };
-  const statsArgs = diffArgs(dependencies.targetCommit, ['--stat', '--stat-width=80'], stagedFiles);
-  const stats = await dependencies.spawnStreamImpl(statsArgs, { allowTruncated: true });
+  const readStats = (ignoreWhitespace: boolean) =>
+    dependencies.spawnStreamImpl(
+      diffArgs(
+        dependencies.targetCommit,
+        ['--stat', '--stat-width=80'],
+        stagedFiles,
+        ignoreWhitespace,
+      ),
+      { allowTruncated: true },
+    );
+  // Same rule as readDiff: `-w` empties a whitespace-only change, so retry without it.
+  let ignoreWhitespace = true;
+  let stats = await readStats(true);
+  if (stats.text.trim() === '') {
+    ignoreWhitespace = false;
+    stats = await readStats(false);
+  }
   const files = new Array<DiffFileFacts>(stagedFiles.length);
   const failures = new Array<{ error: unknown } | undefined>(stagedFiles.length);
   let nextIndex = 0;
@@ -103,6 +125,7 @@ export async function summarizeRepositoryDiff(
           file,
           dependencies.spawnLinesImpl,
           dependencies.targetCommit,
+          ignoreWhitespace,
           config,
         );
       } catch (error) {

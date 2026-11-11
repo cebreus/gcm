@@ -48,6 +48,10 @@ function reportCancel(message: string): void {
   cancel(message, { output: process.stderr });
 }
 
+function unknownProviderMessage(providerId: string, factories: { id: string }[]): string {
+  return `Error: Unknown language model provider "${sanitizeTerminalText(providerId)}". Valid: ${factories.map(factory => factory.id).join(', ')}.`;
+}
+
 function paint(code: string): (message: string) => string {
   return message => `${code}${message}${C.reset}`;
 }
@@ -216,6 +220,9 @@ function createRunnerOutput(
     cancel: reportCancel,
     note: (message, title) => {
       if (!printOnly) note(message, title);
+    },
+    warn: (message, title) => {
+      if (!printOnly) note(message, title, { output: process.stderr });
     },
     outro: message => {
       if (!printOnly) outro(message);
@@ -417,7 +424,7 @@ export async function executeCommitMessageGeneration(
       factories.find(factory => factory.id === providerId) ??
       (parsedArgs.help ? factories[0] : undefined);
     if (!helpFactory) {
-      reportCancel('Error: Unknown language model provider.');
+      reportCancel(unknownProviderMessage(providerId, factories));
       process.exitCode = 1;
       return;
     }
@@ -432,10 +439,16 @@ export async function executeCommitMessageGeneration(
     }
     let providerSwitched = false;
     let previousProviderId: string | null = null;
+    // Only the saved session picked the provider: a non-interactive failure may fall back to the default.
+    // An explicit --model targets the saved provider, so it stays fatal rather than moving to another one.
+    let sessionOnly =
+      !opts.languageModelProvider && !parsedArgs.provider && !config.PROVIDER && !parsedArgs.model;
+    // A fallback is a one-off: it must not overwrite the saved provider and model.
+    let keepSavedSession = false;
     for (;;) {
       const factory = factories.find(candidate => candidate.id === providerId);
       if (!factory) {
-        reportCancel('Error: Unknown language model provider.');
+        reportCancel(unknownProviderMessage(providerId, factories));
         exitCode = 1;
         break;
       }
@@ -443,19 +456,33 @@ export async function executeCommitMessageGeneration(
       try {
         provider = await factory.create();
       } catch (error) {
-        const message = sanitizeTerminalText(String(error));
+        const message = sanitizeTerminalText(
+          error instanceof Error ? error.message : String(error),
+        );
         if (previousProviderId) {
-          note(message, `${factory.label} unavailable`);
+          note(message, `${factory.label} unavailable`, { output: process.stderr });
           providerId = previousProviderId;
           previousProviderId = null;
           providerSwitched = false;
           continue;
         }
-        if (isInteractive && !parsedArgs.nonInteractive && factories.length > 1) {
-          note(message, `${factory.label} unavailable`);
+        const canSelect = isInteractive && !parsedArgs.nonInteractive && factories.length > 1;
+        const fallback = factories[0];
+        if (!canSelect && sessionOnly && fallback && fallback !== factory) {
+          process.stderr.write(
+            `Warning: saved provider ${factory.id} is unavailable (${message}); using ${fallback.id}.\n`,
+          );
+          sessionOnly = false;
+          keepSavedSession = true;
+          providerId = fallback.id;
+          continue;
+        }
+        if (canSelect) {
+          note(message, `${factory.label} unavailable`, { output: process.stderr });
           const selectedProvider = await select({
             message: 'Select AI Provider',
             options: factories.map(candidate => ({ value: candidate.id, label: candidate.label })),
+            output: process.stderr,
           });
           if (!isCancel(selectedProvider)) {
             providerId = String(selectedProvider);
@@ -532,8 +559,8 @@ export async function executeCommitMessageGeneration(
         break;
       }
       const outcome = await runGenerationCommand({
-        createServices: () =>
-          createRunnerServices(
+        createServices: () => {
+          const services = createRunnerServices(
             opts,
             logger,
             provider,
@@ -542,7 +569,9 @@ export async function executeCommitMessageGeneration(
             true,
             config,
             projectConfig,
-          ),
+          );
+          return keepSavedSession ? { ...services, saveSession: async () => {} } : services;
+        },
         parsedArgs: activeParsedArgs,
         logger,
         providerReadinessError: provider.readinessError,

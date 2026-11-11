@@ -103,7 +103,7 @@ test('repository summary owns config context and binary skip Git reads', async (
   await summarizeLargeDiff(['gcm.config.ts', 'image.jpg'], {
     spawnStreamImpl: async function (args) {
       calls.push(args);
-      return { text: '', truncated: false };
+      return { text: ' gcm.config.ts | 1 +', truncated: false };
     },
     spawnLinesImpl: async function (args) {
       calls.push(args);
@@ -302,4 +302,27 @@ test('repository summary reports truncated file statistics', async () => {
   });
 
   expect(result.text).toContain('file statistics truncated by output limit');
+});
+
+test('repository summary falls back to a plain diff for a whitespace-only change', async () => {
+  const repository = await mkdtemp(join(tmpdir(), 'gcm-summary-ws-'));
+  const previousDirectory = process.cwd();
+  try {
+    await runGit(repository, ['init', '-q']);
+    await runGit(repository, ['config', 'user.email', 'test@gcm.local']);
+    await runGit(repository, ['config', 'user.name', 'GCM Test']);
+    await Bun.write(join(repository, 'ci.yml'), 'a:\n  b: 1\n');
+    await runGit(repository, ['add', 'ci.yml']);
+    await runGit(repository, ['commit', '-qm', 'chore: base']);
+    await Bun.write(join(repository, 'ci.yml'), 'a:\n    b: 1\n');
+    await runGit(repository, ['add', 'ci.yml']);
+    process.chdir(repository);
+
+    const result = await summarizeLargeDiff(['ci.yml']);
+
+    expect(result.numHunks).toBeGreaterThan(0);
+  } finally {
+    process.chdir(previousDirectory);
+    await rm(repository, { recursive: true, force: true });
+  }
 });

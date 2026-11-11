@@ -1003,6 +1003,188 @@ describe('Refactored Runner', () => {
       expect(created).toEqual(['gemini']);
     });
 
+    describe('provider creation failures', () => {
+      const limits = { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 };
+      const factories = (failing: string, error: Error) =>
+        ids.map(id => ({
+          id,
+          label: id,
+          create: () =>
+            id === failing
+              ? Promise.reject(error)
+              : Promise.resolve({
+                  id,
+                  label: id,
+                  defaultModel: 'dflt',
+                  models: () => Promise.resolve([{ name: 'dflt', label: 'dflt', limits }]),
+                  service: { generate: mock() },
+                }),
+        }));
+      async function run(
+        args: string[],
+        env: string | undefined,
+        error: Error,
+        isInteractive: boolean,
+      ): Promise<string[]> {
+        const originalProvider = process.env.GCM_PROVIDER;
+        if (env === undefined) delete process.env.GCM_PROVIDER;
+        else process.env.GCM_PROVIDER = env;
+        mockLoadSession.mockResolvedValueOnce({ providerId: 'lm-studio', modelName: null });
+        const writes: string[] = [];
+        const originalWrite = process.stderr.write;
+        process.stderr.write = mock((chunk: string | Uint8Array) => {
+          writes.push(String(chunk));
+          return true;
+        }) as unknown as typeof process.stderr.write;
+        try {
+          await executeCommitMessageGeneration(args, {
+            logger: mockLogger,
+            isInteractive,
+            languageModelProviderFactories: factories('lm-studio', error),
+          });
+        } finally {
+          process.stderr.write = originalWrite;
+          if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
+          else process.env.GCM_PROVIDER = originalProvider;
+        }
+        return writes;
+      }
+
+      test('Should fall back to the first provider when only the session chose a failing one', async () => {
+        mockCancel.mockClear();
+        mockNote.mockClear();
+        process.exitCode = 0;
+        const writes = await run(['--models-list'], undefined, new Error('down'), false);
+        expect(process.exitCode).toBe(0);
+        expect(writes.join('')).toContain('lm-studio');
+        expect(mockCancel).not.toHaveBeenCalled();
+        expect(mockNote.mock.calls[0]?.[0]).toContain('gemini');
+      });
+
+      test('Should keep the saved session after a fallback run succeeds', async () => {
+        mockSaveSession.mockClear();
+        mockGitService.commitChanges.mockClear();
+        mockGitService.retrieveStagedChanges.mockResolvedValue({
+          stagedDiff: 'diff',
+          stagedFiles: ['a.ts'],
+          truncated: false,
+          snapshot: { tree: 'index-tree', entries: [] },
+        });
+        mockContextService.constructLLMPromptContext.mockResolvedValue({
+          promptContext: 'ctx',
+          processedDiffContent: 'diff',
+          tokens: 10,
+        });
+        mockLoadSession.mockResolvedValueOnce({ providerId: 'lm-studio', modelName: 'saved' });
+        const originalProvider = process.env.GCM_PROVIDER;
+        delete process.env.GCM_PROVIDER;
+        const originalWrite = process.stderr.write;
+        process.stderr.write = mock(() => true) as unknown as typeof process.stderr.write;
+        try {
+          await executeCommitMessageGeneration(['--non-interactive', '--apply'], {
+            logger: mockLogger,
+            gitService: mockGitService,
+            contextService: mockContextService,
+            isInteractive: false,
+            languageModelProviderFactories: factories('lm-studio', new Error('down')).map(f => ({
+              ...f,
+              create: async () => {
+                const p = await f.create();
+                return {
+                  ...p,
+                  service: {
+                    generate: () =>
+                      Promise.resolve({ text: 'fix(scope): generated message', usage: {} }),
+                  },
+                };
+              },
+            })),
+          });
+        } finally {
+          process.stderr.write = originalWrite;
+          if (originalProvider !== undefined) process.env.GCM_PROVIDER = originalProvider;
+        }
+        expect(mockCancel.mock.calls).toEqual([]);
+        expect(mockGitService.commitChanges).toHaveBeenCalled();
+        expect(mockSaveSession).not.toHaveBeenCalled();
+      });
+
+      test('Should keep an explicit --model with a failing session provider fatal', async () => {
+        mockCancel.mockClear();
+        process.exitCode = 0;
+        const writes = await run(
+          ['--models-list', '--model', 'm'],
+          undefined,
+          new Error('down'),
+          false,
+        );
+        expect(process.exitCode).toBe(1);
+        expect(mockCancel.mock.calls[0]?.[0]).toBe('Error: down.');
+        expect(writes.join('')).not.toContain('using');
+      });
+
+      test('Should fail plainly when the failing session provider is the first one', async () => {
+        mockCancel.mockClear();
+        process.exitCode = 0;
+        mockLoadSession.mockResolvedValueOnce({ providerId: 'gemini', modelName: null });
+        const writes: string[] = [];
+        const originalWrite = process.stderr.write;
+        process.stderr.write = mock((chunk: string | Uint8Array) => {
+          writes.push(String(chunk));
+          return true;
+        }) as unknown as typeof process.stderr.write;
+        const originalProvider = process.env.GCM_PROVIDER;
+        delete process.env.GCM_PROVIDER;
+        try {
+          await executeCommitMessageGeneration(['--models-list'], {
+            logger: mockLogger,
+            isInteractive: false,
+            languageModelProviderFactories: factories('gemini', new Error('down')),
+          });
+        } finally {
+          process.stderr.write = originalWrite;
+          if (originalProvider !== undefined) process.env.GCM_PROVIDER = originalProvider;
+        }
+        expect(process.exitCode).toBe(1);
+        expect(mockCancel.mock.calls[0]?.[0]).toBe('Error: down.');
+        expect(writes.join('')).not.toContain('using');
+      });
+
+      test('Should keep a failing provider from GCM_PROVIDER fatal', async () => {
+        mockCancel.mockClear();
+        process.exitCode = 0;
+        await run(['--models-list'], 'lm-studio', new Error('down'), false);
+        expect(process.exitCode).toBe(1);
+        expect(mockCancel.mock.calls[0]?.[0]).toBe('Error: down.');
+      });
+
+      test('Should print one Error prefix and no class name', async () => {
+        mockCancel.mockClear();
+        const error = Object.assign(new Error('LM Studio request timed out'), {
+          name: 'LanguageModelApiError',
+        });
+        await run(['--models-list', '--provider', 'lm-studio'], undefined, error, false);
+        expect(mockCancel.mock.calls[0]?.[0]).toBe('Error: LM Studio request timed out.');
+      });
+
+      test('Should route the unavailable note and selector to stderr', async () => {
+        mockNote.mockClear();
+        mockSelect.mockClear();
+        mockSelect.mockResolvedValueOnce('cancel');
+        await run([], 'lm-studio', new Error('down'), true);
+        expect(mockNote.mock.calls[0]?.[2]).toEqual({ output: process.stderr });
+        expect(mockSelect.mock.calls[0]?.[0]).toMatchObject({ output: process.stderr });
+      });
+
+      test('Should name the rejected provider and the valid ids', async () => {
+        mockCancel.mockClear();
+        await run(['--provider', 'bogus\u001b'], undefined, new Error('x'), false);
+        expect(mockCancel.mock.calls[0]?.[0]).toBe(
+          'Error: Unknown language model provider "bogus". Valid: gemini, freellmapi, lm-studio.',
+        );
+      });
+    });
+
     test('Should ignore an unknown session provider silently', async () => {
       mockCancel.mockClear();
       expect((await createdProviders([], undefined, 'ghost')).created).toEqual(['gemini']);
@@ -1534,6 +1716,7 @@ describe('Refactored Runner', () => {
       expect(mockNote).toHaveBeenCalledWith(
         expect.stringContaining('Git operation in progress: rebase.'),
         'Repository warnings',
+        { output: process.stderr },
       );
       expect(mockSelect).toHaveBeenCalled();
     } finally {
@@ -1665,7 +1848,9 @@ describe('Refactored Runner', () => {
         geminiModelLister: mockListModels,
       });
 
-      expect(mockOutro).toHaveBeenCalledWith('Failed to parse structured output.');
+      expect(mockCancel).toHaveBeenCalledWith('Failed to parse structured output.', {
+        output: process.stderr,
+      });
       expect(Number(process.exitCode)).toBe(1);
     } finally {
       process.exitCode = originalExitCode;
@@ -1745,6 +1930,7 @@ describe('Refactored Runner', () => {
       expect(mockNote).toHaveBeenCalledWith(
         'Failed to apply commit action: git commit failed',
         'Commit failed',
+        { output: process.stderr },
       );
       expect(mockSelect).toHaveBeenCalledTimes(2);
       expect(Number(process.exitCode)).toBe(0);
@@ -1790,6 +1976,7 @@ describe('Refactored Runner', () => {
     // Verify note was shown about successful copy
     expect(mockNote).toHaveBeenCalledWith('Commit message copied to clipboard!', 'Success');
     // Verify commit was eventually called
+    expect(mockCancel.mock.calls).toEqual([]);
     expect(mockGitService.commitChanges).toHaveBeenCalled();
   });
 
@@ -1835,6 +2022,7 @@ describe('Refactored Runner', () => {
     expect(mockGeminiService.generate).toHaveBeenCalledTimes(2);
     expect(mockListModels).toHaveBeenCalled();
     // Git commit called once
+    expect(mockCancel.mock.calls).toEqual([]);
     expect(mockGitService.commitChanges).toHaveBeenCalled();
   });
 
