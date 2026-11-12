@@ -46,6 +46,16 @@ jobs:
           bun build ./gcm.ts --compile --target=bun-linux-x64 --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile dist/bin/gcm-linux-x64 --minify
           bun build ./gcm.ts --compile --target=bun-linux-arm64 --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile dist/bin/gcm-linux-arm64 --minify
 
+      - name: Smoke-test the runner's binary
+        run: |
+          EXPECTED="gcm $(bun -e 'console.log(require("./package.json").version)')"
+          ACTUAL="$(dist/bin/gcm-linux-x64 --version)"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "Expected '$EXPECTED', got '$ACTUAL'"
+            exit 1
+          fi
+          dist/bin/gcm-linux-x64 --help > /dev/null
+
       - name: Generate SHA-256 checksums
         run: |
           cd dist/bin
