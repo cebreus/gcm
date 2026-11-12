@@ -1,30 +1,54 @@
 import {
+  HTTP_STATUS_FORBIDDEN,
+  HTTP_STATUS_UNAUTHORIZED,
+} from './constants.js';
+import {
+  type LanguageModelProviderFactory,
   createLanguageModelApiError,
   hasLanguageModelErrorKind,
   isLanguageModelApiError,
-  type LanguageModelProviderFactory,
 } from './language-model-service.js';
+import { hasText } from './utils.js';
 
-function formatProbeError(error: unknown): string {
-  if (
+const PARTIAL_PROVIDER_FAILURE_EXIT_CODE = 1;
+const ALL_PROVIDERS_FAILED_EXIT_CODE = 2;
+
+function isRejectedApiKey(error: unknown): boolean {
+  return (
+    isLanguageModelApiError(error) &&
+    (error.metadata.status === HTTP_STATUS_UNAUTHORIZED ||
+      error.metadata.status === HTTP_STATUS_FORBIDDEN)
+  );
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return (
     hasLanguageModelErrorKind(error, 'timeout') ||
     (error instanceof Error && error.name === 'TimeoutError')
-  ) {
+  );
+}
+
+function formatProbeError(error: unknown): string {
+  if (isTimeoutError(error)) {
     return 'The provider took too long to reply.';
   }
-  if (
-    isLanguageModelApiError(error) &&
-    (error.metadata.status === 401 || error.metadata.status === 403)
-  ) {
+  if (isRejectedApiKey(error)) {
     return 'The API key was not accepted.';
   }
-  if (hasLanguageModelErrorKind(error, 'missing-api-key')) return 'The API key is not set.';
-  if (hasLanguageModelErrorKind(error, 'no-models')) return 'No supported models found.';
-  if (hasLanguageModelErrorKind(error, 'invalid-model')) return 'Provider setup is not valid.';
+  if (hasLanguageModelErrorKind(error, 'missing-api-key')) {
+    return 'The API key is not set.';
+  }
+  if (hasLanguageModelErrorKind(error, 'no-models')) {
+    return 'No supported models found.';
+  }
+  if (hasLanguageModelErrorKind(error, 'invalid-model')) {
+    return 'Provider setup is not valid.';
+  }
   // Errors thrown by the runtime itself (DNS, sockets) carry no kind; only these are read by text.
   if (
     hasLanguageModelErrorKind(error, 'connection') ||
-    (!isLanguageModelApiError(error) && /network|fetch|enotfound|econnrefused/i.test(String(error)))
+    (!isLanguageModelApiError(error) &&
+      /network|fetch|enotfound|econnrefused/iv.test(String(error)))
   ) {
     return 'Cannot connect to the provider.';
   }
@@ -34,23 +58,26 @@ function formatProbeError(error: unknown): string {
 export async function runProvidersListCommand(options: {
   factories: LanguageModelProviderFactory[];
   output: {
-    note(message: string, title?: string): void;
-    outro(message: string): void;
+    note: (message: string, title?: string) => void;
+    outro: (message: string) => void;
     style?: {
-      available(message: string): string;
-      unavailable(message: string): string;
+      available: (message: string) => string;
+      unavailable: (message: string) => string;
     };
   };
 }): Promise<number> {
+  const { output } = options;
   const results = await Promise.all(
-    options.factories.map(async factory => {
+    options.factories.map(async (factory) => {
       try {
         const provider = await factory.create({ probeOnly: true });
-        if (provider.readinessError) {
-          throw createLanguageModelApiError(provider.readinessError, { kind: 'missing-api-key' });
+        if (hasText(provider.readinessError)) {
+          throw createLanguageModelApiError(provider.readinessError, {
+            kind: 'missing-api-key',
+          });
         }
         const models = await provider.models();
-        if (!models.some(model => model.name === provider.defaultModel)) {
+        if (!models.some((model) => model.name === provider.defaultModel)) {
           throw new Error('Provider default model is not in its catalogue');
         }
         return {
@@ -68,22 +95,29 @@ export async function runProvidersListCommand(options: {
     }),
   );
   const report = results
-    .map(result => {
+    .map((result) => {
       const status = result.available ? 'available' : 'unavailable';
+      const { style: outputStyle } = output;
       const style = result.available
-        ? options.output.style?.available
-        : options.output.style?.unavailable;
+        ? outputStyle?.available
+        : outputStyle?.unavailable;
       return `${style?.(result.name) ?? result.name}: ${style?.(status) ?? status} — ${result.detail}`;
     })
     .join('\n');
-  options.output.note(report, 'AI providers');
-  const availableCount = results.filter(result => result.available).length;
-  options.output.outro(
+  output.note(report, 'AI providers');
+  const { length: availableCount } = results.filter(
+    (result) => result.available,
+  );
+  output.outro(
     availableCount === results.length
       ? 'All AI providers are available.'
       : availableCount === 0
         ? 'No AI provider is available.'
         : 'Some AI providers are unavailable.',
   );
-  return availableCount === results.length ? 0 : availableCount === 0 ? 2 : 1;
+  return availableCount === results.length
+    ? 0
+    : availableCount === 0
+      ? ALL_PROVIDERS_FAILED_EXIT_CODE
+      : PARTIAL_PROVIDER_FAILURE_EXIT_CODE;
 }

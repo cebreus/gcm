@@ -1,629 +1,385 @@
-import { CLI_OPTION_DEFINITIONS, isArgumentValidationError, parseArgs } from './cli.js';
-import type { ParsedOptions } from './cli.js';
-import { loadConfig, type Config } from '../gcm.config.js';
-import { createLogger } from './logger.js';
-import type { Logger, LoggerConfig } from './logger.js';
-import { runModelsListCommand } from './models-list-command.js';
-import { runProvidersListCommand } from './providers-list-command.js';
-import { createGitService } from './services/git-service.js';
-import type { GitService } from './services/git-service.js';
-import { createCommitActionService } from './commit-action-service.js';
-import { getCommitContextHints } from './scope-detector.js';
-import { readCommitContextFacts } from './services/repository-context.js';
-import { summarizeRepositoryDiff } from './services/repository-summary.js';
-import { createContextService } from './services/context-service.js';
-import type { ContextService } from './services/context-service.js';
-import { loadProjectConfig } from './services/project-config-service.js';
-import type { ProjectConfig } from './project-config.js';
-import type { LanguageModelProvider } from './language-model-service.js';
-import { isLanguageModelName } from './language-model-service.js';
-import { isGitFailure } from './git-utils.js';
-import { createProviderFactories, type ProviderFactoryOptions } from './provider-factories.js';
-import { loadSession, saveSession } from './session.js';
-import {
-  intro,
-  outro,
-  spinner,
-  note,
-  select,
-  text,
-  confirm,
-  isCancel,
-  cancel,
-} from '@clack/prompts';
-import {
-  sanitizeForDisplay,
-  sanitizeTerminalText,
-  stripTerminalControlSequences,
-} from './utils.js';
-import clipboardy from 'clipboardy';
+import { intro, note, outro } from '@clack/prompts';
+
+import { type Config, loadConfig } from '../gcm.config.js';
 import pkg from '../package.json';
 import {
-  createInteractiveGenerationDialogue,
-  type InteractiveGenerationDialogue,
-} from './interactive-generation-dialogue.js';
+  type ProviderLoopContext,
+  runActiveProvider,
+} from './active-provider.js';
+import { isArgumentValidationError, parseArgs } from './cli.js';
+import type { ParsedOptions } from './cli.js';
+import { isGitFailure } from './git-utils.js';
+import type {
+  LanguageModelProvider,
+  LanguageModelProviderFactory,
+} from './language-model-service.js';
+import { isLanguageModelName } from './language-model-service.js';
+import { createLogger } from './logger.js';
+import type { Logger, LoggerConfig } from './logger.js';
+import { createProviderFactories } from './provider-factories.js';
+import { type ProviderRecovery, recoverProvider } from './provider-recovery.js';
+import { runProvidersListCommand } from './providers-list-command.js';
 import {
-  createGenerationState,
-  runGenerationCommand,
-  type GenerationServices,
-} from './generation.js';
-import { runCommitBatch } from './batch-generation.js';
+  C,
+  forStream,
+  reportCancel,
+  showHelp,
+  unknownProviderMessage,
+} from './runner-output.js';
+import type { RunnerOptions } from './runner-services.js';
+import { createGitService } from './services/git-service.js';
+import type { GitService } from './services/git-service.js';
+import { type GCMSession, loadSession } from './session.js';
+import { hasText } from './utils.js';
 
-function reportCancel(message: string): void {
-  cancel(message, { output: process.stderr });
-}
-
-function unknownProviderMessage(providerId: string, factories: { id: string }[]): string {
-  return `Error: Unknown language model provider "${sanitizeTerminalText(providerId)}". Valid: ${factories.map(factory => factory.id).join(', ')}.`;
-}
-
-function paint(code: string): (message: string) => string {
-  return message => `${code}${message}${C.reset}`;
-}
-
-const C = {
-  reset: '\x1b[0m',
-  bright: '\x1b[1m',
-  dim: '\x1b[2m',
-  cyan: '\x1b[36m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  magenta: '\x1b[35m',
-};
-
-// Styling only for a terminal; a redirected stream gets plain text.
-function forStream(text: string, stream: NodeJS.WriteStream = process.stdout): string {
-  return stream.isTTY ? text : stripTerminalControlSequences(text);
-}
-
-function showHelp(providerLabel: string, providerIds: string[]) {
-  const optionWidth = Math.max(...CLI_OPTION_DEFINITIONS.map(option => option.usage.length));
-  const descriptionLine = new RegExp(`.{1,${80 - optionWidth - 8}}(?:\\s|$)`, 'g');
-  const options = CLI_OPTION_DEFINITIONS.map(option => {
-    const description = option.description.replaceAll('{provider}', providerLabel);
-    const [first, ...rest] = (description.match(descriptionLine) ?? [description]).map(line =>
-      line.trim(),
-    );
-    return [
-      `      ${C.cyan}${option.usage.padEnd(optionWidth)}${C.reset}  ${first}`,
-      ...rest.map(line => ' '.repeat(optionWidth + 8) + line),
-    ].join('\n');
-  }).join('\n');
-  const helpText = `
-    ${C.bright}${providerLabel} Commit Message Helper${C.reset}
-    Version: ${pkg.version}
-
-    Automatically generates professional Conventional Commit messages
-    using ${providerLabel} AI.
-
-    ${C.bright}Usage:${C.reset}
-      gcm [options]
-
-    ${C.bright}Options:${C.reset}
-${options}
-
-    ${C.bright}Provider:${C.reset}
-      Use ${C.cyan}--provider <name>${C.reset}, choose in interactive Settings,
-      or set ${C.cyan}GCM_PROVIDER${C.reset}.
-      Available values: ${providerIds.join(', ')}.
-      Example: ${C.cyan}GCM_PROVIDER=lm-studio gcm${C.reset}
-
-    ${C.bright}Examples:${C.reset}
-      ${C.cyan}gcm${C.reset}                                      Generate from staged changes.
-      ${C.cyan}gcm --commit HEAD${C.reset}                        Generate from the latest commit.
-      ${C.cyan}gcm --commit-range 'abc123^..def456' --non-interactive --apply${C.reset}
-        Generate from abc123 through def456; ^ includes abc123.
-
-    ${C.bright}Commit Safety:${C.reset}
-      - Without ${C.cyan}--commit${C.reset} the action commits the staged changes.
-      - With ${C.cyan}--commit${C.reset} on an unpublished HEAD the action amends that commit.
-      - With ${C.cyan}--commit${C.reset} on any other commit the action adds an 'amend!' commit.
-        History stays intact until you run 'git rebase --autosquash' yourself.
-      - Amend is never offered for a commit already reachable from
-        a remote branch.
-      - Nothing is offered for a commit unreachable from HEAD,
-        on a detached HEAD, or while the index has staged changes.
-      - All actions are disabled when git has unresolved conflicts.
-      - All actions are disabled while merge/rebase/cherry-pick/revert/bisect
-        is in progress.
-      - ${C.cyan}--commit-range${C.reset} creates one separate 'amend!' commit per target
-        and never runs rebase.
-
-    `;
-  process.stdout.write(forStream(helpText.trim() + '\n'));
-}
-
-const providerModelEnv: Record<string, string | undefined> = {
-  gemini: 'GCM_MODEL',
-  freellmapi: 'GCM_FREELLMAPI_MODEL',
-  'lm-studio': 'GCM_LM_STUDIO_MODEL',
-};
-
-function configuredModelFor(providerId: string): string | undefined {
-  const name = providerModelEnv[providerId];
-  const value = name ? process.env[name] : undefined;
-  return value === '' ? undefined : value;
-}
-
-interface RunnerOptions extends ProviderFactoryOptions {
-  isInteractive?: boolean;
-  logger?: Logger;
-  gitService?: GitService;
-  contextService?: ContextService;
-}
-
-function createRunnerDialogue(
-  provider: LanguageModelProvider,
-  providers: Array<{ id: string; label: string }>,
-): InteractiveGenerationDialogue {
-  return createInteractiveGenerationDialogue({
-    prompts: {
-      select,
-      text,
-      confirm,
-      note,
-      outro,
-      cancel: reportCancel,
-      isCancel,
-    },
-    clipboard: {
-      write: async message => {
-        await clipboardy.write(message);
-      },
-    },
-    models: () => provider.models(),
-    providers,
-  });
-}
-
-function createRunnerServices(
-  opts: RunnerOptions,
-  logger: Logger,
-  provider: LanguageModelProvider,
-  providers: Array<{ id: string; label: string }>,
-  gitService: GitService,
-  allowDirectAmend: boolean,
-  config: Config,
-  projectConfig: ProjectConfig,
-): Omit<GenerationServices, 'output'> {
-  const contextService =
-    opts.contextService ??
-    createContextService({
-      summarizeLargeDiff: (files, options) => summarizeRepositoryDiff(files, options, config),
-    });
-  const dialogue = createRunnerDialogue(provider, providers);
-  const commitActions = createCommitActionService({ gitService, logger, allowDirectAmend });
-  async function resolveCommitContextHints(files: string[]) {
-    return getCommitContextHints(files, await readCommitContextFacts(files));
-  }
-  return {
-    config,
-    projectConfig,
-    gitService,
-    contextService,
-    languageModelService: provider.service,
-    providerId: provider.id,
-    providerLabel: provider.label,
-    models: () => provider.models(),
-    dialogue,
-    commitActions,
-    getCommitContextHints: resolveCommitContextHints,
-    saveSession,
-  };
-}
-
-function createRunnerOutput(
-  s: Pick<ReturnType<typeof spinner>, 'start' | 'stop' | 'clear'>,
-  isInteractive: boolean,
-  printOnly: boolean,
-): GenerationServices['output'] {
-  return {
-    isInteractive,
-    startProgress: message => {
-      if (printOnly) return;
-      s.start(message);
-    },
-    stopProgress: message => {
-      if (printOnly) return;
-      if (message === undefined) s.clear();
-      else s.stop(message);
-    },
-    cancel: reportCancel,
-    note: (message, title) => {
-      if (!printOnly) note(message, title);
-    },
-    warn: (message, title) => {
-      if (!printOnly) note(message, title, { output: process.stderr });
-    },
-    outro: message => {
-      if (!printOnly) outro(message);
-    },
-    print: message => process.stdout.write(message + '\n'),
-    sanitizeGeneratedText: sanitizeForDisplay,
-    sanitizeTerminalText,
-    style: {
-      cyan: paint(C.cyan),
-      dim: paint(C.dim),
-      yellow: paint(C.yellow),
-    },
-  };
-}
-
-async function maybeHandleModelsList(
+function buildLoggerConfig(
   parsedArgs: ParsedOptions,
-  provider: LanguageModelProvider,
-): Promise<number | null> {
-  if (!parsedArgs.modelsList) return null;
-  return runModelsListCommand({
-    providerLabel: provider.label,
-    readinessError: provider.readinessError,
-    models: () => provider.models(),
-    output: { cancel: reportCancel, note, outro },
-  });
-}
-
-function buildLoggerConfig(parsedArgs: ParsedOptions, config: Config): LoggerConfig {
+  config: Config,
+): LoggerConfig {
   const loggerConfig: LoggerConfig = {
     LOG_LEVEL: config.LOG_LEVEL,
   };
-  if (parsedArgs.verbose || parsedArgs.debug || config.DEBUG_API) loggerConfig.LOG_LEVEL = 'debug';
+  if (parsedArgs.verbose || parsedArgs.debug || config.DEBUG_API) {
+    loggerConfig.LOG_LEVEL = 'debug';
+  }
   return loggerConfig;
 }
 
-function parseArgsOrReport(argv: string[]): ParsedOptions | null {
+function parseArgsOrReport(argv?: string[]): ParsedOptions | null {
   try {
     return parseArgs(argv);
   } catch (error) {
-    if (!isArgumentValidationError(error)) throw error;
+    if (!isArgumentValidationError(error)) {
+      throw error;
+    }
     const message = `Error: ${error.message}. Run gcm --help for usage.`;
     reportCancel(message);
     return null;
   }
 }
 
-async function runCommitRangeCommand(params: {
-  gitService: GitService;
-  range: string;
-  createServices(): Omit<GenerationServices, 'output'>;
-  parsedArgs: ParsedOptions;
-  logger: Logger;
-  providerReadinessError?: string;
-  state: ReturnType<typeof createGenerationState>['state'];
-  output: GenerationServices['output'];
-}): Promise<'success' | 'failure'> {
-  const {
-    gitService,
-    range,
-    createServices,
-    parsedArgs,
-    logger,
-    providerReadinessError,
-    state,
-    output,
-  } = params;
+interface ProviderLoopState {
+  providerId: string;
+  previousProviderId: string | null;
+  providerSwitched: boolean;
+  // Only the saved session picked the provider: a non-interactive failure may fall back to the default.
+  sessionOnly: boolean;
+  // A fallback is a one-off: it must not overwrite the saved provider and model.
+  keepSavedSession: boolean;
+}
+
+type ProviderStep = { exitCode: number } | { next: ProviderLoopState };
+
+async function tryCreateProvider(
+  factory: LanguageModelProviderFactory,
+): Promise<{ provider: LanguageModelProvider } | { error: unknown }> {
   try {
-    const repositoryState = await gitService.getRepositoryState(logger);
-    if (
-      parsedArgs.apply &&
-      (repositoryState.hasStagedChanges ||
-        repositoryState.hasUnmergedPaths ||
-        repositoryState.inProgressOperation)
-    ) {
-      output.cancel('Commit range apply requires a clean index with no Git operation in progress.');
-      return 'failure';
-    }
-    const targets = await gitService.listCommitHashes(range, logger);
-    if (targets.length === 0) {
-      output.cancel(`Commit range ${range} contains no commits.`);
-      return 'failure';
-    }
-    const initialHead = await gitService.getHeadHash(logger);
-    const result = await runCommitBatch({
-      targets,
-      initialHead,
-      getHead: () => gitService.getHeadHash(logger),
-      hasAmendment: hash =>
-        parsedArgs.apply ? gitService.hasAmendment(hash, logger) : Promise.resolve(false),
-      runOne: async hash => {
-        try {
-          const outcome = await runGenerationCommand({
-            createServices,
-            parsedArgs,
-            logger,
-            providerReadinessError,
-            canSwitchProvider: false,
-            targetCommit: hash,
-            state,
-            output,
-          });
-          return outcome === 'success';
-        } catch (error) {
-          logger.log('error', `Commit range target failed: ${error}`);
-          return false;
-        }
+    return { provider: await factory.create() };
+  } catch (error) {
+    return { error };
+  }
+}
+
+function applyRecovery(
+  state: ProviderLoopState,
+  recovery: ProviderRecovery,
+): ProviderStep {
+  if (recovery.kind === 'switch') {
+    return {
+      next: {
+        ...state,
+        providerId: recovery.providerId,
+        previousProviderId: null,
+        providerSwitched: recovery.providerSwitched,
       },
-      report: message => {
-        logger.log('info', message);
+    };
+  }
+  if (recovery.kind === 'fallback') {
+    return {
+      next: {
+        ...state,
+        providerId: recovery.providerId,
+        sessionOnly: false,
+        keepSavedSession: true,
+      },
+    };
+  }
+  return { exitCode: 1 };
+}
+
+async function runProviderStep(
+  context: ProviderLoopContext,
+  state: ProviderLoopState,
+): Promise<ProviderStep> {
+  const { factories, parsedArgs, isInteractive } = context;
+  const factory = factories.find(
+    (candidate) => candidate.id === state.providerId,
+  );
+  if (factory === undefined) {
+    reportCancel(unknownProviderMessage(state.providerId, factories));
+    return { exitCode: 1 };
+  }
+  const created = await tryCreateProvider(factory);
+  if ('error' in created) {
+    const recovery = await recoverProvider({
+      error: created.error,
+      factory,
+      factories,
+      previousProviderId: state.previousProviderId,
+      isInteractive,
+      nonInteractive: parsedArgs.nonInteractive,
+      sessionOnly: state.sessionOnly,
+    });
+    return applyRecovery(state, recovery);
+  }
+  const outcome = await runActiveProvider({
+    ...context,
+    provider: created.provider,
+    providerSwitched: state.providerSwitched,
+    keepSavedSession: state.keepSavedSession,
+  });
+  if ('exitCode' in outcome) {
+    return outcome;
+  }
+  return {
+    next: {
+      ...state,
+      previousProviderId: state.providerId,
+      providerId: outcome.switchToProviderId,
+      providerSwitched: true,
+    },
+  };
+}
+
+// Each provider attempt depends on the previous outcome; switches are few.
+async function runProviderLoop(
+  context: ProviderLoopContext,
+  state: ProviderLoopState,
+): Promise<number> {
+  const step = await runProviderStep(context, state);
+  return 'exitCode' in step
+    ? step.exitCode
+    : await runProviderLoop(context, step.next);
+}
+
+function loadRunConfig(help: boolean): Config {
+  try {
+    return loadConfig(process.env);
+  } catch (error) {
+    if (!help) {
+      throw error;
+    }
+    return loadConfig({}); // --help stays usable; provider text falls back to defaults
+  }
+}
+
+interface FactoryContext {
+  opts: RunnerOptions;
+  parsedArgs: ParsedOptions;
+  config: Config;
+  logger: Logger;
+  factories: LanguageModelProviderFactory[];
+}
+
+function resolveProviderId(
+  { opts, parsedArgs, config, factories }: FactoryContext,
+  session: GCMSession,
+): string | undefined {
+  if (opts.languageModelProvider !== undefined) {
+    return opts.languageModelProvider.id;
+  }
+  // Session file is local but may be stale or hand-edited: its provider counts only if a factory exists for it.
+  const sessionProviderId = factories.some(
+    (factory) => factory.id === session.providerId,
+  )
+    ? session.providerId
+    : undefined;
+  return (
+    parsedArgs.provider ??
+    config.PROVIDER ??
+    sessionProviderId ??
+    factories[0]?.id
+  );
+}
+
+function selectProviderId(
+  context: FactoryContext,
+  session: GCMSession,
+): string | null {
+  const providerId = resolveProviderId(context, session);
+  if (!hasText(providerId)) {
+    reportCancel('Error: No language model provider available.');
+    return null;
+  }
+  const {
+    parsedArgs: { model },
+  } = context;
+  if (hasText(model) && !isLanguageModelName(model)) {
+    reportCancel('Error: Invalid model name.');
+    return null;
+  }
+  return providerId;
+}
+
+function showHelpScreen(
+  factories: LanguageModelProviderFactory[],
+  providerId: string,
+): number {
+  const helpFactory =
+    factories.find((factory) => factory.id === providerId) ?? factories.at(0);
+  if (helpFactory === undefined) {
+    reportCancel(unknownProviderMessage(providerId, factories));
+    return 1;
+  }
+  intro(
+    forStream(
+      `${C.bright}${helpFactory.label} Commit Message Helper v${pkg.version}${C.reset}`,
+    ),
+  );
+  showHelp(
+    helpFactory.label,
+    factories.map((factory) => factory.id),
+  );
+  return 0;
+}
+
+// Cheap local probe first: a run outside a repository must not reach any provider.
+async function isOutsideRepository(
+  gitService: GitService,
+  logger: Logger,
+): Promise<boolean> {
+  try {
+    await gitService.getRepositoryState(logger);
+    return false;
+  } catch (error) {
+    if (!isGitFailure(error, 'not-a-repository')) {
+      throw error;
+    }
+    reportCancel('Error: Not inside a git repository.');
+    return true;
+  }
+}
+
+// An explicit --model targets the saved provider, so it stays fatal rather than moving to another one.
+function isSessionOnly({ opts, parsedArgs, config }: FactoryContext): boolean {
+  return (
+    opts.languageModelProvider === undefined &&
+    !hasText(parsedArgs.provider) &&
+    !hasText(config.PROVIDER) &&
+    !hasText(parsedArgs.model)
+  );
+}
+
+async function runWithFactories(context: FactoryContext): Promise<number> {
+  const { opts, parsedArgs, config, logger, factories } = context;
+  const session = await loadSession();
+  const providerId = selectProviderId(context, session);
+  if (providerId === null) {
+    return 1;
+  }
+  if (parsedArgs.help) {
+    return showHelpScreen(factories, providerId);
+  }
+  if (!factories.some((factory) => factory.id === providerId)) {
+    reportCancel(unknownProviderMessage(providerId, factories));
+    return 1;
+  }
+  const gitService =
+    opts.gitService ??
+    createGitService({ maxBytes: config.CHILD_PROCESS_MAX_BUFFER });
+  if (
+    !parsedArgs.modelsList &&
+    (await isOutsideRepository(gitService, logger))
+  ) {
+    return 1;
+  }
+  // Node types declare isTTY as boolean, but it is undefined on a pipe.
+  const stdinIsTty = (process.stdin.isTTY as boolean | undefined) === true;
+  return await runProviderLoop(
+    {
+      opts,
+      parsedArgs,
+      logger,
+      factories,
+      gitService,
+      config,
+      session,
+      isInteractive: opts.isInteractive ?? stdinIsTty,
+    },
+    {
+      providerId,
+      previousProviderId: null,
+      providerSwitched: false,
+      sessionOnly: isSessionOnly(context),
+      keepSavedSession: false,
+    },
+  );
+}
+
+async function runParsedCommand(
+  parsedArgs: ParsedOptions,
+  opts: RunnerOptions,
+): Promise<number> {
+  const config = loadRunConfig(parsedArgs.help);
+  const logger =
+    opts.logger ?? createLogger(buildLoggerConfig(parsedArgs, config));
+  // Checked before any provider is built, because GCM_MODEL becomes a
+  // provider's default model and would otherwise surface as "unavailable".
+  // --help never resolves a model, so it stays usable.
+  if (!parsedArgs.help && !isLanguageModelName(config.MODEL)) {
+    reportCancel('Error: Invalid GCM_MODEL.');
+    return 1;
+  }
+  const factories = createProviderFactories(
+    opts,
+    logger,
+    parsedArgs.debug,
+    config,
+  );
+  if (parsedArgs.providersList && !parsedArgs.help) {
+    return await runProvidersListCommand({
+      factories,
+      output: {
+        note,
+        outro,
+        style: process.stdout.isTTY
+          ? {
+              available: (message) => `${C.green}${message}${C.reset}`,
+              unavailable: (message) => `${C.yellow}${message}${C.reset}`,
+            }
+          : undefined,
       },
     });
-    const summary = `Commit range: ${result.completed.length} completed, ${result.skipped.length} skipped.`;
-    if (result.failed) {
-      const failedIndex = targets.indexOf(result.failed);
-      const remaining = targets.slice(failedIndex).join(', ');
-      output.cancel(
-        `${summary} Failed at ${result.failed}. Remaining: ${remaining}. No rebase was run.`,
-      );
-      return 'failure';
-    }
-    output.outro(`${summary} No rebase was run.`);
-    return 'success';
-  } catch (error) {
-    output.cancel(
-      `Commit range failed before completion: ${output.sanitizeTerminalText(String(error))}`,
-    );
-    return 'failure';
   }
+  return await runWithFactories({
+    opts,
+    parsedArgs,
+    config,
+    logger,
+    factories,
+  });
+}
+
+async function runCommitMessageGeneration(
+  argv?: string[],
+  dependencies?: RunnerOptions,
+): Promise<number> {
+  const parsedArgs = parseArgsOrReport(argv);
+  if (parsedArgs === null) {
+    return 1;
+  }
+  if (parsedArgs.version) {
+    process.stdout.write(`${pkg.name} ${pkg.version}\n`);
+    return 0;
+  }
+  return await runParsedCommand(parsedArgs, dependencies ?? {});
 }
 
 export async function executeCommitMessageGeneration(
   argv?: string[],
   dependencies?: RunnerOptions,
 ): Promise<void> {
-  const opts = dependencies ?? {};
-  const parsedArgs = parseArgsOrReport(argv ?? process.argv.slice(2));
-  let exitCode = 0;
-  if (parsedArgs) {
-    if (parsedArgs.version) {
-      process.stdout.write(`${pkg.name} ${pkg.version}\n`);
-      process.exitCode = 0;
-      return;
-    }
-    let config: Config;
-    try {
-      config = loadConfig(process.env);
-    } catch (error) {
-      if (!parsedArgs.help) throw error;
-      config = loadConfig({}); // --help stays usable; provider text falls back to defaults
-    }
-    const loggerConfig = buildLoggerConfig(parsedArgs, config);
-    const logger = opts.logger ?? createLogger(loggerConfig);
-    const isInteractive = opts.isInteractive ?? Boolean(process.stdin.isTTY);
-    // Checked before any provider is built, because GCM_MODEL becomes a
-    // provider's default model and would otherwise surface as "unavailable".
-    // --help never resolves a model, so it stays usable.
-    if (!parsedArgs.help && !isLanguageModelName(config.MODEL)) {
-      reportCancel('Error: Invalid GCM_MODEL.');
-      process.exitCode = 1;
-      return;
-    }
-    const factories = createProviderFactories(opts, logger, parsedArgs.debug, config);
-    if (parsedArgs.providersList && !parsedArgs.help) {
-      process.exitCode = await runProvidersListCommand({
-        factories,
-        output: {
-          note,
-          outro,
-          style: process.stdout.isTTY
-            ? {
-                available: message => `${C.green}${message}${C.reset}`,
-                unavailable: message => `${C.yellow}${message}${C.reset}`,
-              }
-            : undefined,
-        },
-      });
-      return;
-    }
-    const session = await loadSession();
-    const gitService =
-      opts.gitService ?? createGitService({ maxBytes: config.CHILD_PROCESS_MAX_BUFFER });
-    // Session file is local but may be stale or hand-edited: its provider counts only if a factory exists for it.
-    const sessionProviderId = factories.some(factory => factory.id === session.providerId)
-      ? session.providerId
-      : undefined;
-    const requestedProviderId = parsedArgs.provider ?? config.PROVIDER ?? sessionProviderId;
-    let providerId = opts.languageModelProvider
-      ? opts.languageModelProvider.id
-      : (requestedProviderId ?? factories[0]?.id);
-    if (!providerId || (parsedArgs.model && !isLanguageModelName(parsedArgs.model))) {
-      reportCancel(
-        `Error: ${providerId ? 'Invalid model name' : 'No language model provider available'}.`,
-      );
-      process.exitCode = 1;
-      return;
-    }
-    const helpFactory =
-      factories.find(factory => factory.id === providerId) ??
-      (parsedArgs.help ? factories[0] : undefined);
-    if (!helpFactory) {
-      reportCancel(unknownProviderMessage(providerId, factories));
-      process.exitCode = 1;
-      return;
-    }
-    if (parsedArgs.help) {
-      intro(
-        forStream(
-          `${C.bright}${helpFactory.label} Commit Message Helper v${pkg.version}${C.reset}`,
-        ),
-      );
-      showHelp(
-        helpFactory.label,
-        factories.map(factory => factory.id),
-      );
-      process.exitCode = 0;
-      return;
-    }
-    if (!parsedArgs.modelsList) {
-      // Cheap local probe first: a run outside a repository must not reach any provider.
-      try {
-        await gitService.getRepositoryState(logger);
-      } catch (error) {
-        if (!isGitFailure(error, 'not-a-repository')) throw error;
-        reportCancel('Error: Not inside a git repository.');
-        process.exitCode = 1;
-        return;
-      }
-    }
-    let providerSwitched = false;
-    let previousProviderId: string | null = null;
-    // Only the saved session picked the provider: a non-interactive failure may fall back to the default.
-    // An explicit --model targets the saved provider, so it stays fatal rather than moving to another one.
-    let sessionOnly =
-      !opts.languageModelProvider && !parsedArgs.provider && !config.PROVIDER && !parsedArgs.model;
-    // A fallback is a one-off: it must not overwrite the saved provider and model.
-    let keepSavedSession = false;
-    for (;;) {
-      const factory = factories.find(candidate => candidate.id === providerId);
-      if (!factory) {
-        reportCancel(unknownProviderMessage(providerId, factories));
-        exitCode = 1;
-        break;
-      }
-      let provider: LanguageModelProvider;
-      try {
-        provider = await factory.create();
-      } catch (error) {
-        const message = sanitizeTerminalText(
-          error instanceof Error ? error.message : String(error),
-        );
-        if (previousProviderId) {
-          note(message, `${factory.label} unavailable`, { output: process.stderr });
-          providerId = previousProviderId;
-          previousProviderId = null;
-          providerSwitched = false;
-          continue;
-        }
-        const canSelect = isInteractive && !parsedArgs.nonInteractive && factories.length > 1;
-        const fallback = factories[0];
-        if (!canSelect && sessionOnly && fallback && fallback !== factory) {
-          process.stderr.write(
-            `Warning: saved provider ${factory.id} is unavailable (${message}); using ${fallback.id}.\n`,
-          );
-          sessionOnly = false;
-          keepSavedSession = true;
-          providerId = fallback.id;
-          continue;
-        }
-        if (canSelect) {
-          note(message, `${factory.label} unavailable`, { output: process.stderr });
-          const selectedProvider = await select({
-            message: 'Select AI Provider',
-            options: factories.map(candidate => ({ value: candidate.id, label: candidate.label })),
-            output: process.stderr,
-          });
-          if (!isCancel(selectedProvider)) {
-            providerId = String(selectedProvider);
-            providerSwitched = true;
-            continue;
-          }
-        }
-        reportCancel(`Error: ${message}.`);
-        exitCode = 1;
-        break;
-      }
-      if (!parsedArgs.print)
-        intro(
-          forStream(
-            `${C.bright}${provider.label} Commit Message Helper v${pkg.version}${C.reset}`,
-            process.stderr,
-          ),
-          { output: process.stderr },
-        );
-      const earlyExitCode = await maybeHandleModelsList(parsedArgs, provider);
-      if (earlyExitCode !== null) {
-        exitCode = earlyExitCode;
-        break;
-      }
-      let projectConfig: ProjectConfig;
-      try {
-        projectConfig = await loadProjectConfig();
-      } catch (error) {
-        reportCancel(
-          `Error: ${sanitizeTerminalText(error instanceof Error ? error.message : String(error))}`,
-        );
-        exitCode = 1;
-        break;
-      }
-      // clack's spinner emits cursor control sequences even without a TTY, so draw it only on one.
-      const s = process.stderr.isTTY
-        ? spinner({ output: process.stderr })
-        : {
-            start: () => {},
-            stop: (message?: string) =>
-              void process.stderr.write(`${sanitizeTerminalText(message ?? '')}\n`),
-            clear: () => {},
-          };
-      const output = createRunnerOutput(
-        s,
-        isInteractive && !parsedArgs.nonInteractive,
-        parsedArgs.print,
-      );
-      const activeParsedArgs = providerSwitched ? { ...parsedArgs, model: null } : parsedArgs;
-      const { targetCommit, state } = createGenerationState(
-        activeParsedArgs,
-        session,
-        provider.defaultModel,
-        provider.id,
-        configuredModelFor(provider.id),
-      );
-      if (activeParsedArgs.commitRange) {
-        const outcome = await runCommitRangeCommand({
-          gitService,
-          range: activeParsedArgs.commitRange,
-          createServices: () =>
-            createRunnerServices(
-              opts,
-              logger,
-              provider,
-              factories,
-              gitService,
-              false,
-              config,
-              projectConfig,
-            ),
-          parsedArgs: activeParsedArgs,
-          logger,
-          providerReadinessError: provider.readinessError,
-          state,
-          output,
-        });
-        exitCode = outcome === 'failure' ? 1 : 0;
-        break;
-      }
-      const outcome = await runGenerationCommand({
-        createServices: () => {
-          const services = createRunnerServices(
-            opts,
-            logger,
-            provider,
-            factories,
-            gitService,
-            true,
-            config,
-            projectConfig,
-          );
-          return keepSavedSession ? { ...services, saveSession: async () => {} } : services;
-        },
-        parsedArgs: activeParsedArgs,
-        logger,
-        providerReadinessError: provider.readinessError,
-        canSwitchProvider: factories.length > 1 && output.isInteractive,
-        targetCommit,
-        state,
-        output,
-      });
-      if (typeof outcome === 'object') {
-        previousProviderId = providerId;
-        providerId = outcome.providerId;
-        providerSwitched = true;
-        continue;
-      }
-      exitCode = outcome === 'failure' ? 1 : 0;
-      break;
-    }
-  } else {
-    exitCode = 1;
-  }
-  process.exitCode = exitCode;
+  process.exitCode = await runCommitMessageGeneration(argv, dependencies);
 }
 
 export default { executeCommitMessageGeneration };

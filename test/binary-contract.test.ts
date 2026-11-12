@@ -1,10 +1,13 @@
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
+
 import { mkdtemp, rm } from 'fs/promises';
+
 import pkg from '../package.json';
 
-const ansiEscape = /\x1B\[[0-?]*[ -/]*[@-~]/g;
+// eslint-disable-next-line no-control-regex -- ANSI escape sequences start with ESC control byte.
+const ansiEscape = /\x1B\[[0-?]*[ -\/]*[@-~]/gv;
 const tempRoot = Bun.env.TMPDIR ?? '/tmp';
-const packageVersion = pkg.version;
+const { version: packageVersion } = pkg;
 const expectPath = Bun.which('expect');
 let binaryDirectory = '';
 let binaryPath = '';
@@ -67,9 +70,9 @@ async function runSubprocess(
   });
   const stdout = new Response(child.stdout).text();
   const stderr = new Response(child.stderr).text();
-  let timedOut = false;
+  const timeoutState = { timedOut: false };
   const timeout = setTimeout(() => {
-    timedOut = true;
+    timeoutState.timedOut = true;
     child.kill();
   }, 10_000);
   const exitCode = await child.exited;
@@ -79,7 +82,7 @@ async function runSubprocess(
     stdout: await stdout,
     stderr: await stderr,
   };
-  if (timedOut) {
+  if (timeoutState.timedOut) {
     throw new Error(
       `Timed out: ${command.join(' ')}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
     );
@@ -87,7 +90,10 @@ async function runSubprocess(
   return result;
 }
 
-async function runCommand(command: string[], cwd: string): Promise<BinaryResult> {
+async function runCommand(
+  command: string[],
+  cwd: string,
+): Promise<BinaryResult> {
   const result = await runSubprocess(command, cwd);
   if (result.exitCode !== 0) {
     throw new Error(
@@ -116,7 +122,15 @@ async function runBinaryWithProvider(
   extraEnvironment?: Record<string, string>,
 ): Promise<BinaryResult> {
   const result = await runSubprocess(
-    ['bun', '--preload', providerPreload, binaryPath, '--model', 'gemini-3.7-flash', ...args],
+    [
+      'bun',
+      '--preload',
+      providerPreload,
+      binaryPath,
+      '--model',
+      'gemini-3.7-flash',
+      ...args,
+    ],
     cwd,
     'fake-key',
     extraEnvironment,
@@ -131,27 +145,45 @@ async function runBinaryWithProvider(
 async function createCommittedRepository(): Promise<string> {
   const repository = await mkdtemp(`${tempRoot}/gcm-binary-contract-flow-`);
   flowRepositories.push(repository);
-  await runCommand(['git', 'init', '--quiet', '--initial-branch=main'], repository);
-  await runCommand(['git', 'config', 'user.email', 'test@gcm.local'], repository);
+  await runCommand(
+    ['git', 'init', '--quiet', '--initial-branch=main'],
+    repository,
+  );
+  await runCommand(
+    ['git', 'config', 'user.email', 'test@gcm.local'],
+    repository,
+  );
   await runCommand(['git', 'config', 'user.name', 'GCM Test'], repository);
   await Bun.write(`${repository}/file.txt`, 'first\n');
   await runCommand(['git', 'add', 'file.txt'], repository);
   await runCommand(['git', 'commit', '-qm', 'feat: first subject'], repository);
   await Bun.write(`${repository}/file.txt`, 'second\n');
-  await runCommand(['git', 'commit', '-qam', 'feat: second subject'], repository);
+  await runCommand(
+    ['git', 'commit', '-qam', 'feat: second subject'],
+    repository,
+  );
   return repository;
 }
 
 async function readSubjects(repository: string): Promise<string[]> {
-  return (await runCommand(['git', 'log', '--format=%s'], repository)).stdout.trim().split('\n');
+  return (await runCommand(['git', 'log', '--format=%s'], repository)).stdout
+    .trim()
+    .split('\n');
 }
 
-async function runInteractiveBinary(args: string[], cwd: string): Promise<BinaryResult> {
-  if (expectPath === null) throw new Error('expect PTY is unavailable.');
+async function runInteractiveBinary(
+  args: string[],
+  cwd: string,
+): Promise<BinaryResult> {
+  if (expectPath === null) {
+    throw new Error('expect PTY is unavailable.');
+  }
   const command = ['bun', '--preload', providerPreload, binaryPath, ...args]
-    .map(value => `'${value.replaceAll("'", "'\\''")}'`)
+    .map((value) => `'${value.replaceAll("'", "'\\''")}'`)
     .join(' ');
-  const shellCommand = escapeTclDoubleQuoted(`stty rows 40 columns 200; exec ${command}`);
+  const shellCommand = escapeTclDoubleQuoted(
+    `stty rows 40 columns 200; exec ${command}`,
+  );
   const script = [
     'set timeout 10',
     `spawn -noecho sh -c "${shellCommand}"`,
@@ -190,17 +222,23 @@ function expectCleanInputError(result: BinaryResult, message: string): void {
 
 // Binary runs share HOME=tempRoot; a saved session would now pick the next test's provider.
 const sharedSession = `${tempRoot}/.gcm-session.json`;
-afterEach(() => rm(sharedSession, { force: true }));
+afterEach(async () => await rm(sharedSession, { force: true }));
 
 beforeAll(async () => {
   await rm(sharedSession, { force: true });
   binaryDirectory = await mkdtemp(`${tempRoot}/gcm-binary-contract-build-`);
   binaryPath = `${binaryDirectory}/gcm`;
   gitRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-repository-`);
-  nonRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-not-a-repository-`);
-  whitespaceRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-whitespace-`);
+  nonRepository = await mkdtemp(
+    `${tempRoot}/gcm-binary-contract-not-a-repository-`,
+  );
+  whitespaceRepository = await mkdtemp(
+    `${tempRoot}/gcm-binary-contract-whitespace-`,
+  );
   excludeRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-exclude-`);
-  conflictRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-conflict-`);
+  conflictRepository = await mkdtemp(
+    `${tempRoot}/gcm-binary-contract-conflict-`,
+  );
   rewordRepository = await mkdtemp(`${tempRoot}/gcm-binary-contract-reword-`);
   providerPreload = `${binaryDirectory}/provider-preload.ts`;
 
@@ -221,7 +259,15 @@ choices: [{ finish_reason: process.env.FAKE_FINISH_REASON ?? 'stop', message: { 
   );
 
   await runCommand(
-    ['bun', 'build', './gcm.ts', '--outfile', binaryPath, '--target=bun', '--minify'],
+    [
+      'bun',
+      'build',
+      './gcm.ts',
+      '--outfile',
+      binaryPath,
+      '--target=bun',
+      '--minify',
+    ],
     process.cwd(),
   );
   for (const repository of [
@@ -232,17 +278,38 @@ choices: [{ finish_reason: process.env.FAKE_FINISH_REASON ?? 'stop', message: { 
   ]) {
     await runCommand(['git', 'init', '--quiet'], repository);
   }
-  await runCommand(['git', 'init', '--quiet', '--initial-branch=main'], conflictRepository);
-  await runCommand(['git', 'config', 'user.email', 'test@gcm.local'], conflictRepository);
-  await runCommand(['git', 'config', 'user.name', 'GCM Test'], conflictRepository);
+  await runCommand(
+    ['git', 'init', '--quiet', '--initial-branch=main'],
+    conflictRepository,
+  );
+  await runCommand(
+    ['git', 'config', 'user.email', 'test@gcm.local'],
+    conflictRepository,
+  );
+  await runCommand(
+    ['git', 'config', 'user.name', 'GCM Test'],
+    conflictRepository,
+  );
 
-  await runCommand(['git', 'config', 'user.email', 'test@gcm.local'], rewordRepository);
-  await runCommand(['git', 'config', 'user.name', 'GCM Test'], rewordRepository);
+  await runCommand(
+    ['git', 'config', 'user.email', 'test@gcm.local'],
+    rewordRepository,
+  );
+  await runCommand(
+    ['git', 'config', 'user.name', 'GCM Test'],
+    rewordRepository,
+  );
   await Bun.write(`${rewordRepository}/file.txt`, 'first\n');
   await runCommand(['git', 'add', 'file.txt'], rewordRepository);
-  await runCommand(['git', 'commit', '-qm', 'feat: original subject'], rewordRepository);
+  await runCommand(
+    ['git', 'commit', '-qm', 'feat: original subject'],
+    rewordRepository,
+  );
   await Bun.write(`${rewordRepository}/file.txt`, 'second\n');
-  await runCommand(['git', 'commit', '-am', 'feat: later work', '--quiet'], rewordRepository);
+  await runCommand(
+    ['git', 'commit', '-am', 'feat: later work', '--quiet'],
+    rewordRepository,
+  );
 
   await Bun.write(`${whitespaceRepository}/document.txt`, 'first line\n');
   await runCommand(['git', 'add', 'document.txt'], whitespaceRepository);
@@ -262,7 +329,10 @@ choices: [{ finish_reason: process.env.FAKE_FINISH_REASON ?? 'stop', message: { 
   await Bun.write(`${whitespaceRepository}/document.txt`, 'first line \n');
   await runCommand(['git', 'add', 'document.txt'], whitespaceRepository);
 
-  await Bun.write(`${excludeRepository}/-generated/sentinel.txt`, 'do not send\n');
+  await Bun.write(
+    `${excludeRepository}/-generated/sentinel.txt`,
+    'do not send\n',
+  );
   await Bun.write(`${excludeRepository}/included.txt`, 'send this\n');
   await runCommand(
     ['git', 'add', '--', '-generated/sentinel.txt', 'included.txt'],
@@ -274,12 +344,23 @@ choices: [{ finish_reason: process.env.FAKE_FINISH_REASON ?? 'stop', message: { 
   await runCommand(['git', 'commit', '-qm', 'base'], conflictRepository);
   await runCommand(['git', 'checkout', '-qb', 'other'], conflictRepository);
   await Bun.write(`${conflictRepository}/file.txt`, 'other\n');
-  await runCommand(['git', 'commit', '-am', 'other', '--quiet'], conflictRepository);
+  await runCommand(
+    ['git', 'commit', '-am', 'other', '--quiet'],
+    conflictRepository,
+  );
   await runCommand(['git', 'checkout', '-q', 'main'], conflictRepository);
   await Bun.write(`${conflictRepository}/file.txt`, 'main\n');
-  await runCommand(['git', 'commit', '-am', 'main', '--quiet'], conflictRepository);
-  const merge = await runSubprocess(['git', 'merge', 'other'], conflictRepository);
-  if (merge.exitCode === 0) throw new Error('Expected test repository merge to conflict.');
+  await runCommand(
+    ['git', 'commit', '-am', 'main', '--quiet'],
+    conflictRepository,
+  );
+  const merge = await runSubprocess(
+    ['git', 'merge', 'other'],
+    conflictRepository,
+  );
+  if (merge.exitCode === 0) {
+    throw new Error('Expected test repository merge to conflict.');
+  }
 }, 60_000);
 
 afterAll(async () => {
@@ -291,7 +372,10 @@ afterAll(async () => {
     rm(excludeRepository, { recursive: true, force: true }),
     rm(conflictRepository, { recursive: true, force: true }),
     rm(rewordRepository, { recursive: true, force: true }),
-    ...flowRepositories.map(repository => rm(repository, { recursive: true, force: true })),
+    ...flowRepositories.map(
+      async (repository) =>
+        await rm(repository, { recursive: true, force: true }),
+    ),
   ]);
 });
 
@@ -312,30 +396,44 @@ test.skipIf(expectPath === null)(
       );
     }
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain('Reword via amend! commit; manual rebase required');
+    expect(result.stdout).toContain(
+      'Reword via amend! commit; manual rebase required',
+    );
     expect(result.stdout).toContain('git rebase --autosquash');
     const subjects = (
       await runCommand(['git', 'log', '-3', '--format=%s'], rewordRepository)
     ).stdout
       .trim()
       .split('\n');
-    expect(subjects).toEqual([`amend! ${target}`, 'feat: later work', 'feat: original subject']);
+    expect(subjects).toEqual([
+      `amend! ${target}`,
+      'feat: later work',
+      'feat: original subject',
+    ]);
   },
 );
 
-for (const provider of ['codex', 'claude']) {
-  for (const mode of ['print', 'apply', 'auth', 'truncated']) {
-    test(`binary contract: ${provider} CLI ${mode}`, async function () {
-      const repository = await createCommittedRepository();
-      await Bun.write(`${repository}/file.txt`, 'third\n');
-      await runCommand(['git', 'add', 'file.txt'], repository);
-      const head = (await runCommand(['git', 'rev-parse', 'HEAD'], repository)).stdout;
-      const staged = (await runCommand(['git', 'diff', '--cached'], repository)).stdout;
-      const bin = `${binaryDirectory}/fake-${provider}-${mode}`;
-      const executable = `${bin}/${provider}`;
-      await Bun.write(
-        executable,
-        `#!/usr/bin/env bun
+test.each(
+  ['codex', 'claude'].flatMap((provider) =>
+    ['print', 'apply', 'auth', 'truncated'].map((mode) => ({ provider, mode })),
+  ),
+)('binary contract: $provider CLI $mode', async ({ provider, mode }) => {
+  const repository = await createCommittedRepository();
+  await Bun.write(`${repository}/file.txt`, 'third\n');
+  await runCommand(['git', 'add', 'file.txt'], repository);
+  const { stdout: head } = await runCommand(
+    ['git', 'rev-parse', 'HEAD'],
+    repository,
+  );
+  const { stdout: staged } = await runCommand(
+    ['git', 'diff', '--cached'],
+    repository,
+  );
+  const bin = `${binaryDirectory}/fake-${provider}-${mode}`;
+  const executable = `${bin}/${provider}`;
+  await Bun.write(
+    executable,
+    `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 if (args.includes('status')) {
   console.log(JSON.stringify({ loggedIn: process.env.FAKE_CLI_MODE !== 'auth' }));
@@ -354,41 +452,47 @@ if (${JSON.stringify(provider)} === 'codex') {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'fix: local CLI message', usage: { output_tokens: count } }));
 }
 `,
-      );
-      await runCommand(['chmod', '+x', executable], repository);
-      const result = await runSubprocess(
-        [
-          'bun',
-          binaryPath,
-          '--provider',
-          `${provider}-cli`,
-          ...(mode === 'apply' ? ['--non-interactive', '--apply'] : ['--print']),
-        ],
-        repository,
-        undefined,
-        {
-          PATH: `${bin}:${Bun.env.PATH ?? '/usr/bin:/bin'}`,
-          FAKE_CLI_MODE: mode,
-          FAKE_REPOSITORY: repository,
-        },
-      );
-      if (mode === 'auth' || mode === 'truncated') {
-        expect(result.exitCode).toBe(1);
-        expect(result.stdout).toBe('');
-      } else {
-        expect(result.exitCode).toBe(0);
-        if (mode === 'print') expect(result.stdout.trim()).toBe('fix: local CLI message');
-      }
-      if (mode === 'apply') {
-        expect((await readSubjects(repository))[0]).toBe('fix: local CLI message');
-        expect((await runCommand(['git', 'status', '--porcelain'], repository)).stdout).toBe('');
-      } else {
-        expect((await runCommand(['git', 'rev-parse', 'HEAD'], repository)).stdout).toBe(head);
-        expect((await runCommand(['git', 'diff', '--cached'], repository)).stdout).toBe(staged);
-      }
-    });
+  );
+  await runCommand(['chmod', '+x', executable], repository);
+  const result = await runSubprocess(
+    [
+      'bun',
+      binaryPath,
+      '--provider',
+      `${provider}-cli`,
+      ...(mode === 'apply' ? ['--non-interactive', '--apply'] : ['--print']),
+    ],
+    repository,
+    undefined,
+    {
+      PATH: `${bin}:${Bun.env.PATH ?? '/usr/bin:/bin'}`,
+      FAKE_CLI_MODE: mode,
+      FAKE_REPOSITORY: repository,
+    },
+  );
+  if (mode === 'auth' || mode === 'truncated') {
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('');
+  } else {
+    expect(result.exitCode).toBe(0);
+    if (mode === 'print') {
+      expect(result.stdout.trim()).toBe('fix: local CLI message');
+    }
   }
-}
+  if (mode === 'apply') {
+    expect((await readSubjects(repository))[0]).toBe('fix: local CLI message');
+    expect(
+      (await runCommand(['git', 'status', '--porcelain'], repository)).stdout,
+    ).toBe('');
+  } else {
+    expect(
+      (await runCommand(['git', 'rev-parse', 'HEAD'], repository)).stdout,
+    ).toBe(head);
+    expect(
+      (await runCommand(['git', 'diff', '--cached'], repository)).stdout,
+    ).toBe(staged);
+  }
+});
 
 test('binary contract: non-interactive generation stays read-only without --apply', async () => {
   const repository = await createCommittedRepository();
@@ -399,19 +503,33 @@ test('binary contract: non-interactive generation stays read-only without --appl
 
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain('fix: corrected message');
-  expect(await readSubjects(repository)).toEqual(['feat: second subject', 'feat: first subject']);
+  expect(await readSubjects(repository)).toEqual([
+    'feat: second subject',
+    'feat: first subject',
+  ]);
 });
 
-function runRawWithProvider(args: string[], cwd: string): Promise<BinaryResult> {
-  return runSubprocess(
-    ['bun', '--preload', providerPreload, binaryPath, '--model', 'gemini-3.7-flash', ...args],
+async function runRawWithProvider(
+  args: string[],
+  cwd: string,
+): Promise<BinaryResult> {
+  return await runSubprocess(
+    [
+      'bun',
+      '--preload',
+      providerPreload,
+      binaryPath,
+      '--model',
+      'gemini-3.7-flash',
+      ...args,
+    ],
     cwd,
     'fake-key',
   );
 }
 
 function expectNoLogsOrControlsOnStdout(stdout: string): void {
-  expect(stdout).not.toMatch(/(INFO|WARN|DEBUG):/);
+  expect(stdout).not.toMatch(/(?:INFO|WARN|DEBUG):/v);
   expect(stdout).not.toContain('\u001b[?25l');
   expect(stdout).not.toContain('\u001b[1G');
 }
@@ -445,7 +563,10 @@ test('binary contract: --print writes only generated message and stays read-only
   const result = await runBinaryWithProvider(['--print'], repository);
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toBe('fix: corrected message\n');
-  expect(await readSubjects(repository)).toEqual(['feat: second subject', 'feat: first subject']);
+  expect(await readSubjects(repository)).toEqual([
+    'feat: second subject',
+    'feat: first subject',
+  ]);
 });
 test('binary contract: --print refuses truncated generated message', async () => {
   const repository = await createCommittedRepository();
@@ -469,7 +590,15 @@ test('binary contract: --print keeps stdout empty on provider failure', async ()
   await Bun.write(`${repository}/file.txt`, 'third\n');
   await runCommand(['git', 'add', 'file.txt'], repository);
   const result = await runSubprocess(
-    ['bun', '--preload', providerPreload, binaryPath, '--model', 'gemini-3.7-flash', '--print'],
+    [
+      'bun',
+      '--preload',
+      providerPreload,
+      binaryPath,
+      '--model',
+      'gemini-3.7-flash',
+      '--print',
+    ],
     repository,
     'fake-key',
     { FAKE_CHAT_STATUS: '400' },
@@ -489,7 +618,10 @@ test('binary contract: --apply commits the staged changes with the generated mes
   await Bun.write(`${repository}/file.txt`, 'third\n');
   await runCommand(['git', 'add', 'file.txt'], repository);
 
-  const result = await runBinaryWithProvider(['--non-interactive', '--apply'], repository);
+  const result = await runBinaryWithProvider(
+    ['--non-interactive', '--apply'],
+    repository,
+  );
 
   expect(result.exitCode).toBe(0);
   expect(await readSubjects(repository)).toEqual([
@@ -497,19 +629,29 @@ test('binary contract: --apply commits the staged changes with the generated mes
     'feat: second subject',
     'feat: first subject',
   ]);
-  expect((await runCommand(['git', 'status', '--porcelain'], repository)).stdout).toBe('');
+  expect(
+    (await runCommand(['git', 'status', '--porcelain'], repository)).stdout,
+  ).toBe('');
 });
 
 test('binary contract: --commit-range --apply adds one amend! per target and skips them on a re-run', async () => {
   const repository = await createCommittedRepository();
   await Bun.write(`${repository}/file.txt`, 'third\n');
-  await runCommand(['git', 'commit', '-qam', 'feat: third subject'], repository);
+  await runCommand(
+    ['git', 'commit', '-qam', 'feat: third subject'],
+    repository,
+  );
   const [third, second, first] = (
     await runCommand(['git', 'log', '--format=%H'], repository)
   ).stdout
     .trim()
     .split('\n');
-  const args = ['--commit-range', `${first}..HEAD`, '--non-interactive', '--apply'];
+  const args = [
+    '--commit-range',
+    `${first}..HEAD`,
+    '--non-interactive',
+    '--apply',
+  ];
   const expected = [
     `amend! ${third}`,
     `amend! ${second}`,
@@ -552,29 +694,38 @@ test('binary contract: a provider failure is reported once', async () => {
 
   expect(result.exitCode).toBe(1);
   const reports =
-    `${clean(result.stdout)}\n${clean(result.stderr)}`.match(/quota exhausted/g) ?? [];
+    `${clean(result.stdout)}\n${clean(result.stderr)}`.match(
+      /quota exhausted/gv,
+    ) ?? [];
   expect(reports).toHaveLength(1);
 });
 test('binary contract: GCM_MAX_BUFFER limits Git output', async () => {
   const repository = await createCommittedRepository();
   await Bun.write(`${repository}/long-file-name.txt`, 'content\n');
   await runCommand(['git', 'add', 'long-file-name.txt'], repository);
-  const result = await runBinaryWithProvider([], repository, { GCM_MAX_BUFFER: '8' });
+  const result = await runBinaryWithProvider([], repository, {
+    GCM_MAX_BUFFER: '8',
+  });
   expect(result.exitCode).toBe(1);
   expect(`${result.stdout}${result.stderr}`).toContain('output was truncated');
 });
 
 test('binary contract: an invalid configuration value is reported without a stack trace', async () => {
-  const result = await runSubprocess([binaryPath, '--providers-list'], gitRepository, undefined, {
-    GCM_MAX_HUNKS: 'abc',
-  });
+  const result = await runSubprocess(
+    [binaryPath, '--providers-list'],
+    gitRepository,
+    undefined,
+    {
+      GCM_MAX_HUNKS: 'abc',
+    },
+  );
 
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe('');
   expect(result.stderr).toBe('gcm: Invalid GCM_MAX_HUNKS\n');
 });
 
-test('binary contract: invalid project configuration stops generation', async function () {
+test('binary contract: invalid project configuration stops generation', async () => {
   const path = `${gitRepository}/.gcmrc.json`;
   await Bun.write(path, '{"model":"untrusted"}');
   try {
@@ -625,7 +776,7 @@ test('binary contract: shows documented help', async () => {
   expect(result.stdout).not.toContain('--list-');
   const wideLines = Bun.stripANSI(result.stdout)
     .split('\n')
-    .filter(line => line.length > 80);
+    .filter((line) => line.length > 80);
   expect(wideLines).toEqual([]);
   expect(result.stdout).toContain('GCM_PROVIDER=lm-studio gcm');
   expect(result.stdout).toContain('gemini, freellmapi, lm-studio');
@@ -642,7 +793,11 @@ test('binary contract: reports no staged changes without calling Gemini', async 
 });
 
 test('binary contract: a non-TTY stderr carries no terminal styling', async () => {
-  const result = await runSubprocess([binaryPath], gitRepository, 'not-a-real-key');
+  const result = await runSubprocess(
+    [binaryPath],
+    gitRepository,
+    'not-a-real-key',
+  );
 
   expect(result.stderr).toContain('Commit Message Helper');
   expect(result.stderr).not.toMatch(ansiEscape);
@@ -669,8 +824,10 @@ test('binary contract: an unconfigured run still shows configuration', async () 
   const result = await runBinary([], excludeRepository, 'not-a-real-key');
 
   expect(result.exitCode).toBe(0);
-  expect(result.stdout).toContain('Settings: [Provider: Gemini] [Model: gemini-3.7-flash]');
-  expect(result.stderr).not.toMatch(/ERROR|Error/);
+  expect(result.stdout).toContain(
+    'Settings: [Provider: Gemini] [Model: gemini-3.7-flash]',
+  );
+  expect(result.stderr).not.toMatch(/ERROR|Error/v);
 });
 
 test('binary contract: analyses whitespace-only staged changes as is', async () => {
@@ -703,10 +860,16 @@ for (const inputCase of [
     message: 'Flag may only be specified once: --commit',
   },
   { args: ['-vx'], message: 'Unknown flag: -x' },
-  { args: ['-cv', 'sha'], message: 'Value-taking flag must be last in cluster: -cv' },
+  {
+    args: ['-cv', 'sha'],
+    message: 'Value-taking flag must be last in cluster: -cv',
+  },
 ] as const) {
   test(`binary contract: rejects ${inputCase.args.join(' ')}`, async () => {
-    expectCleanInputError(await runBinary([...inputCase.args]), inputCase.message);
+    expectCleanInputError(
+      await runBinary([...inputCase.args]),
+      inputCase.message,
+    );
   });
 }
 
@@ -733,10 +896,15 @@ test('binary contract: rejects positional arguments after --', async () => {
 });
 
 test('binary contract: excludes a dash-prefixed sentinel from the changed-file set', async () => {
-  const result = await runBinary(['--exclude', '-generated/*'], excludeRepository);
+  const result = await runBinary(
+    ['--exclude', '-generated/*'],
+    excludeRepository,
+  );
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stderr).toContain('Excluded 1 file(s) matching patterns: -generated/*');
+  expect(result.stderr).toContain(
+    'Excluded 1 file(s) matching patterns: -generated/*',
+  );
   expect(result.stderr).toContain('Found 1 file(s) changed');
   expect(result.stderr).toContain('GOOGLE_GEMINI_API_KEY');
   expect(result.stdout).not.toContain('Missing value for flag: --exclude');
@@ -760,7 +928,10 @@ test('binary contract: --debug and GCM_DEBUG_API print API traces to stderr', as
   expect(quiet.stderr).not.toContain('Gemini API request');
   expect(quiet.stderr).not.toContain('Gemini API response');
 
-  const flagged = await runBinaryWithProvider(['--print', '--debug'], repository);
+  const flagged = await runBinaryWithProvider(
+    ['--print', '--debug'],
+    repository,
+  );
   const environment = await runBinaryWithProvider(['--print'], repository, {
     GCM_DEBUG_API: 'true',
   });
@@ -789,7 +960,11 @@ test('binary contract: a missing repository is reported on stderr only', async (
 });
 
 test('binary contract: --apply without --non-interactive is reported on stderr only', async () => {
-  const result = await runBinary(['--apply'], excludeRepository, 'not-a-real-key');
+  const result = await runBinary(
+    ['--apply'],
+    excludeRepository,
+    'not-a-real-key',
+  );
 
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe('');
@@ -797,9 +972,14 @@ test('binary contract: --apply without --non-interactive is reported on stderr o
 });
 
 test('binary contract: --version ignores invalid configuration', async () => {
-  const result = await runSubprocess([binaryPath, '--version'], nonRepository, undefined, {
-    GCM_TEMP: 'abc',
-  });
+  const result = await runSubprocess(
+    [binaryPath, '--version'],
+    nonRepository,
+    undefined,
+    {
+      GCM_TEMP: 'abc',
+    },
+  );
 
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toBe(`gcm ${packageVersion}\n`);
@@ -809,8 +989,14 @@ const misconfigurations: Array<Record<string, string>> = [
   { GCM_TEMP: 'abc' },
   { GCM_PROVIDER: 'bogus' },
 ];
-for (const environment of misconfigurations) {
-  test(`binary contract: --help survives ${Object.keys(environment)[0]} misconfiguration`, async () => {
+test.each(
+  misconfigurations.map((environment) => ({
+    name: Object.keys(environment).join(),
+    environment,
+  })),
+)(
+  'binary contract: --help survives $name misconfiguration',
+  async ({ environment }) => {
     const result = await runSubprocess(
       [binaryPath, '--help'],
       nonRepository,
@@ -820,20 +1006,28 @@ for (const environment of misconfigurations) {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('--commit-range');
-  });
-}
+  },
+);
 
 test('binary contract: --apply drops a trailer the model asserted', async () => {
   const repository = await createCommittedRepository();
   await Bun.write(`${repository}/file.txt`, 'third\n');
   await runCommand(['git', 'add', 'file.txt'], repository);
 
-  const result = await runBinaryWithProvider(['--non-interactive', '--apply'], repository, {
-    FAKE_CHAT_CONTENT: 'fix: corrected message\n\nBody.\n\nCo-authored-by: Evil <evil@example.com>',
-  });
+  const result = await runBinaryWithProvider(
+    ['--non-interactive', '--apply'],
+    repository,
+    {
+      FAKE_CHAT_CONTENT:
+        'fix: corrected message\n\nBody.\n\nCo-authored-by: Evil <evil@example.com>',
+    },
+  );
 
   expect(result.exitCode).toBe(0);
-  const body = (await runCommand(['git', 'log', '-1', '--format=%B'], repository)).stdout;
+  const { stdout: body } = await runCommand(
+    ['git', 'log', '-1', '--format=%B'],
+    repository,
+  );
   expect(body).toContain('Body.');
   expect(body).not.toContain('Co-authored-by');
 });
@@ -845,11 +1039,18 @@ test('binary contract: a saved session provider selects the provider', async () 
       `${home}/.gcm-session.json`,
       JSON.stringify({ providerId: 'lm-studio', modelName: null }),
     );
-    const result = await runSubprocess([binaryPath, '--help'], nonRepository, undefined, {
-      HOME: home,
-    });
+    const result = await runSubprocess(
+      [binaryPath, '--help'],
+      nonRepository,
+      undefined,
+      {
+        HOME: home,
+      },
+    );
     expect(result.exitCode).toBe(0);
-    expect(clean(result.stdout + result.stderr)).toContain('LM Studio Commit Message Helper');
+    expect(clean(result.stdout + result.stderr)).toContain(
+      'LM Studio Commit Message Helper',
+    );
   } finally {
     await rm(home, { recursive: true, force: true });
   }

@@ -56,12 +56,12 @@ Codex/Claude CLI child had isolated Git history unless our harness captures it.
 
 ## Viable alternatives
 
-| Service | Useful capability | GCM limitation |
-| --- | --- | --- |
-| LangSmith | Dataset-backed evaluation, custom evaluators, experiment comparison and human feedback. Docs: <https://docs.smith.langchain.com/evaluation>. | Managed trace store; local fixture/CLI process remains ours. |
-| Weights & Biases Weave | Versioned evaluation datasets, scorers and evaluation calls. Docs: <https://weave-docs.wandb.ai/guides/evaluation/>. | Requires SDK integration; not Git-fixture isolation. |
-| Promptfoo | Local/CI test matrix, assertions and red-team tooling. Docs: <https://www.promptfoo.dev/docs/configuration/expected-outputs/>. | Better deterministic regression gate than online evidence/review system; custom provider can shell out, but must be written and secured. |
-| OpenAI Evals | Hosted API evaluation runs, datasets and graders. Docs: <https://platform.openai.com/docs/guides/evals>. | API-product fit, not multi-CLI harness; does not directly evaluate Codex/Claude/Kilo route behaviour. |
+| Service                | Useful capability                                                                                                                            | GCM limitation                                                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| LangSmith              | Dataset-backed evaluation, custom evaluators, experiment comparison and human feedback. Docs: <https://docs.smith.langchain.com/evaluation>. | Managed trace store; local fixture/CLI process remains ours.                                                                             |
+| Weights & Biases Weave | Versioned evaluation datasets, scorers and evaluation calls. Docs: <https://weave-docs.wandb.ai/guides/evaluation/>.                         | Requires SDK integration; not Git-fixture isolation.                                                                                     |
+| Promptfoo              | Local/CI test matrix, assertions and red-team tooling. Docs: <https://www.promptfoo.dev/docs/configuration/expected-outputs/>.               | Better deterministic regression gate than online evidence/review system; custom provider can shell out, but must be written and secured. |
+| OpenAI Evals           | Hosted API evaluation runs, datasets and graders. Docs: <https://platform.openai.com/docs/guides/evals>.                                     | API-product fit, not multi-CLI harness; does not directly evaluate Codex/Claude/Kilo route behaviour.                                    |
 
 ## Smallest defensible architecture
 

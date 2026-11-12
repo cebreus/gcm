@@ -1,60 +1,101 @@
+import type { Config } from '../gcm.config.js';
 import {
+  HTTP_STATUS_METHOD_NOT_ALLOWED,
+  HTTP_STATUS_NOT_FOUND,
+} from './constants.js';
+import {
+  type LanguageModelApiError,
+  type LanguageModelGenerateParams,
+  type LanguageModelProvider,
   createLanguageModelApiError,
   isLanguageModelApiError,
   isLanguageModelName,
-  type LanguageModelGenerateParams,
-  type LanguageModelProvider,
 } from './language-model-service.js';
+import type { Logger } from './logger.js';
+import {
+  type ModelSpec,
+  collectSortedModels,
+  readPositiveTokenCount,
+  requireDistinctModels,
+} from './model-registry.js';
 import {
   generateOpenAiCompatibleChat,
   isHeaderSafeToken,
   rejectUnsafeModelMetadata,
   requestLanguageModelJson,
 } from './openai-compatible-client.js';
-import type { Config } from '../gcm.config.js';
-import { isRecord } from './utils.js';
-import {
-  collectSortedModels,
-  readPositiveTokenCount,
-  requireDistinctModels,
-  type ModelSpec,
-} from './model-registry.js';
-import type { Logger } from './logger.js';
 import { parseProviderBaseUrl, withRequestTrace } from './provider-http.js';
+import { isRecord } from './utils.js';
 
 const DEFAULT_FREELLMAPI_MODEL = 'auto';
+const MODEL_CATALOGUE_TIMEOUT_MS = 5_000;
+const NON_CHAT_MODEL_PATTERN =
+  /(?:^|[\/._\-])(?:dall-e|embed(?:ding)?|moderation|tts|whisper)(?:[\/._\-]|$)/iv;
+const TRAILING_SLASH_PATTERN = /\/+$/v;
+const NON_CHAT_MODEL_TYPES = new Set([
+  'audio',
+  'embedding',
+  'image',
+  'moderation',
+  'rerank',
+]);
 
 function parseModelId(entry: unknown): string | null {
-  if (typeof entry === 'string' && isLanguageModelName(entry)) return entry;
-  if (!isRecord(entry)) return null;
+  if (typeof entry === 'string' && isLanguageModelName(entry)) {
+    return entry;
+  }
+  if (!isRecord(entry)) {
+    return null;
+  }
   const rawId = entry.id ?? entry.name ?? entry.key;
-  if (typeof rawId === 'string' && isLanguageModelName(rawId)) return rawId;
+  if (typeof rawId === 'string' && isLanguageModelName(rawId)) {
+    return rawId;
+  }
   return null;
 }
 
 function parseModel(entry: unknown): ModelSpec | null {
   const name = parseModelId(entry);
-  if (!name) return null;
+  if (name === null) {
+    return null;
+  }
   const record = isRecord(entry) ? entry : {};
-  const type = typeof record.type === 'string' ? record.type.toLowerCase() : '';
-  if (record.available === false) return null;
-  if (['audio', 'embedding', 'image', 'moderation', 'rerank'].includes(type)) return null;
-  if (/(^|[/._-])(dall-e|embed(?:ding)?|moderation|tts|whisper)([/._-]|$)/i.test(name)) return null;
+  if (!isChatModelRecord(record, name)) {
+    return null;
+  }
   const label =
-    typeof record.display_name === 'string'
-      ? record.display_name
-      : typeof record.label === 'string'
-        ? record.label
-        : name;
-  if (!isLanguageModelName(label)) return null;
+    [record.display_name, record.label].find(
+      (value): value is string => typeof value === 'string',
+    ) ?? name;
+  if (!isLanguageModelName(label)) {
+    return null;
+  }
   const contextWindowTokens =
-    readPositiveTokenCount(record.context_window) ?? readPositiveTokenCount(record.context_length);
-  if (contextWindowTokens === null) return null;
-  return { name, label, limits: { kind: 'shared-context', contextWindowTokens } };
+    readPositiveTokenCount(record.context_window) ??
+    readPositiveTokenCount(record.context_length);
+  if (contextWindowTokens === null) {
+    return null;
+  }
+  return {
+    name,
+    label,
+    limits: { kind: 'shared-context', contextWindowTokens },
+  };
+}
+
+function isChatModelRecord(
+  record: Record<string, unknown>,
+  name: string,
+): boolean {
+  const type = typeof record.type === 'string' ? record.type.toLowerCase() : '';
+  if (record.available === false) {
+    return false;
+  }
+  return !NON_CHAT_MODEL_TYPES.has(type) && !NON_CHAT_MODEL_PATTERN.test(name);
 }
 
 function resolveChatEndpoint(url: URL): URL {
-  const pathname = url.pathname.replace(/\/+$/, '');
+  const pathname = url.pathname.replace(TRAILING_SLASH_PATTERN, '');
   if (
     pathname.endsWith('/chat/completions') ||
     pathname.endsWith('/chat') ||
@@ -69,11 +110,13 @@ function resolveChatEndpoint(url: URL): URL {
 }
 
 function resolveModelCandidates(url: URL): URL[] {
-  const pathname = url.pathname.replace(/\/+$/, '');
+  const pathname = url.pathname.replace(TRAILING_SLASH_PATTERN, '');
   const candidates: URL[] = [];
 
   if (pathname.endsWith('/chat/completions')) {
-    candidates.push(new URL(`${pathname.slice(0, -'/chat/completions'.length)}/models`, url));
+    candidates.push(
+      new URL(`${pathname.slice(0, -'/chat/completions'.length)}/models`, url),
+    );
     candidates.push(new URL('/v1/models', url));
     candidates.push(new URL('/models', url));
   } else if (pathname.endsWith('/v1')) {
@@ -92,14 +135,19 @@ function resolveModelCandidates(url: URL): URL[] {
   }
 
   const seen = new Set<string>();
-  return candidates.filter(candidate => {
-    if (seen.has(candidate.href)) return false;
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate.href)) {
+      return false;
+    }
     seen.add(candidate.href);
     return true;
   });
 }
 
-function candidateCatalogueError(message: string, metadata: { kind?: 'no-models' } = {}) {
+function candidateCatalogueError(
+  message: string,
+  metadata: { kind?: 'no-models' } = {},
+): LanguageModelApiError {
   return createLanguageModelApiError(message, {
     ...metadata,
     candidateFailure: true,
@@ -116,28 +164,25 @@ async function discoverModels(
 
   for (const modelsUrl of candidates) {
     try {
+      // eslint-disable-next-line no-await-in-loop -- model endpoints are ordered fallbacks and stop after first success
       const payload = await requestLanguageModelJson({
         providerLabel: 'FreeLLMAPI',
         url: modelsUrl,
-        timeoutMs: 5_000,
+        timeoutMs: MODEL_CATALOGUE_TIMEOUT_MS,
         token,
-        init: token ? { headers: { authorization: `Bearer ${token}` } } : undefined,
+        init:
+          token === undefined
+            ? undefined
+            : { headers: { authorization: `Bearer ${token}` } },
         config,
       });
 
-      let rawList: unknown[] = [];
-      if (Array.isArray(payload)) {
-        rawList = payload;
-      } else if (isRecord(payload)) {
-        if (Array.isArray(payload.data)) {
-          rawList = payload.data;
-        } else if (Array.isArray(payload.models)) {
-          rawList = payload.models;
-        }
-      }
+      const rawList = readModelList(payload);
 
       for (const entry of rawList) {
-        if (!isRecord(entry)) continue;
+        if (!isRecord(entry)) {
+          continue;
+        }
         rejectUnsafeModelMetadata(
           [entry.id, entry.name, entry.key, entry.label, entry.display_name],
           token,
@@ -151,17 +196,42 @@ async function discoverModels(
       return { models };
     } catch (error) {
       if (isLanguageModelApiError(error)) {
-        const candidateFailure =
-          error.metadata.candidateFailure === true ||
-          error.metadata.status === 404 ||
-          error.metadata.status === 405;
-        if (!candidateFailure) throw error;
+        if (isCandidateFailure(error)) {
+          lastError = error;
+        } else {
+          throw error;
+        }
+      } else {
+        lastError = error;
       }
-      lastError = error;
     }
   }
 
-  throw lastError;
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error('FreeLLMAPI model discovery failed', { cause: lastError });
+}
+
+function isCandidateFailure(error: LanguageModelApiError): boolean {
+  return (
+    error.metadata.candidateFailure === true ||
+    error.metadata.status === HTTP_STATUS_NOT_FOUND ||
+    error.metadata.status === HTTP_STATUS_METHOD_NOT_ALLOWED
+  );
+}
+
+function readModelList(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  if (!isRecord(payload)) {
+    return [];
+  }
+  if (Array.isArray(payload.data)) {
+    return payload.data;
+  }
+  return Array.isArray(payload.models) ? payload.models : [];
 }
 
 export async function createFreeLlmApiProvider(options: {
@@ -176,35 +246,49 @@ export async function createFreeLlmApiProvider(options: {
     allowHttps: true,
     loopbackError: 'FreeLLMAPI URL must use HTTPS or a loopback hostname',
   });
-  if (options.token && !isHeaderSafeToken(options.token)) {
+  if (options.token !== undefined && !isHeaderSafeToken(options.token)) {
     throw createLanguageModelApiError('Invalid FreeLLMAPI API token');
   }
 
-  const config = options.config;
+  const { config } = options;
   const fetchImpl =
-    options.logger && (options.debugApi === true || config.DEBUG_API)
-      ? withRequestTrace(options.logger, globalThis.fetch, 'FreeLLMAPI', options.token)
+    options.logger !== undefined &&
+    (options.debugApi === true || config.DEBUG_API)
+      ? withRequestTrace(
+          options.logger,
+          globalThis.fetch,
+          'FreeLLMAPI',
+          options.token,
+        )
       : undefined;
   const { models } = await discoverModels(url, config, options.token);
 
-  if (options.model && !models.some(model => model.name === options.model)) {
+  if (
+    options.model !== undefined &&
+    !models.some((model) => model.name === options.model)
+  ) {
     throw new Error('Configured FreeLLMAPI model is not available');
   }
 
-  const byName = new Map(models.map(model => [model.name, model]));
+  const byName = new Map(models.map((model) => [model.name, model]));
 
   const defaultModel = options.model ?? DEFAULT_FREELLMAPI_MODEL;
-  if (!models.some(model => model.name === defaultModel)) {
+  if (!models.some((model) => model.name === defaultModel)) {
     throw createLanguageModelApiError(
       'FreeLLMAPI auto model is unavailable or lacks context metadata',
     );
   }
 
-  async function generateWithModel(params: LanguageModelGenerateParams, modelName: string) {
+  async function generateWithModel(
+    params: LanguageModelGenerateParams,
+    modelName: string,
+  ): ReturnType<typeof generateOpenAiCompatibleChat> {
     const model = byName.get(modelName);
-    if (!model) throw new Error('Unknown FreeLLMAPI model');
+    if (model === undefined) {
+      throw new Error('Unknown FreeLLMAPI model');
+    }
 
-    return generateOpenAiCompatibleChat({
+    return await generateOpenAiCompatibleChat({
       providerLabel: 'FreeLLMAPI',
       url: resolveChatEndpoint(url),
       token: options.token,
@@ -214,8 +298,10 @@ export async function createFreeLlmApiProvider(options: {
     });
   }
 
-  function generate(params: LanguageModelGenerateParams) {
-    return generateWithModel(params, params.modelName);
+  async function generate(
+    params: LanguageModelGenerateParams,
+  ): ReturnType<typeof generateOpenAiCompatibleChat> {
+    return await generateWithModel(params, params.modelName);
   }
 
   return {
@@ -226,6 +312,6 @@ export async function createFreeLlmApiProvider(options: {
     service: {
       generate,
     },
-    models: async () => models,
+    models: async () => await Promise.resolve(models),
   };
 }

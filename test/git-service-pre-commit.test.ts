@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
-import { createGitService } from '../src/services/git-service.js';
+
 import type { Logger } from '../src/logger.js';
+import { createGitService } from '../src/services/git-service.js';
 
 const decoder = new TextDecoder();
 
@@ -32,15 +33,19 @@ async function runCommand(args: string[]): Promise<void> {
     new Response(child.stdout).arrayBuffer(),
     new Response(child.stderr).arrayBuffer(),
   ]);
-  if (exitCode !== 0) throw new Error(decoder.decode(stderr));
+  if (exitCode !== 0) {
+    throw new Error(decoder.decode(stderr));
+  }
 }
 
-test('git service: warns when a pre-commit hook stages an extra path', async function () {
+test('git service: warns when a pre-commit hook stages an extra path', async () => {
   const repository = `/tmp/gcm-pre-commit-${crypto.randomUUID()}`;
   const warnings: string[] = [];
   const logger: Logger = {
     log: function (level, message) {
-      if (level === 'warn') warnings.push(message);
+      if (level === 'warn') {
+        warnings.push(message);
+      }
     },
   };
 
@@ -67,13 +72,18 @@ test('git service: warns when a pre-commit hook stages an extra path', async fun
       },
     });
     const staged = await service.retrieveStagedChanges(null, logger);
-    if (!staged?.snapshot) throw new Error('Expected staged snapshot.');
+    if (staged?.snapshot === undefined) {
+      throw new Error('Expected staged snapshot.');
+    }
 
-    await service.commitChanges('feat: analysed change', logger, { snapshot: staged.snapshot });
+    await service.commitChanges('feat: analysed change', logger, {
+      snapshot: staged.snapshot,
+    });
 
-    expect((await runGit(repository, ['show', '--format=', '--name-only', 'HEAD'])).text).toContain(
-      'hook-added.txt',
-    );
+    expect(
+      (await runGit(repository, ['show', '--format=', '--name-only', 'HEAD']))
+        .text,
+    ).toContain('hook-added.txt');
     expect(warnings).toEqual([
       'Commit completed, but pre-commit hooks changed the committed tree after analysis. Paths that differ from the analysed snapshot: "hook-added.txt".',
     ]);
@@ -82,7 +92,7 @@ test('git service: warns when a pre-commit hook stages an extra path', async fun
   }
 });
 
-test('git service: rolls back a hook-modified amend! commit and keeps its files staged', async function () {
+test('git service: rolls back a hook-modified amend! commit and keeps its files staged', async () => {
   const repository = `/tmp/gcm-reword-hook-${crypto.randomUUID()}`;
   try {
     await runCommand(['mkdir', '-p', repository]);
@@ -104,16 +114,20 @@ test('git service: rolls back a hook-modified amend! commit and keeps its files 
       },
     });
     const target = await service.inspectCommitTarget('HEAD', null);
-    const originalHead = (await runGit(repository, ['rev-parse', 'HEAD'])).text.trim();
+    const originalHead = (
+      await runGit(repository, ['rev-parse', 'HEAD'])
+    ).text.trim();
 
-    await expect(service.rewordCommit(target, 'fix: replacement', null)).rejects.toThrow(
-      'amend! commit contains file changes',
-    );
+    await expect(
+      service.rewordCommit(target, 'fix: replacement', null),
+    ).rejects.toThrow('amend! commit contains file changes');
 
-    expect((await runGit(repository, ['rev-parse', 'HEAD'])).text.trim()).toBe(originalHead);
-    expect((await runGit(repository, ['diff', '--cached', '--name-only'])).text).toContain(
-      'hook-added.txt',
+    expect((await runGit(repository, ['rev-parse', 'HEAD'])).text.trim()).toBe(
+      originalHead,
     );
+    expect(
+      (await runGit(repository, ['diff', '--cached', '--name-only'])).text,
+    ).toContain('hook-added.txt');
   } finally {
     await runCommand(['rm', '-rf', repository]);
   }
@@ -129,24 +143,31 @@ async function createRepository(repository: string): Promise<void> {
   await runGit(repository, ['commit', '-qm', 'chore: initial']);
 }
 
-test('git service: treats a commit as published when configured remotes have no tracking refs', async function () {
+test('git service: treats a commit as published when configured remotes have no tracking refs', async () => {
   const repository = `/tmp/gcm-unfetched-remote-${crypto.randomUUID()}`;
   try {
     await createRepository(repository);
-    await runGit(repository, ['remote', 'add', 'origin', 'https://example.test/repository.git']);
+    await runGit(repository, [
+      'remote',
+      'add',
+      'origin',
+      'https://example.test/repository.git',
+    ]);
     const service = createGitService({
       gitCommandRunner: async function (args) {
         return await runGit(repository, args);
       },
     });
 
-    expect((await service.inspectCommitTarget('HEAD', null)).isPublished).toBe(true);
+    expect((await service.inspectCommitTarget('HEAD', null)).isPublished).toBe(
+      true,
+    );
   } finally {
     await runCommand(['rm', '-rf', repository]);
   }
 });
 
-test('git service: treats a commit as unpublished when the repository has no remotes', async function () {
+test('git service: treats a commit as unpublished when the repository has no remotes', async () => {
   const repository = `/tmp/gcm-local-remote-${crypto.randomUUID()}`;
   try {
     await createRepository(repository);
@@ -156,13 +177,15 @@ test('git service: treats a commit as unpublished when the repository has no rem
       },
     });
 
-    expect((await service.inspectCommitTarget('HEAD', null)).isPublished).toBe(false);
+    expect((await service.inspectCommitTarget('HEAD', null)).isPublished).toBe(
+      false,
+    );
   } finally {
     await runCommand(['rm', '-rf', repository]);
   }
 });
 
-test('git service: inspects independent commit facts concurrently', async function () {
+test('git service: inspects independent commit facts concurrently', async () => {
   let active = 0;
   let peak = 0;
   const service = createGitService({
@@ -172,19 +195,30 @@ test('git service: inspects independent commit facts concurrently', async functi
       await Bun.sleep(1);
       active -= 1;
       const command = args.join(' ');
-      if (command === 'rev-parse --verify target^{commit}')
+      if (command === 'rev-parse --verify target^{commit}') {
         return { text: 'target\n', truncated: false };
-      if (command === 'rev-parse --verify HEAD^{commit}')
+      }
+      if (command === 'rev-parse --verify HEAD^{commit}') {
         return { text: 'head\n', truncated: false };
-      if (command === 'log -1 --format=%s target')
+      }
+      if (command === 'log -1 --format=%s target') {
         return { text: 'feat: target\n', truncated: false };
-      if (command === 'log --format=%s target^')
+      }
+      if (command === 'log --format=%s target^') {
         return { text: 'chore: parent\n', truncated: false };
-      if (command === 'branch --remotes --contains target') return { text: '', truncated: false };
-      if (command === 'remote') return { text: '', truncated: false };
-      if (command === 'merge-base HEAD target') return { text: 'target\n', truncated: false };
-      if (command === 'symbolic-ref --quiet HEAD')
+      }
+      if (command === 'branch --remotes --contains target') {
+        return { text: '', truncated: false };
+      }
+      if (command === 'remote') {
+        return { text: '', truncated: false };
+      }
+      if (command === 'merge-base HEAD target') {
+        return { text: 'target\n', truncated: false };
+      }
+      if (command === 'symbolic-ref --quiet HEAD') {
         return { text: 'refs/heads/main\n', truncated: false };
+      }
       throw new Error(`Unexpected command: ${command}`);
     },
   });

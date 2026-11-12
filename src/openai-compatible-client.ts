@@ -1,35 +1,63 @@
-import {
-  createLanguageModelApiError,
-  type LanguageModelGenerateParams,
-  type LanguageModelResponse,
-} from './language-model-service.js';
-import { isRecord, redactSensitiveTextForPrompt, sanitizeTerminalText } from './utils.js';
 import type { Config } from '../gcm.config.js';
 import {
+  type LanguageModelGenerateParams,
+  type LanguageModelResponse,
+  createLanguageModelApiError,
+} from './language-model-service.js';
+import {
+  type ProviderFetch,
+  ResponseBodyTooLargeError,
   isRequestTimeout,
   requestProviderText,
-  ResponseBodyTooLargeError,
-  type ProviderFetch,
 } from './provider-http.js';
+import {
+  hasText,
+  isRecord,
+  redactSensitiveTextForPrompt,
+  sanitizeTerminalText,
+} from './utils.js';
 
 const MAX_ERROR_SNIPPET_BYTES = 4_096;
+const LANGUAGE_MODEL_REQUEST_TIMEOUT_MS = 90_000;
+const MIN_HEADER_CHARACTER_CODE = 0x21;
+const MAX_HEADER_CHARACTER_CODE = 0x7e;
 
 function readNonNegativeInteger(value: unknown): number | null {
-  return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null;
+  return Number.isSafeInteger(value) && Number(value) >= 0
+    ? Number(value)
+    : null;
 }
 
 function redactToken(text: string, token?: string): string {
-  return token ? text.split(token).join('[REDACTED-TOKEN]') : text;
+  return hasText(token) ? text.split(token).join('[REDACTED-TOKEN]') : text;
 }
 
 export function isHeaderSafeToken(token: string): boolean {
-  return /^[\x21-\x7E]+$/.test(token);
+  if (token.length === 0) {
+    return false;
+  }
+  for (let index = 0; index < token.length; index += 1) {
+    const characterCode = token.charCodeAt(index);
+    if (
+      characterCode < MIN_HEADER_CHARACTER_CODE ||
+      characterCode > MAX_HEADER_CHARACTER_CODE
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function sanitizeLanguageModelErrorText(text: string, token?: string): string {
   return sanitizeTerminalText(redactToken(text, token))
-    .replace(/(["'](?:password|token|api[_-]?key)["']\s*:\s*)["'][^"']*["']/gi, '$1"[REDACTED]"')
-    .replace(/\b(password|token|api[_-]?key)\s*[:=]\s*[^\s,}&]+/gi, '$1=[REDACTED]');
+    .replace(
+      /(?<secretPrefix>["'](?:password|token|api[_\-]?key)["']\s*:\s*)["'][^"']*["']/giv,
+      '$<secretPrefix>"[REDACTED]"',
+    )
+    .replace(
+      /\b(?<secretName>password|token|api[_\-]?key)\s*[:=]\s*(?:(?!\s|,|\}|&).)+/giv,
+      '$<secretName>=[REDACTED]',
+    );
 }
 
 export function rejectUnsafeModelMetadata(
@@ -38,14 +66,19 @@ export function rejectUnsafeModelMetadata(
   message: string,
 ): void {
   for (const value of values) {
-    if (typeof value === 'string' && sanitizeLanguageModelErrorText(value, token) !== value) {
+    if (
+      typeof value === 'string' &&
+      sanitizeLanguageModelErrorText(value, token) !== value
+    ) {
       throw createLanguageModelApiError(message, { kind: 'invalid-model' });
     }
   }
 }
 
 function requestFailureMessage(providerLabel: string, error: unknown): string {
-  if (isRequestTimeout(error)) return `${providerLabel} request timed out`;
+  if (isRequestTimeout(error)) {
+    return `${providerLabel} request timed out`;
+  }
   if (error instanceof ResponseBodyTooLargeError) {
     return `${providerLabel} response body is too large`;
   }
@@ -62,31 +95,31 @@ export async function requestLanguageModelJson(params: {
   config: Pick<Config, 'MAX_RETRIES' | 'RETRY_BASE_MS' | 'RETRY_MAX_MS'>;
 }): Promise<unknown> {
   const { providerLabel, url, init, timeoutMs, token } = params;
-  let result;
-  try {
-    result = await requestProviderText({
-      url,
-      init,
-      timeoutMs,
-      retry: {
-        maxRetries: params.config.MAX_RETRIES,
-        retryBaseMs: params.config.RETRY_BASE_MS,
-        retryMaxMs: params.config.RETRY_MAX_MS,
-      },
-      retryNetworkErrors: (init?.method ?? 'GET').toUpperCase() === 'GET',
-      fetchImpl: params.fetchImpl,
-    });
-  } catch (error) {
+  const result = await requestProviderText({
+    url,
+    init,
+    timeoutMs,
+    retry: {
+      maxRetries: params.config.MAX_RETRIES,
+      retryBaseMs: params.config.RETRY_BASE_MS,
+      retryMaxMs: params.config.RETRY_MAX_MS,
+    },
+    retryNetworkErrors: (init?.method ?? 'GET').toUpperCase() === 'GET',
+    fetchImpl: params.fetchImpl,
+  }).catch((error: unknown) => {
     const kind = isRequestTimeout(error)
       ? { kind: 'timeout' }
       : error instanceof ResponseBodyTooLargeError
         ? {}
         : { kind: 'connection' };
-    throw createLanguageModelApiError(requestFailureMessage(providerLabel, error), {
-      availability: error instanceof Error && error.name === 'TimeoutError',
-      ...kind,
-    });
-  }
+    throw createLanguageModelApiError(
+      requestFailureMessage(providerLabel, error),
+      {
+        availability: error instanceof Error && error.name === 'TimeoutError',
+        ...kind,
+      },
+    );
+  });
   const redacted = sanitizeLanguageModelErrorText(result.body, token);
   const snippet = new TextDecoder().decode(
     new TextEncoder().encode(redacted).slice(0, MAX_ERROR_SNIPPET_BYTES),
@@ -100,7 +133,10 @@ export async function requestLanguageModelJson(params: {
   try {
     return JSON.parse(result.body) as unknown;
   } catch {
-    throw createLanguageModelApiError(`${providerLabel} returned malformed JSON`, { snippet });
+    throw createLanguageModelApiError(
+      `${providerLabel} returned malformed JSON`,
+      { snippet },
+    );
   }
 }
 
@@ -111,7 +147,66 @@ export async function requestLanguageModelJson(params: {
 const TRUNCATION_FINISH_REASONS = new Set(['length', 'max_tokens']);
 
 function isTruncatedFinishReason(value: unknown): boolean {
-  return typeof value === 'string' && TRUNCATION_FINISH_REASONS.has(value.toLowerCase());
+  return (
+    typeof value === 'string' &&
+    TRUNCATION_FINISH_REASONS.has(value.toLowerCase())
+  );
+}
+
+interface ReadChatResponseOptions {
+  payload: unknown;
+  providerLabel: string;
+  token: string | undefined;
+  maxOutputTokens: number;
+}
+
+interface ChatChoice {
+  messageContent: string;
+  finishReason: unknown;
+}
+
+function readChatChoice(
+  payload: Record<string, unknown>,
+  providerLabel: string,
+): ChatChoice {
+  if (!Array.isArray(payload.choices)) {
+    throw createLanguageModelApiError(`Invalid ${providerLabel} response`);
+  }
+  const choices: unknown[] = payload.choices;
+  const choice = choices.at(0);
+  if (
+    !isRecord(choice) ||
+    !isRecord(choice.message) ||
+    typeof choice.message.content !== 'string'
+  ) {
+    throw createLanguageModelApiError(`Invalid ${providerLabel} response`);
+  }
+  return {
+    messageContent: choice.message.content,
+    finishReason: choice.finish_reason,
+  };
+}
+
+function readChatResponse(
+  options: ReadChatResponseOptions,
+): LanguageModelResponse {
+  const { payload, providerLabel, token, maxOutputTokens } = options;
+  if (!isRecord(payload)) {
+    throw createLanguageModelApiError(`Invalid ${providerLabel} response`);
+  }
+  const choice = readChatChoice(payload, providerLabel);
+  const usage = isRecord(payload.usage) ? payload.usage : {};
+  const outputTokens = readNonNegativeInteger(usage.completion_tokens);
+  return {
+    text: sanitizeTerminalText(redactToken(choice.messageContent, token)),
+    usage: {
+      promptTokens: readNonNegativeInteger(usage.prompt_tokens) ?? undefined,
+      outputTokens: outputTokens ?? undefined,
+    },
+    truncated:
+      isTruncatedFinishReason(choice.finishReason) ||
+      (outputTokens !== null && outputTokens >= maxOutputTokens),
+  };
 }
 
 export async function generateOpenAiCompatibleChat(options: {
@@ -120,15 +215,20 @@ export async function generateOpenAiCompatibleChat(options: {
   token?: string;
   params: LanguageModelGenerateParams;
   fetchImpl?: ProviderFetch;
-  config: Pick<Config, 'TEMP' | 'MAX_RETRIES' | 'RETRY_BASE_MS' | 'RETRY_MAX_MS'>;
+  config: Pick<
+    Config,
+    'TEMP' | 'MAX_RETRIES' | 'RETRY_BASE_MS' | 'RETRY_MAX_MS'
+  >;
 }): Promise<LanguageModelResponse | null> {
   const { providerLabel, params } = options;
   const headers = new Headers({ 'content-type': 'application/json' });
-  if (options.token) headers.set('authorization', `Bearer ${options.token}`);
+  if (hasText(options.token)) {
+    headers.set('authorization', `Bearer ${options.token}`);
+  }
   const payload = await requestLanguageModelJson({
     providerLabel,
     url: options.url,
-    timeoutMs: 90_000,
+    timeoutMs: LANGUAGE_MODEL_REQUEST_TIMEOUT_MS,
     token: options.token,
     fetchImpl: options.fetchImpl,
     config: options.config,
@@ -140,11 +240,15 @@ export async function generateOpenAiCompatibleChat(options: {
         messages: [
           {
             role: 'system',
-            content: redactSensitiveTextForPrompt(redactToken(params.systemPrompt, options.token)),
+            content: redactSensitiveTextForPrompt(
+              redactToken(params.systemPrompt, options.token),
+            ),
           },
           {
             role: 'user',
-            content: redactSensitiveTextForPrompt(redactToken(params.promptContext, options.token)),
+            content: redactSensitiveTextForPrompt(
+              redactToken(params.promptContext, options.token),
+            ),
           },
         ],
         temperature: options.config.TEMP,
@@ -153,27 +257,10 @@ export async function generateOpenAiCompatibleChat(options: {
       }),
     },
   });
-  if (!isRecord(payload) || !Array.isArray(payload.choices)) {
-    throw createLanguageModelApiError(`Invalid ${providerLabel} response`);
-  }
-  const choices: unknown[] = payload.choices;
-  const choice = choices[0];
-  if (
-    !isRecord(choice) ||
-    !isRecord(choice.message) ||
-    typeof choice.message.content !== 'string'
-  ) {
-    throw createLanguageModelApiError(`Invalid ${providerLabel} response`);
-  }
-  const usage = isRecord(payload.usage) ? payload.usage : {};
-  const outputTokens = readNonNegativeInteger(usage.completion_tokens);
-  const spentWholeOutputCap = outputTokens !== null && outputTokens >= params.maxOutputTokens;
-  return {
-    text: sanitizeTerminalText(redactToken(choice.message.content, options.token)),
-    usage: {
-      promptTokens: readNonNegativeInteger(usage.prompt_tokens) ?? undefined,
-      outputTokens: outputTokens ?? undefined,
-    },
-    truncated: isTruncatedFinishReason(choice.finish_reason) || spentWholeOutputCap,
-  };
+  return readChatResponse({
+    payload,
+    providerLabel,
+    token: options.token,
+    maxOutputTokens: params.maxOutputTokens,
+  });
 }

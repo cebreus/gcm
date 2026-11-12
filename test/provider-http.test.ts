@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
+
 import type { Logger } from '../src/logger.js';
 import { withRequestTrace } from '../src/provider-http.js';
 
 test('provider-http: trace redacts a provider token echoed in a body', async () => {
   const token = 'opaque-value-123';
+  // eslint-disable-next-line no-useless-concat -- fake token stays split so secret scanners skip this fixture
   const gitlabToken = 'glpat-' + 'aB3dE5gH7jK9mN1pQ3rS5';
   const logged: string[] = [];
   const logger: Logger = {
@@ -13,9 +15,11 @@ test('provider-http: trace redacts a provider token echoed in a body', async () 
   };
   const traced = withRequestTrace(
     logger,
-    () =>
-      Promise.resolve(
-        new Response(JSON.stringify({ echoed: `Bearer ${token}`, text: gitlabToken })),
+    async () =>
+      await Promise.resolve(
+        new Response(
+          JSON.stringify({ echoed: `Bearer ${token}`, text: gitlabToken }),
+        ),
       ),
     'Fake',
     token,

@@ -1,14 +1,15 @@
 import { expect, spyOn, test } from 'bun:test';
+
+import { loadConfig } from '../gcm.config.js';
 import {
   generateOpenAiCompatibleChat,
   requestLanguageModelJson,
 } from '../src/openai-compatible-client.js';
 import { requestProviderText } from '../src/provider-http.js';
-import { loadConfig } from '../gcm.config.js';
 
 const retry = { maxRetries: 2, retryBaseMs: 10, retryMaxMs: 100 };
 
-test('chat generation gives slow models a 90-second request deadline', async function () {
+test('chat generation gives slow models a 90-second request deadline', async () => {
   const timeout = spyOn(AbortSignal, 'timeout');
   try {
     await generateOpenAiCompatibleChat({
@@ -25,7 +26,12 @@ test('chat generation gives slow models a 90-second request deadline', async fun
       fetchImpl: async function (_input, init) {
         expect(init?.signal?.aborted).toBe(false);
         return Response.json({
-          choices: [{ message: { content: 'fix: handle slow models' }, finish_reason: 'stop' }],
+          choices: [
+            {
+              message: { content: 'fix: handle slow models' },
+              finish_reason: 'stop',
+            },
+          ],
         });
       },
     });
@@ -35,7 +41,7 @@ test('chat generation gives slow models a 90-second request deadline', async fun
   }
 });
 
-test('provider transport retries transient HTTP failures', async function () {
+test('provider transport retries transient HTTP failures', async () => {
   let calls = 0;
   const delays: number[] = [];
   const result = await requestProviderText({
@@ -50,7 +56,9 @@ test('provider transport retries transient HTTP failures', async function () {
       calls += 1;
       if (calls === 1) {
         return Response.json(
-          { error: { details: [{ '@type': 'RetryInfo', retryDelay: '0.02s' }] } },
+          {
+            error: { details: [{ '@type': 'RetryInfo', retryDelay: '0.02s' }] },
+          },
           { status: 503, headers: { 'retry-after': '0.01' } },
         );
       }
@@ -63,7 +71,7 @@ test('provider transport retries transient HTTP failures', async function () {
   expect(delays).toEqual([10]);
 });
 
-test('provider transport retries network failures within its bound', async function () {
+test('provider transport retries network failures within its bound', async () => {
   let calls = 0;
   const result = await requestProviderText({
     url: new URL('https://example.test/v1/models'),
@@ -73,7 +81,9 @@ test('provider transport retries network failures within its bound', async funct
     sleep: async function () {},
     fetchImpl: async function () {
       calls += 1;
-      if (calls < 3) throw new TypeError('fetch failed');
+      if (calls < 3) {
+        throw new TypeError('fetch failed');
+      }
       return Response.json({ ok: true });
     },
   });
@@ -82,7 +92,7 @@ test('provider transport retries network failures within its bound', async funct
   expect(calls).toBe(3);
 });
 
-test('OpenAI-compatible transport does not retry permanent HTTP failures', async function () {
+test('OpenAI-compatible transport does not retry permanent HTTP failures', async () => {
   let calls = 0;
   await expect(
     requestLanguageModelJson({
@@ -99,7 +109,7 @@ test('OpenAI-compatible transport does not retry permanent HTTP failures', async
   expect(calls).toBe(1);
 });
 
-test('OpenAI-compatible transport does not retry ambiguous gateway failures for POST', async function () {
+test('OpenAI-compatible transport does not retry ambiguous gateway failures for POST', async () => {
   let calls = 0;
   await expect(
     requestLanguageModelJson({
@@ -117,7 +127,7 @@ test('OpenAI-compatible transport does not retry ambiguous gateway failures for 
   expect(calls).toBe(1);
 });
 
-test('provider transport aborts during retry backoff', async function () {
+test('provider transport aborts during retry backoff', async () => {
   const controller = new AbortController();
   let calls = 0;
   const startedAt = performance.now();
@@ -129,7 +139,7 @@ test('provider transport aborts during retry backoff', async function () {
     retryNetworkErrors: true,
     fetchImpl: async function () {
       calls += 1;
-      setTimeout(function () {
+      setTimeout(() => {
         controller.abort(new DOMException('cancelled', 'AbortError'));
       }, 0);
       return new Response('retry later', { status: 503 });
@@ -141,7 +151,7 @@ test('provider transport aborts during retry backoff', async function () {
   expect(performance.now() - startedAt).toBeLessThan(500);
 });
 
-test('provider transport combines caller cancellation with its timeout', async function () {
+test('provider transport combines caller cancellation with its timeout', async () => {
   const controller = new AbortController();
   controller.abort(new DOMException('cancelled', 'AbortError'));
   let receivedAborted = false;
@@ -157,7 +167,11 @@ test('provider transport combines caller cancellation with its timeout', async f
         const signal = init?.signal;
         receivedAborted = signal?.aborted ?? false;
         receivedCallerSignal = signal === controller.signal;
-        if (signal?.aborted) throw signal.reason;
+        if (signal?.aborted === true) {
+          throw signal.reason instanceof Error
+            ? signal.reason
+            : new Error('Request aborted');
+        }
         return Response.json({ ok: true });
       },
     }),
@@ -166,7 +180,7 @@ test('provider transport combines caller cancellation with its timeout', async f
   expect(receivedAborted).toBe(true);
 });
 
-test('chat generation sends the prompt without URL passwords or env secrets', async function () {
+test('chat generation sends the prompt without URL passwords or env secrets', async () => {
   let sent = '';
   await generateOpenAiCompatibleChat({
     providerLabel: 'Test provider',
@@ -181,9 +195,11 @@ test('chat generation sends the prompt without URL passwords or env secrets', as
       maxOutputTokens: 100,
     },
     fetchImpl: async function (_input, init) {
-      sent = String(init?.body);
+      sent = typeof init?.body === 'string' ? init.body : '';
       return Response.json({
-        choices: [{ message: { content: 'fix: redact' }, finish_reason: 'stop' }],
+        choices: [
+          { message: { content: 'fix: redact' }, finish_reason: 'stop' },
+        ],
       });
     },
   });
@@ -192,8 +208,11 @@ test('chat generation sends the prompt without URL passwords or env secrets', as
   expect(sent).not.toContain('wJalrXUtnFEMI');
 });
 
-async function generateReply(content: string, token?: string) {
-  return generateOpenAiCompatibleChat({
+async function generateReply(
+  content: string,
+  token?: string,
+): Promise<Awaited<ReturnType<typeof generateOpenAiCompatibleChat>>> {
+  return await generateOpenAiCompatibleChat({
     providerLabel: 'Test provider',
     url: new URL('https://example.test/v1/chat/completions'),
     config: loadConfig({}),
@@ -206,20 +225,25 @@ async function generateReply(content: string, token?: string) {
       maxOutputTokens: 100,
     },
     fetchImpl: async function () {
-      return Response.json({ choices: [{ message: { content }, finish_reason: 'stop' }] });
+      return Response.json({
+        choices: [{ message: { content }, finish_reason: 'stop' }],
+      });
     },
   });
 }
 
-test('chat generation returns ordinary prose that mentions password or api_key unchanged', async function () {
+test('chat generation returns ordinary prose that mentions password or api_key unchanged', async () => {
   const content =
     'fix(auth): reject password: shorter than 8 chars\n\napi_key=optional flag is documented';
   expect((await generateReply(content))?.text).toBe(content);
 });
 
-test('chat generation strips terminal escapes and the provider token from replies', async function () {
+test('chat generation strips terminal escapes and the provider token from replies', async () => {
   const text = (
-    await generateReply('\u001b[31mred\u001b[0m uses sk-secret-token', 'sk-secret-token')
+    await generateReply(
+      '\u001b[31mred\u001b[0m uses sk-secret-token',
+      'sk-secret-token',
+    )
   )?.text;
   expect(text).not.toContain('\u001b');
   expect(text).not.toContain('sk-secret-token');

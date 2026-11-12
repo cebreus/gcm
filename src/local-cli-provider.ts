@@ -1,21 +1,33 @@
 import { tmpdir } from 'os';
+
 import { childEnvironment } from './git-utils.js';
 import {
-  createLanguageModelApiError,
-  isModelUnavailableError,
   type LanguageModelProvider,
   type LanguageModelResponse,
+  createLanguageModelApiError,
+  isModelUnavailableError,
 } from './language-model-service.js';
-import { isRecord, redactSensitiveTextForPrompt, sanitizeTerminalText } from './utils.js';
+import { parseLocalCliJson } from './local-cli-json.js';
+import {
+  LOCAL_CLI_LIMITS,
+  MAX_CLI_ERROR_BYTES,
+  MAX_CLI_OUTPUT_BYTES,
+} from './local-cli-models.js';
+import {
+  type LocalCliRunResult,
+  cliFailure,
+  parseClaudeOutput,
+  parseCodexOutput,
+} from './local-cli-output.js';
+import {
+  isRecord,
+  redactSensitiveTextForPrompt,
+  sanitizeTerminalText,
+} from './utils.js';
 
 const CLI_TIMEOUT_MS = 90_000;
 const CLI_KILL_GRACE_MS = 1_000;
-const MAX_CLI_OUTPUT_BYTES = 1024 * 1024;
-const CLI_LIMITS = {
-  kind: 'separate' as const,
-  maxInputTokens: 32_000,
-  maxOutputTokens: 8_192,
-};
+const CLI_AUTH_TIMEOUT_MS = 5_000;
 
 interface LocalCliRunRequest {
   cmd: string[];
@@ -23,13 +35,9 @@ interface LocalCliRunRequest {
   timeoutMs: number;
 }
 
-interface LocalCliRunResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-export type LocalCliRun = (request: LocalCliRunRequest) => Promise<LocalCliRunResult>;
+export type LocalCliRun = (
+  request: LocalCliRunRequest,
+) => Promise<LocalCliRunResult>;
 
 export async function checkLocalCliAuthentication(
   command: 'codex' | 'claude',
@@ -42,18 +50,19 @@ export async function checkLocalCliAuthentication(
         ? [executable, 'login', 'status']
         : [executable, 'auth', 'status', '--json'],
     stdin: '',
-    timeoutMs: 5_000,
+    timeoutMs: CLI_AUTH_TIMEOUT_MS,
   });
-  if (result.exitCode !== 0) throw new Error(`${command} CLI login is required`);
+  if (result.exitCode !== 0) {
+    throw new Error(`${command} CLI login is required`);
+  }
   if (command === 'claude') {
-    let status: unknown;
-    try {
-      status = JSON.parse(result.stdout);
-    } catch {
-      throw new Error('Claude CLI returned invalid login status');
-    }
-    if (!isRecord(status) || status.loggedIn !== true)
+    const status = parseLocalCliJson(
+      result.stdout,
+      'Claude CLI returned invalid login status',
+    );
+    if (!isRecord(status) || status.loggedIn !== true) {
       throw new Error('Claude CLI login is required');
+    }
   }
 }
 
@@ -61,21 +70,30 @@ async function readBoundedStream(
   stream: ReadableStream<Uint8Array> | null,
   maxBytes: number,
 ): Promise<string> {
-  if (!stream) return '';
+  if (stream === null) {
+    return '';
+  }
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let bytes = 0;
   let text = '';
   for (;;) {
+    // eslint-disable-next-line no-await-in-loop -- stream chunks must be read in order.
     const { done, value } = await reader.read();
-    if (done) return text + decoder.decode();
+    if (done) {
+      return text + decoder.decode();
+    }
     bytes += value.byteLength;
-    if (bytes > maxBytes) throw new Error('Local CLI output was too large');
+    if (bytes > maxBytes) {
+      throw new Error('Local CLI output was too large');
+    }
     text += decoder.decode(value, { stream: true });
   }
 }
 
-export async function runLocalCli(request: LocalCliRunRequest): Promise<LocalCliRunResult> {
+export async function runLocalCli(
+  request: LocalCliRunRequest,
+): Promise<LocalCliRunResult> {
   const child = Bun.spawn({
     cmd: request.cmd,
     cwd: tmpdir(),
@@ -84,19 +102,21 @@ export async function runLocalCli(request: LocalCliRunRequest): Promise<LocalCli
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  let timedOut = false;
-  let forceKill: ReturnType<typeof setTimeout> | null = null;
-  const timeout = setTimeout(function () {
-    timedOut = true;
+  const timeoutState: {
+    timedOut: boolean;
+    forceKill: ReturnType<typeof setTimeout> | null;
+  } = { timedOut: false, forceKill: null };
+  const timeout = setTimeout(() => {
+    timeoutState.timedOut = true;
     child.kill('SIGTERM');
-    forceKill = setTimeout(function () {
+    timeoutState.forceKill = setTimeout(() => {
       child.kill('SIGKILL');
     }, CLI_KILL_GRACE_MS);
   }, request.timeoutMs);
   try {
     const stdoutPromise = readBoundedStream(child.stdout, MAX_CLI_OUTPUT_BYTES);
-    const stderrPromise = readBoundedStream(child.stderr, 64 * 1024);
-    async function writeInput() {
+    const stderrPromise = readBoundedStream(child.stderr, MAX_CLI_ERROR_BYTES);
+    async function writeInput(): Promise<void> {
       await child.stdin.write(request.stdin);
       await child.stdin.end();
     }
@@ -106,7 +126,7 @@ export async function runLocalCli(request: LocalCliRunRequest): Promise<LocalCli
       stderrPromise,
       writeInput(),
     ]);
-    if (timedOut) {
+    if (timeoutState.timedOut) {
       throw createLanguageModelApiError('Local CLI request timed out', {
         availability: true,
         kind: 'timeout',
@@ -115,121 +135,14 @@ export async function runLocalCli(request: LocalCliRunRequest): Promise<LocalCli
     return { exitCode, stdout, stderr };
   } catch (error) {
     child.kill('SIGKILL');
-    await child.exited.catch(function () {});
+    await child.exited.catch(() => undefined);
     throw error;
   } finally {
     clearTimeout(timeout);
-    if (forceKill) clearTimeout(forceKill);
-  }
-}
-
-function readUsage(value: unknown): LanguageModelResponse['usage'] {
-  if (!isRecord(value)) return {};
-  const promptTokens =
-    Number.isSafeInteger(value.input_tokens) && Number(value.input_tokens) >= 0
-      ? Number(value.input_tokens)
-      : undefined;
-  const outputTokens =
-    Number.isSafeInteger(value.output_tokens) && Number(value.output_tokens) >= 0
-      ? Number(value.output_tokens)
-      : undefined;
-  return { promptTokens, outputTokens };
-}
-
-function parseCodexOutput(stdout: string): LanguageModelResponse {
-  let text: string | null = null;
-  let completed = false;
-  let usage: LanguageModelResponse['usage'] = {};
-  for (const line of stdout.split('\n')) {
-    if (!line.trim()) continue;
-    let event: unknown;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      throw createLanguageModelApiError('Codex CLI returned malformed JSON');
-    }
-    if (!isRecord(event)) continue;
-    if (event.type === 'turn.failed' || event.type === 'error') {
-      cliFailure('Codex CLI', { exitCode: 1, stdout, stderr: '' });
-    }
-    if (
-      event.type === 'item.completed' &&
-      isRecord(event.item) &&
-      event.item.type === 'agent_message' &&
-      typeof event.item.text === 'string'
-    ) {
-      text = event.item.text;
-    }
-    if (event.type === 'turn.completed') {
-      completed = true;
-      usage = readUsage(event.usage);
+    if (timeoutState.forceKill !== null) {
+      clearTimeout(timeoutState.forceKill);
     }
   }
-  if (!text || !completed)
-    throw createLanguageModelApiError('Codex CLI returned no completed message');
-  return { text, usage };
-}
-
-function parseClaudeOutput(stdout: string): LanguageModelResponse {
-  let value: unknown;
-  try {
-    value = JSON.parse(stdout);
-  } catch {
-    throw createLanguageModelApiError('Claude CLI returned malformed JSON');
-  }
-  if (isRecord(value) && value.type === 'result' && value.is_error === true) {
-    cliFailure('Claude CLI', { exitCode: 1, stdout, stderr: '' });
-  }
-  if (
-    !isRecord(value) ||
-    value.type !== 'result' ||
-    value.is_error === true ||
-    (value.subtype !== undefined && value.subtype !== 'success') ||
-    typeof value.result !== 'string' ||
-    !value.result
-  ) {
-    throw createLanguageModelApiError('Claude CLI returned no message');
-  }
-  return { text: value.result, usage: readUsage(value.usage) };
-}
-
-function cliFailure(label: string, result: LocalCliRunResult): never {
-  let failureText = result.stderr;
-  for (const line of result.stdout.split('\n')) {
-    let event: unknown;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!isRecord(event)) continue;
-    if (event.type === 'error' && typeof event.message === 'string')
-      failureText += `\n${event.message}`;
-    if (
-      event.type === 'turn.failed' &&
-      isRecord(event.error) &&
-      typeof event.error.message === 'string'
-    )
-      failureText += `\n${event.error.message}`;
-    if (event.type === 'result' && event.is_error === true) {
-      if (Array.isArray(event.errors))
-        failureText += '\n' + event.errors.filter(value => typeof value === 'string').join('\n');
-      if (typeof event.result === 'string') failureText += `\n${event.result}`;
-    }
-  }
-  const detail = sanitizeTerminalText(failureText).trim().split('\n').at(-1)?.slice(0, 256);
-  const authenticationFailure = /auth|login|credential|api.?key|unauthorized|forbidden/i.test(
-    failureText,
-  );
-  // CLI output is external text: classify it here, once, into typed metadata.
-  const timedOut = /timed? out|timeout/i.test(failureText);
-  throw createLanguageModelApiError(`${label} failed${detail ? `: ${detail}` : ''}`, {
-    exitCode: result.exitCode,
-    availability:
-      !authenticationFailure &&
-      (timedOut || /unavailable|overload|capacity|rate.?limit|\b429\b/i.test(failureText)),
-    ...(timedOut ? { kind: 'timeout' } : {}),
-  });
 }
 
 export function createCodexCliProvider(options: {
@@ -239,15 +152,15 @@ export function createCodexCliProvider(options: {
 }): LanguageModelProvider {
   const run = options.run ?? runLocalCli;
   const models = [
-    { name: 'gpt-6-luna', label: 'GPT-6 Luna', limits: CLI_LIMITS },
-    { name: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', limits: CLI_LIMITS },
-    { name: 'gpt-6.1-terra', label: 'GPT-6.1 Terra', limits: CLI_LIMITS },
+    { name: 'gpt-6-luna', label: 'GPT-6 Luna', limits: LOCAL_CLI_LIMITS },
+    { name: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', limits: LOCAL_CLI_LIMITS },
+    { name: 'gpt-6.1-terra', label: 'GPT-6.1 Terra', limits: LOCAL_CLI_LIMITS },
   ];
   async function generateWithModel(
     params: Parameters<LanguageModelProvider['service']['generate']>[0],
     modelName: string,
     timeoutMs: number,
-  ) {
+  ): Promise<LanguageModelResponse> {
     const result = await run({
       cmd: [
         options.executable,
@@ -281,10 +194,14 @@ export function createCodexCliProvider(options: {
         '--json',
         '-',
       ],
-      stdin: redactSensitiveTextForPrompt(`${params.systemPrompt}\n\n${params.promptContext}`),
+      stdin: redactSensitiveTextForPrompt(
+        `${params.systemPrompt}\n\n${params.promptContext}`,
+      ),
       timeoutMs,
     });
-    if (result.exitCode !== 0) cliFailure('Codex CLI', result);
+    if (result.exitCode !== 0) {
+      cliFailure('Codex CLI', result);
+    }
     const response = parseCodexOutput(result.stdout);
     return {
       ...response,
@@ -296,23 +213,34 @@ export function createCodexCliProvider(options: {
     id: 'codex-cli',
     label: 'Codex CLI',
     defaultModel: 'gpt-6-luna',
-    models: async function () {
-      return models;
+    models: async function (): Promise<typeof models> {
+      return await Promise.resolve(models);
     },
     service: {
       generate: async function (params) {
-        if (!models.some(model => model.name === params.modelName)) {
+        if (!models.some((model) => model.name === params.modelName)) {
           throw new Error('Unknown Codex CLI model');
         }
         const deadline = Date.now() + CLI_TIMEOUT_MS;
         try {
-          return await generateWithModel(params, params.modelName, CLI_TIMEOUT_MS);
+          return await generateWithModel(
+            params,
+            params.modelName,
+            CLI_TIMEOUT_MS,
+          );
         } catch (error) {
-          if (params.modelName !== 'gpt-6-luna' || !isModelUnavailableError(error)) throw error;
+          if (
+            params.modelName !== 'gpt-6-luna' ||
+            !isModelUnavailableError(error)
+          ) {
+            throw error;
+          }
           const remainingMs = deadline - Date.now();
-          if (remainingMs <= 0) throw error;
+          if (remainingMs <= 0) {
+            throw error;
+          }
           options.onFallback?.('gpt-6-luna', 'gpt-6.1-sol');
-          return generateWithModel(params, 'gpt-6.1-sol', remainingMs);
+          return await generateWithModel(params, 'gpt-6.1-sol', remainingMs);
         }
       },
     },
@@ -326,25 +254,28 @@ export function createClaudeCliProvider(options: {
 }): LanguageModelProvider {
   const run = options.run ?? runLocalCli;
   const models = [
-    { name: 'haiku', label: 'Claude Haiku', limits: CLI_LIMITS },
-    { name: 'sonnet', label: 'Claude Sonnet', limits: CLI_LIMITS },
-    { name: 'opus', label: 'Claude Opus', limits: CLI_LIMITS },
-    { name: 'fable', label: 'Claude Fable', limits: CLI_LIMITS },
+    { name: 'haiku', label: 'Claude Haiku', limits: LOCAL_CLI_LIMITS },
+    { name: 'sonnet', label: 'Claude Sonnet', limits: LOCAL_CLI_LIMITS },
+    { name: 'opus', label: 'Claude Opus', limits: LOCAL_CLI_LIMITS },
+    { name: 'fable', label: 'Claude Fable', limits: LOCAL_CLI_LIMITS },
   ];
   return {
     id: 'claude-cli',
     label: 'Claude CLI',
     defaultModel: 'haiku',
-    models: async function () {
-      return models;
+    models: async function (): Promise<typeof models> {
+      return await Promise.resolve(models);
     },
     service: {
       generate: async function (params) {
-        if (!models.some(model => model.name === params.modelName)) {
+        if (!models.some((model) => model.name === params.modelName)) {
           throw new Error('Unknown Claude CLI model');
         }
         const deadline = Date.now() + CLI_TIMEOUT_MS;
-        async function generateWithModel(modelName: string, timeoutMs: number) {
+        async function generateWithModel(
+          modelName: string,
+          timeoutMs: number,
+        ): Promise<LanguageModelResponse> {
           const result = await run({
             cmd: [
               options.executable,
@@ -369,22 +300,29 @@ export function createClaudeCliProvider(options: {
             stdin: redactSensitiveTextForPrompt(params.promptContext),
             timeoutMs,
           });
-          if (result.exitCode !== 0) cliFailure('Claude CLI', result);
+          if (result.exitCode !== 0) {
+            cliFailure('Claude CLI', result);
+          }
           const response = parseClaudeOutput(result.stdout);
           return {
             ...response,
             text: sanitizeTerminalText(response.text),
-            truncated: (response.usage.outputTokens ?? 0) >= params.maxOutputTokens,
+            truncated:
+              (response.usage.outputTokens ?? 0) >= params.maxOutputTokens,
           };
         }
         try {
           return await generateWithModel(params.modelName, CLI_TIMEOUT_MS);
         } catch (error) {
-          if (params.modelName !== 'haiku' || !isModelUnavailableError(error)) throw error;
+          if (params.modelName !== 'haiku' || !isModelUnavailableError(error)) {
+            throw error;
+          }
           const remainingMs = deadline - Date.now();
-          if (remainingMs <= 0) throw error;
+          if (remainingMs <= 0) {
+            throw error;
+          }
           options.onFallback?.('haiku', 'sonnet');
-          return generateWithModel('sonnet', remainingMs);
+          return await generateWithModel('sonnet', remainingMs);
         }
       },
     },

@@ -1,7 +1,8 @@
-import { redactSensitiveText, stripTerminalControlSequences } from './utils.js';
 import { stringOrDefault } from './config-values.js';
+import { redactSensitiveText, stripTerminalControlSequences } from './utils.js';
 
-type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
+type LogLevel = (typeof LOG_LEVELS)[number];
 
 export interface LoggerConfig {
   LOG_LEVEL?: string;
@@ -14,46 +15,59 @@ export interface Logger {
 }
 
 const DEFAULT_LEVEL = 'info';
-
-const SENSITIVE_KEY_PATTERN = /key|token|pass|secret/i;
+const DEFAULT_MAX_LOG_TEXT_LENGTH = 256;
+const SENSITIVE_KEY_PATTERN = /key|token|pass|secret/iv;
+const SENSITIVE_VALUE_PATTERN = /(?<key>key|token|pass|secret)=[^&\s]+/giv;
 const TOKEN_COUNT_KEYS = new Set(['promptTokens', 'outputTokens']);
 
-const levels: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
-
-function sanitiseTextForLogs(text: string, maxLen = 256): string {
+function sanitiseTextForLogs(
+  text: string,
+  maxLen = DEFAULT_MAX_LOG_TEXT_LENGTH,
+): string {
   const out = stripTerminalControlSequences(
-    redactSensitiveText(text).replace(/(key|token|pass|secret)=[^&\s]+/gi, '$1=[REDACTED]'),
+    redactSensitiveText(text).replace(
+      SENSITIVE_VALUE_PATTERN,
+      '$<key>=[REDACTED]',
+    ),
   );
-  if (out.length > maxLen) return out.substring(0, maxLen) + '...[TRUNCATED]';
+  if (out.length > maxLen) {
+    return `${out.substring(0, maxLen)}...[TRUNCATED]`;
+  }
   return out;
 }
 
-function redactForLogs(value: unknown, seen = new WeakSet<object>()): unknown {
-  if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'string') return sanitiseTextForLogs(value);
-  if (typeof value === 'object' && value !== null) {
-    if (seen.has(value)) return '[Circular]';
-    seen.add(value);
+function redactObjectForLogs(value: object, seen: WeakSet<object>): unknown {
+  if (seen.has(value)) {
+    return '[Circular]';
   }
+  seen.add(value);
   if (Array.isArray(value)) {
-    return value.map(item => redactForLogs(item, seen));
+    return value.map((item) => redactForLogs(item, seen));
+  }
+  const output: LogMetadata = {};
+  for (const key of Object.keys(value)) {
+    if (SENSITIVE_KEY_PATTERN.test(key)) {
+      output[key] = '[REDACTED]';
+      continue;
+    }
+    try {
+      output[key] = redactForLogs(Reflect.get(value, key), seen);
+    } catch {
+      output[key] = '[Unserializable]';
+    }
+  }
+  return output;
+}
+
+function redactForLogs(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+  if (typeof value === 'string') {
+    return sanitiseTextForLogs(value);
   }
   if (typeof value === 'object' && value !== null) {
-    const output: LogMetadata = {};
-    const record = value as LogMetadata;
-    for (const key in record) {
-      if (!Object.prototype.hasOwnProperty.call(record, key)) continue;
-      if (SENSITIVE_KEY_PATTERN.test(key)) {
-        output[key] = '[REDACTED]';
-        continue;
-      }
-      try {
-        output[key] = redactForLogs(record[key], seen);
-      } catch {
-        output[key] = '[Unserializable]';
-      }
-    }
-    return output;
+    return redactObjectForLogs(value, seen);
   }
   return value;
 }
@@ -62,7 +76,8 @@ function sanitiseMetaForLogs(meta: LogMetadata): LogMetadata {
   const out: LogMetadata = {};
   for (const key of Object.keys(meta)) {
     // Usage counts, not credentials; any other key or value type stays redacted.
-    const isTokenCount = TOKEN_COUNT_KEYS.has(key) && typeof meta[key] === 'number';
+    const isTokenCount =
+      TOKEN_COUNT_KEYS.has(key) && typeof meta[key] === 'number';
     out[key] =
       SENSITIVE_KEY_PATTERN.test(key) && !isTokenCount
         ? '[REDACTED-KEY]'
@@ -72,26 +87,37 @@ function sanitiseMetaForLogs(meta: LogMetadata): LogMetadata {
 }
 
 function formatLogLine(ts: string, level: LogLevel, message: string): string {
-  return '[' + ts + '] ' + level.toUpperCase() + ': ' + message;
+  return `[${ts}] ${level.toUpperCase()}: ${message}`;
 }
 
 function formatLogMeta(meta: LogMetadata | undefined): string {
-  if (!meta || Object.keys(meta).length === 0) return '';
-  return ' ' + JSON.stringify(meta);
+  if (meta === undefined || Object.keys(meta).length === 0) {
+    return '';
+  }
+  return ` ${JSON.stringify(meta)}`;
 }
 
 export function createLogger(config?: LoggerConfig): Logger {
+  const configuredLevel = stringOrDefault(config?.LOG_LEVEL, DEFAULT_LEVEL);
+  const configuredIndex = LOG_LEVELS.findIndex(
+    (level) => level === configuredLevel,
+  );
+  // An unknown configured level falls back to info.
   const threshold =
-    levels[stringOrDefault(config?.LOG_LEVEL, DEFAULT_LEVEL) as LogLevel] ?? levels.info;
+    configuredIndex === -1 ? LOG_LEVELS.indexOf('info') : configuredIndex;
   return {
     log(level, message, meta) {
-      if (levels[level] < threshold) return;
+      if (LOG_LEVELS.indexOf(level) < threshold) {
+        return;
+      }
       const formatted = formatLogLine(
         new Date().toISOString(),
         level,
         sanitiseTextForLogs(message, Infinity),
       );
-      process.stderr.write(formatted + formatLogMeta(sanitiseMetaForLogs(meta ?? {})) + '\n');
+      process.stderr.write(
+        `${formatted + formatLogMeta(sanitiseMetaForLogs(meta ?? {}))}\n`,
+      );
     },
   };
 }

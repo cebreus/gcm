@@ -1,9 +1,28 @@
-import { fileExists, literalPathspec, spawnGitStream } from '../git-utils.js';
-import { shouldExcludeFile } from '../utils.js';
-import { DEFAULT_ANALYSIS_EXCLUDE_PATTERNS, SECRET_FILE_EXCLUDE_PATTERNS } from '../constants.js';
+import {
+  DEFAULT_ANALYSIS_EXCLUDE_PATTERNS,
+  SECRET_FILE_EXCLUDE_PATTERNS,
+} from '../constants.js';
+import {
+  type GitCommandRunner,
+  type SpawnGitStreamResult,
+  literalPathspec,
+  spawnGitStream,
+} from '../git-utils.js';
 import type { Logger } from '../logger.js';
+import { shouldExcludeFile } from '../utils.js';
+import {
+  getRepositoryState,
+  inspectCommitTarget,
+} from './git-repository-service.js';
+import {
+  amendCommit,
+  commitChanges,
+  getIndexEntries,
+  getIndexTree,
+  rewordCommit,
+} from './git-write-service.js';
 
-interface StagedChangesResult {
+export interface StagedChangesResult {
   stagedDiff: string;
   stagedFiles: string[];
   excludedPaths?: string[];
@@ -41,30 +60,43 @@ export interface CommitWriteSafety {
 }
 
 export interface GitService {
-  listCommitHashes(range: string, logger: Logger | null): Promise<string[]>;
-  hasAmendment(hash: string, logger: Logger | null): Promise<boolean>;
-  getHeadHash(logger: Logger | null): Promise<string>;
-  retrieveStagedChanges(
+  listCommitHashes: (range: string, logger: Logger | null) => Promise<string[]>;
+  hasAmendment: (hash: string, logger: Logger | null) => Promise<boolean>;
+  getHeadHash: (logger: Logger | null) => Promise<string>;
+  retrieveStagedChanges: (
     commitHash: string | null,
     logger: Logger | null,
     excludePatterns?: string[],
     analysisExcludePatterns?: string[],
-  ): Promise<StagedChangesResult | null>;
-  commitChanges(message: string, logger: Logger | null, safety?: CommitWriteSafety): Promise<void>;
-  amendCommit(message: string, logger: Logger | null, safety?: CommitWriteSafety): Promise<void>;
-  rewordCommit(
+  ) => Promise<StagedChangesResult | null>;
+  commitChanges: (
+    message: string,
+    logger: Logger | null,
+    safety?: CommitWriteSafety,
+  ) => Promise<void>;
+  amendCommit: (
+    message: string,
+    logger: Logger | null,
+    safety?: CommitWriteSafety,
+  ) => Promise<void>;
+  rewordCommit: (
     target: CommitTarget,
     message: string,
     logger: Logger | null,
     safety?: CommitWriteSafety,
-  ): Promise<void>;
-  inspectCommitTarget(hash: string, logger: Logger | null): Promise<CommitTarget>;
-  getIndexTree(logger: Logger | null): Promise<string>;
-  getIndexEntries(logger: Logger | null): Promise<IndexEntry[]>;
-  getRepositoryState(logger: Logger | null): Promise<RepositoryState>;
+  ) => Promise<void>;
+  inspectCommitTarget: (
+    hash: string,
+    logger: Logger | null,
+  ) => Promise<CommitTarget>;
+  getIndexTree: (logger: Logger | null) => Promise<string>;
+  getIndexEntries: (logger: Logger | null) => Promise<IndexEntry[]>;
+  getRepositoryState: (logger: Logger | null) => Promise<RepositoryState>;
 }
 
-type GitCommandRunner = typeof spawnGitStream;
+const RENAME_ENTRY_FIELD_COUNT = 2;
+const COMMIT_LOG_FIELD_COUNT = 2;
+const INDEX_STABILITY_ATTEMPTS = 2;
 
 interface GitServiceOptions {
   gitCommandRunner?: GitCommandRunner;
@@ -74,13 +106,15 @@ interface GitServiceOptions {
 export interface RepositoryState {
   hasStagedChanges: boolean;
   hasUnmergedPaths: boolean;
-  inProgressOperation: null | 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect';
+  inProgressOperation:
+    null | 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect';
   changedFiles: string[];
 }
 
 function buildFileListArgs(commitHash: string | null): string[] {
-  return commitHash
-    ? [
+  return commitHash === null
+    ? ['diff', '--staged', '--name-status', '-z', '--find-renames']
+    : [
         'show',
         '--first-parent',
         '--name-status',
@@ -88,16 +122,23 @@ function buildFileListArgs(commitHash: string | null): string[] {
         '-z',
         '--find-renames',
         commitHash,
-      ]
-    : ['diff', '--staged', '--name-status', '-z', '--find-renames'];
+      ];
 }
 
-function buildDiffArgs(commitHash: string | null, ignoreWhitespace = true): string[] {
-  const plain = ['--no-color', '--no-ext-diff', '--no-textconv', '--find-renames'];
+function buildDiffArgs(
+  commitHash: string | null,
+  ignoreWhitespace = true,
+): string[] {
+  const plain = [
+    '--no-color',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--find-renames',
+  ];
   const w = ignoreWhitespace ? ['-w'] : [];
-  return commitHash
-    ? ['show', '--first-parent', ...w, ...plain, commitHash]
-    : ['diff', '--staged', ...w, ...plain];
+  return commitHash === null
+    ? ['diff', '--staged', ...w, ...plain]
+    : ['show', '--first-parent', ...w, ...plain, commitHash];
 }
 
 // `-w` keeps noise down, but empties a whitespace-only change (indentation is meaning in YAML/Python).
@@ -105,22 +146,27 @@ async function readDiff(
   runGit: GitCommandRunner,
   commitHash: string | null,
   pathspec: string[],
-): Promise<Awaited<ReturnType<GitCommandRunner>>> {
-  const read = (ignoreWhitespace: boolean) =>
-    runGit(
-      [...buildDiffArgs(commitHash, ignoreWhitespace), '--', ...pathspec.map(literalPathspec)],
+): Promise<SpawnGitStreamResult> {
+  const read = async (
+    ignoreWhitespace: boolean,
+  ): Promise<SpawnGitStreamResult> =>
+    await runGit(
+      [
+        ...buildDiffArgs(commitHash, ignoreWhitespace),
+        '--',
+        ...pathspec.map(literalPathspec),
+      ],
       {
         allowTruncated: true,
       },
     );
   const result = await read(true);
   // `git show` prints the commit message even when the `-w` diff is empty.
-  const empty = commitHash ? !/^diff --git /m.test(result.text) : result.text.trim() === '';
-  return empty ? read(false) : result;
-}
-
-function parseFileList(text: string): string[] {
-  return text.split('\0').filter(path => path.length > 0);
+  const empty =
+    commitHash === null
+      ? result.text.trim() === ''
+      : !/^diff --git /mv.test(result.text);
+  return empty ? await read(false) : result;
 }
 
 interface FileEntry {
@@ -134,13 +180,24 @@ function parseFileEntries(text: string): FileEntry[] {
   const entries: FileEntry[] = [];
   for (let index = 0; index < fields.length; index += 1) {
     const status = fields[index].trim();
-    if (!status) continue;
+    if (status === '') {
+      continue;
+    }
     if (status.startsWith('R') || status.startsWith('C')) {
-      const [from, to] = [fields[index + 1], fields[index + 2]];
-      if (to) entries.push(status.startsWith('R') ? { path: to, origin: from } : { path: to });
-      index += 2;
+      const [from, to] = [
+        fields[index + 1],
+        fields[index + RENAME_ENTRY_FIELD_COUNT],
+      ];
+      if (to !== '') {
+        entries.push(
+          status.startsWith('R') ? { path: to, origin: from } : { path: to },
+        );
+      }
+      index += RENAME_ENTRY_FIELD_COUNT;
     } else {
-      if (fields[index + 1]) entries.push({ path: fields[index + 1] });
+      if (fields[index + 1] !== '') {
+        entries.push({ path: fields[index + 1] });
+      }
       index += 1;
     }
   }
@@ -153,7 +210,9 @@ function logExcludedFiles(
   originalFileCount: number,
   filteredFileCount: number,
 ): void {
-  if (!(excludePatterns.length > 0 && filteredFileCount < originalFileCount)) return;
+  if (excludePatterns.length === 0 || filteredFileCount >= originalFileCount) {
+    return;
+  }
   const excludedCount = originalFileCount - filteredFileCount;
   logger?.log(
     'info',
@@ -162,36 +221,56 @@ function logExcludedFiles(
 }
 
 function logNoChanges(logger: Logger | null, commitHash: string | null): void {
-  if (commitHash) logger?.log('debug', `No changes found in commit ${commitHash}.`);
-  else logger?.log('debug', 'No staged changes found.');
+  if (commitHash === null) {
+    logger?.log('debug', 'No staged changes found.');
+  } else {
+    logger?.log('debug', `No changes found in commit ${commitHash}.`);
+  }
 }
 
 export function createGitService(opts: GitServiceOptions = {}): GitService {
   const runGit: GitCommandRunner =
     opts.gitCommandRunner ??
-    function (args, options) {
-      return spawnGitStream(args, { ...options, maxBytes: opts.maxBytes });
+    async function (args, options) {
+      return await spawnGitStream(args, {
+        ...options,
+        maxBytes: opts.maxBytes,
+      });
     };
   return {
-    listCommitHashes: (range, logger = null) => listCommitHashes(runGit, range, logger),
-    hasAmendment: (hash, logger = null) => hasAmendment(runGit, hash, logger),
-    getHeadHash: (logger = null) => getHeadHash(runGit, logger),
-    retrieveStagedChanges: (
+    listCommitHashes: async (range, logger) =>
+      await listCommitHashes(runGit, range, logger),
+    hasAmendment: async (hash, logger) =>
+      await hasAmendment(runGit, hash, logger),
+    getHeadHash: async (logger) => await getHeadHash(runGit, logger),
+    retrieveStagedChanges: async (
       commitHash,
-      logger = null,
+      logger,
       excludePatterns = [],
       analysisExcludePatterns = [],
     ) =>
-      retrieveStagedChanges(runGit, commitHash, logger, excludePatterns, analysisExcludePatterns),
-    commitChanges: (message, logger = null, safety) =>
-      commitChanges(runGit, message, logger, safety),
-    amendCommit: (message, logger = null, safety) => amendCommit(runGit, message, logger, safety),
-    rewordCommit: (target, message, logger = null, safety) =>
-      rewordCommit(runGit, target, message, logger, safety),
-    inspectCommitTarget: (hash, logger = null) => inspectCommitTarget(runGit, hash, logger),
-    getIndexTree: (logger = null) => getIndexTree(runGit, logger),
-    getIndexEntries: (logger = null) => getIndexEntries(runGit, logger),
-    getRepositoryState: (logger = null) => getRepositoryState(runGit, logger),
+      await retrieveStagedChanges({
+        runGit,
+        commitHash,
+        logger,
+        excludePatterns,
+        projectExcludePatterns: analysisExcludePatterns,
+      }),
+    commitChanges: async (message, logger, safety) => {
+      await commitChanges(runGit, message, logger, safety);
+    },
+    amendCommit: async (message, logger, safety) => {
+      await amendCommit(runGit, message, logger, safety);
+    },
+    rewordCommit: async (target, message, logger, safety) => {
+      await rewordCommit({ runGit, target, message, logger, safety });
+    },
+    inspectCommitTarget: async (hash, logger) =>
+      await inspectCommitTarget(runGit, hash, logger),
+    getIndexTree: async (logger) => await getIndexTree(runGit, logger),
+    getIndexEntries: async (logger) => await getIndexEntries(runGit, logger),
+    getRepositoryState: async (logger) =>
+      await getRepositoryState(runGit, logger),
   };
 }
 
@@ -208,13 +287,21 @@ async function listCommitHashes(
     '--format=%H%x00%s%x00',
     range,
   ]);
-  if (result.truncated) throw new Error('Commit range output was truncated.');
+  if (result.truncated) {
+    throw new Error('Commit range output was truncated.');
+  }
   const fields = result.text.split('\0');
   const hashes: string[] = [];
-  for (let index = 0; index + 1 < fields.length; index += 2) {
+  for (
+    let index = 0;
+    index + 1 < fields.length;
+    index += COMMIT_LOG_FIELD_COUNT
+  ) {
     const hash = fields[index]?.trim();
     const subject = fields[index + 1]?.trim() ?? '';
-    if (!hash || /^(amend|fixup|squash)! /.test(subject)) continue;
+    if (hash === '' || /^(?:amend|fixup|squash)! /v.test(subject)) {
+      continue;
+    }
     hashes.push(hash);
   }
   return hashes;
@@ -233,21 +320,37 @@ async function hasAmendment(
     `--grep=amend! ${hash}`,
     'HEAD',
   ]);
-  return result.text.split('\n').some(subject => subject.trim() === `amend! ${hash}`);
+  return result.text
+    .split('\n')
+    .some((subject) => subject.trim() === `amend! ${hash}`);
 }
 
-async function getHeadHash(runGit: GitCommandRunner, logger: Logger | null): Promise<string> {
+async function getHeadHash(
+  runGit: GitCommandRunner,
+  logger: Logger | null,
+): Promise<string> {
   logger?.log('debug', 'Reading HEAD');
   return (await runGit(['rev-parse', '--verify', 'HEAD^{commit}'])).text.trim();
 }
 
+interface RetrieveStagedChangesOptions {
+  runGit: GitCommandRunner;
+  commitHash: string | null;
+  logger: Logger | null;
+  excludePatterns: string[];
+  projectExcludePatterns: string[];
+}
+
 async function retrieveStagedChanges(
-  runGit: GitCommandRunner,
-  commitHash: string | null,
-  logger: Logger | null,
-  excludePatterns: string[],
-  projectExcludePatterns: string[],
+  options: RetrieveStagedChangesOptions,
 ): Promise<StagedChangesResult | null> {
+  const {
+    runGit,
+    commitHash,
+    logger,
+    excludePatterns,
+    projectExcludePatterns,
+  } = options;
   const analysisExcludePatterns = [
     ...DEFAULT_ANALYSIS_EXCLUDE_PATTERNS,
     ...projectExcludePatterns,
@@ -256,28 +359,39 @@ async function retrieveStagedChanges(
   logger?.log('debug', 'Checking git status');
   const fileListRes = await runGit(buildFileListArgs(commitHash));
   if (fileListRes.truncated) {
-    throw new Error('File list output was truncated. Reduce the change set, then try again.');
+    throw new Error(
+      'File list output was truncated. Reduce the change set, then try again.',
+    );
   }
   const entries = parseFileEntries(fileListRes.text);
   const isExcluded = (entry: FileEntry, patterns: string[]): boolean =>
     shouldExcludeFile(entry.path, patterns) ||
     (entry.origin !== undefined && shouldExcludeFile(entry.origin, patterns));
-  const kept = entries.filter(entry => !isExcluded(entry, analysisExcludePatterns));
-  const files = kept.map(entry => entry.path);
+  const kept = entries.filter(
+    (entry) => !isExcluded(entry, analysisExcludePatterns),
+  );
+  const files = kept.map((entry) => entry.path);
   // Git needs both rename endpoints in the pathspec to print `rename from/to`.
-  const pathspec = kept.flatMap(entry =>
-    entry.origin ? [entry.path, entry.origin] : [entry.path],
+  const pathspec = kept.flatMap((entry) =>
+    entry.origin === undefined ? [entry.path] : [entry.path, entry.origin],
   );
   const excludedPaths = entries
-    .filter(entry => isExcluded(entry, [...SECRET_FILE_EXCLUDE_PATTERNS, ...excludePatterns]))
-    .map(entry => entry.path);
-  const projectExcludesMatched = projectExcludePatterns.some(pattern =>
-    entries.some(entry => isExcluded(entry, [pattern])),
+    .filter((entry) =>
+      isExcluded(entry, [...SECRET_FILE_EXCLUDE_PATTERNS, ...excludePatterns]),
+    )
+    .map((entry) => entry.path);
+  const projectExcludesMatched = projectExcludePatterns.some((pattern) =>
+    entries.some((entry) => isExcluded(entry, [pattern])),
   );
-  const matchedExcludePatterns = analysisExcludePatterns.filter(pattern =>
-    entries.some(entry => isExcluded(entry, [pattern])),
+  const matchedExcludePatterns = analysisExcludePatterns.filter((pattern) =>
+    entries.some((entry) => isExcluded(entry, [pattern])),
   );
-  logExcludedFiles(logger, matchedExcludePatterns, entries.length, files.length);
+  logExcludedFiles(
+    logger,
+    matchedExcludePatterns,
+    entries.length,
+    files.length,
+  );
   if (files.length === 0) {
     // Only reported exclusions (secret defaults, --exclude) mean "staged, but nothing to analyse".
     if (excludedPaths.length > 0) {
@@ -292,11 +406,14 @@ async function retrieveStagedChanges(
     logNoChanges(logger, commitHash);
     return null;
   }
-  const diff = commitHash
-    ? { result: await readDiff(runGit, commitHash, pathspec) }
-    : await readStableStagedDiff(runGit, pathspec, logger);
-  const diffRes = diff.result;
-  if (diffRes.truncated) logger?.log('warn', 'Diff output was truncated due to size limits.');
+  const diff =
+    commitHash === null
+      ? await readStableStagedDiff(runGit, pathspec, logger)
+      : { result: await readDiff(runGit, commitHash, pathspec) };
+  const { result: diffRes } = diff;
+  if (diffRes.truncated) {
+    logger?.log('warn', 'Diff output was truncated due to size limits.');
+  }
   return {
     stagedDiff: diffRes.text,
     stagedFiles: files,
@@ -311,373 +428,29 @@ async function readStableStagedDiff(
   runGit: GitCommandRunner,
   pathspec: string[],
   logger: Logger | null,
-): Promise<{ result: Awaited<ReturnType<GitCommandRunner>>; snapshot: IndexSnapshot }> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+): Promise<{
+  result: SpawnGitStreamResult;
+  snapshot: IndexSnapshot;
+}> {
+  for (let attempt = 0; attempt < INDEX_STABILITY_ATTEMPTS; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop -- each attempt must observe one ordered Git index snapshot
     const beforeEntries = await getIndexTree(runGit, logger);
+    // eslint-disable-next-line no-await-in-loop -- index entries must follow the first tree observation
     const entries = await getIndexEntries(runGit, logger);
+    // eslint-disable-next-line no-await-in-loop -- second tree observation validates captured entries
     const beforeDiff = await getIndexTree(runGit, logger);
-    if (beforeEntries !== beforeDiff) continue;
+    if (beforeEntries !== beforeDiff) {
+      continue;
+    }
+    // eslint-disable-next-line no-await-in-loop -- diff must follow a stable pre-read index observation
     const result = await readDiff(runGit, null, pathspec);
+    // eslint-disable-next-line no-await-in-loop -- final tree observation validates the ordered diff read
     const afterDiff = await getIndexTree(runGit, logger);
-    if (beforeDiff === afterDiff) return { result, snapshot: { tree: afterDiff, entries } };
+    if (beforeDiff === afterDiff) {
+      return { result, snapshot: { tree: afterDiff, entries } };
+    }
   }
   throw new Error(
     'Staged changes changed while their diff was being read. Regenerate the message, then try again.',
   );
-}
-
-async function commitChanges(
-  runGit: GitCommandRunner,
-  message: string,
-  logger: Logger | null,
-  safety?: CommitWriteSafety,
-): Promise<void> {
-  await assertCommitWriteSafety(runGit, logger, safety);
-  if (logger) logger.log('debug', 'Executing git commit');
-  await runGit(['commit', '-m', message], { timeoutMs: 0, allowTruncated: true });
-  await warnIfCommittedTreeChanged(runGit, logger, safety);
-}
-
-async function getIndexTree(runGit: GitCommandRunner, logger: Logger | null): Promise<string> {
-  logger?.log('debug', 'Capturing git index tree');
-  const result = await runGit(['write-tree']);
-  return result.text.trim();
-}
-
-function parseIndexEntries(text: string): IndexEntry[] {
-  return text
-    .split('\0')
-    .filter(Boolean)
-    .flatMap((line): IndexEntry[] => {
-      const separator = line.indexOf('\t');
-      if (separator < 0) return [];
-      const [mode, objectId, stage] = line.slice(0, separator).split(' ');
-      const path = line.slice(separator + 1);
-      if (!mode || !objectId || stage !== '0' || !path) return [];
-      return [{ path, mode, objectId }];
-    });
-}
-
-async function getIndexEntries(
-  runGit: GitCommandRunner,
-  logger: Logger | null,
-): Promise<IndexEntry[]> {
-  logger?.log('debug', 'Capturing git index entries');
-  const result = await runGit(['ls-files', '--stage', '-z']);
-  return parseIndexEntries(result.text);
-}
-
-async function amendCommit(
-  runGit: GitCommandRunner,
-  message: string,
-  logger: Logger | null,
-  safety?: CommitWriteSafety,
-): Promise<void> {
-  await assertCommitWriteSafety(runGit, logger, safety);
-  logger?.log('debug', 'Executing git commit --amend');
-  await runGit(['commit', '--amend', '-m', message], { timeoutMs: 0, allowTruncated: true });
-  await warnIfCommittedTreeChanged(runGit, logger, safety);
-}
-
-// An `amend!` commit carries the replacement message as an ordinary commit, so
-// nothing is rewritten here. `git rebase --autosquash` folds it into the target
-// later, when the user asks for it. Hash targeting remains unambiguous when
-// multiple commits share a subject.
-async function rewordCommit(
-  runGit: GitCommandRunner,
-  target: CommitTarget,
-  message: string,
-  logger: Logger | null,
-  safety?: CommitWriteSafety,
-): Promise<void> {
-  await assertCommitWriteSafety(runGit, logger, safety);
-  logger?.log('debug', `Creating amend! commit for ${target.hash}`);
-  const previousHead = (await runGit(['rev-parse', '--verify', 'HEAD'])).text.trim();
-  await runGit(['commit', '--allow-empty', '-m', `amend! ${target.hash}`, '-m', message], {
-    timeoutMs: 0,
-    allowTruncated: true,
-  });
-  try {
-    await assertAmendCommitIsEmpty(runGit);
-  } catch (error) {
-    await rollBackUnsafeAmendCommit(runGit, previousHead);
-    throw error;
-  }
-}
-
-async function rollBackUnsafeAmendCommit(
-  runGit: GitCommandRunner,
-  previousHead: string,
-): Promise<void> {
-  let createdHead = 'HEAD';
-  try {
-    const [head, parent] = await Promise.all([
-      runGit(['rev-parse', '--verify', 'HEAD']),
-      runGit(['rev-parse', '--verify', 'HEAD^']),
-    ]);
-    createdHead = head.text.trim();
-    if (parent.text.trim() !== previousHead) {
-      throw new Error('HEAD parent does not match the pre-write HEAD');
-    }
-    await runGit(['reset', '--soft', previousHead]);
-  } catch {
-    throw commitActionRefusal(
-      `The unsafe amend! commit ${createdHead} could not be rolled back automatically. ` +
-        'Inspect HEAD and use git reset --soft only after confirming the target.',
-    );
-  }
-}
-
-async function assertAmendCommitIsEmpty(runGit: GitCommandRunner): Promise<void> {
-  try {
-    const [committed, parent] = await Promise.all([
-      runGit(['rev-parse', '--verify', 'HEAD^{tree}']),
-      runGit(['rev-parse', '--verify', 'HEAD^1^{tree}']),
-    ]);
-    if (committed.text.trim() === parent.text.trim()) return;
-  } catch {
-    throw commitActionRefusal(
-      'The amend! commit was created, but its tree could not be verified. Batch processing must stop.',
-    );
-  }
-  throw commitActionRefusal(
-    'The amend! commit contains file changes introduced by a Git hook. Batch processing must stop.',
-  );
-}
-
-async function warnIfCommittedTreeChanged(
-  runGit: GitCommandRunner,
-  logger: Logger | null,
-  safety?: CommitWriteSafety,
-): Promise<void> {
-  if (!safety) return;
-  try {
-    const committedTree = (await runGit(['rev-parse', '--verify', 'HEAD^{tree}'])).text.trim();
-    if (committedTree === safety.snapshot.tree) return;
-    const changedPaths = parseFileList(
-      (await runGit(['diff', '--name-only', '-z', safety.snapshot.tree, committedTree])).text,
-    ).map(path => JSON.stringify(path));
-    logger?.log(
-      'warn',
-      'Commit completed, but pre-commit hooks changed the committed tree after analysis. Paths that differ from the analysed snapshot: ' +
-        (changedPaths.join(', ') || 'the tree contents') +
-        '.',
-    );
-  } catch {
-    logger?.log(
-      'warn',
-      'Commit completed, but its tree could not be verified against the analysed snapshot.',
-    );
-  }
-}
-
-export function commitActionRefusal(message: string): Error {
-  const error = new Error(message);
-  error.name = 'CommitActionRefusal';
-  return error;
-}
-
-async function assertCommitWriteSafety(
-  runGit: GitCommandRunner,
-  logger: Logger | null,
-  safety?: CommitWriteSafety,
-): Promise<void> {
-  if (!safety) return;
-  const tree = await getIndexTree(runGit, logger);
-  if (tree !== safety.snapshot.tree) {
-    throw commitActionRefusal(
-      'Staged changes changed before the commit could be written. Regenerate the message, then try again.',
-    );
-  }
-  if (!safety.target) return;
-  const target = await inspectCommitTarget(runGit, safety.target.hash, logger);
-  if (target.hash !== safety.target.hash || target.headHash !== safety.target.headHash) {
-    throw commitActionRefusal(
-      'HEAD or target commit moved before the commit could be written. Regenerate the message, then try again.',
-    );
-  }
-}
-
-// `branch --remotes --contains` answers with output rather than an exit code:
-// empty means no remote branch holds the commit. `merge-base --is-ancestor`
-// would answer through exit 1, which the git runner turns into a throw
-// indistinguishable from a real failure. This also covers every remote, not
-// just the tracked upstream. An unanswerable question resolves to published,
-// so the additive path is taken.
-async function isPublishedCommit(runGit: GitCommandRunner, hash: string): Promise<boolean> {
-  try {
-    const remotes = await runGit(['branch', '--remotes', '--contains', hash]);
-    if (remotes.text.trim().length > 0) return true;
-    const configuredRemotes = await runGit(['remote']);
-    if (configuredRemotes.text.trim().length === 0) return false;
-    const trackingRefs = await runGit(['for-each-ref', '--format=%(refname)', 'refs/remotes']);
-    return trackingRefs.text.trim().length === 0;
-  } catch {
-    return true;
-  }
-}
-
-// An `amend!` commit is created on the current branch. When the target is not
-// reachable from HEAD the rebase that would fold it never sees it, so the
-// commit stays behind as litter and the target keeps its old message. Compared
-// through merge-base, whose answer arrives as output rather than an exit code.
-async function isAncestorOfHead(runGit: GitCommandRunner, hash: string): Promise<boolean> {
-  try {
-    const base = await runGit(['merge-base', 'HEAD', hash]);
-    return base.text.trim() === hash;
-  } catch {
-    return false;
-  }
-}
-
-// A commit made on a detached HEAD is orphaned the moment another branch is
-// checked out. Both amend and an `amend!` commit would be lost that way, while
-// the tool reports success.
-async function isHeadDetached(runGit: GitCommandRunner): Promise<boolean> {
-  try {
-    await runGit(['symbolic-ref', '--quiet', 'HEAD']);
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-// `rebase --autosquash` folds an `amend!` into the FIRST commit in its range
-// whose subject matches, so an older twin of the subject silently steals the
-// rewrite when the user widens the base. A missing parent means the target is
-// the root commit, which changes the rebase command it needs.
-async function readSubjectAmbiguity(
-  runGit: GitCommandRunner,
-  hash: string,
-  subject: string,
-): Promise<{ hasParent: boolean; hasAmbiguousSubject: boolean }> {
-  try {
-    const ancestors = await runGit(['log', '--format=%s', `${hash}^`]);
-    const twins = ancestors.text.split('\n').filter(line => line.trimEnd() === subject);
-    return { hasParent: true, hasAmbiguousSubject: twins.length > 0 };
-  } catch {
-    return { hasParent: false, hasAmbiguousSubject: false };
-  }
-}
-
-async function inspectCommitTarget(
-  runGit: GitCommandRunner,
-  hash: string,
-  logger: Logger | null,
-): Promise<CommitTarget> {
-  const resolved = (await runGit(['rev-parse', '--verify', `${hash}^{commit}`])).text.trim();
-  const [headResult, subjectResult] = await Promise.all([
-    runGit(['rev-parse', '--verify', 'HEAD^{commit}']),
-    runGit(['log', '-1', '--format=%s', resolved]),
-  ]);
-  const head = headResult.text.trim();
-  const subject = subjectResult.text.trim();
-  const isHead = resolved === head;
-  const [ambiguity, isPublished, isAncestor, headDetached] = await Promise.all([
-    readSubjectAmbiguity(runGit, resolved, subject),
-    isPublishedCommit(runGit, resolved),
-    isHead ? Promise.resolve(true) : isAncestorOfHead(runGit, resolved),
-    isHeadDetached(runGit),
-  ]);
-  const target: CommitTarget = {
-    hash: resolved,
-    headHash: head,
-    subject,
-    isHead,
-    isPublished,
-    isAncestorOfHead: isAncestor,
-    isHeadDetached: headDetached,
-    ...ambiguity,
-  };
-  logger?.log('debug', 'Commit target', { ...target });
-  return target;
-}
-
-function parsePorcelainStatus(text: string): {
-  hasStagedChanges: boolean;
-  hasUnmergedPaths: boolean;
-  changedFiles: string[];
-} {
-  const state = {
-    hasStagedChanges: false,
-    hasUnmergedPaths: false,
-    changedFiles: new Set<string>(),
-  };
-
-  const records = text.split('\0');
-  for (let index = 0; index < records.length; index += 1) {
-    const record = records[index];
-    if (!record) continue;
-    parsePorcelainLine(record, state);
-    const status = record.slice(0, 2);
-    if (status.includes('R') || status.includes('C')) index += 1;
-  }
-
-  return {
-    hasStagedChanges: state.hasStagedChanges,
-    hasUnmergedPaths: state.hasUnmergedPaths,
-    changedFiles: Array.from(state.changedFiles),
-  };
-}
-
-function parsePorcelainLine(
-  line: string,
-  state: {
-    hasStagedChanges: boolean;
-    hasUnmergedPaths: boolean;
-    changedFiles: Set<string>;
-  },
-): void {
-  if (line.startsWith('?? ')) {
-    addChangedPath(line.slice(3), state.changedFiles);
-    return;
-  }
-  const x = line[0] || ' ';
-  const y = line[1] || ' ';
-  if (x !== ' ') state.hasStagedChanges = true;
-  if (isUnmergedStatus(x, y)) state.hasUnmergedPaths = true;
-  addChangedPath(line.slice(3), state.changedFiles);
-}
-
-function isUnmergedStatus(x: string, y: string): boolean {
-  return x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D');
-}
-
-function addChangedPath(rawPathInput: string, changedFiles: Set<string>): void {
-  if (rawPathInput) changedFiles.add(rawPathInput);
-}
-
-async function detectInProgressOperation(
-  runGit: GitCommandRunner,
-): Promise<RepositoryState['inProgressOperation']> {
-  const gitDir = (await runGit(['rev-parse', '--git-dir'])).text.trim();
-  const checks: Array<{ name: RepositoryState['inProgressOperation']; path: string }> = [
-    { name: 'merge', path: `${gitDir}/MERGE_HEAD` },
-    { name: 'rebase', path: `${gitDir}/rebase-merge` },
-    { name: 'rebase', path: `${gitDir}/rebase-apply` },
-    { name: 'cherry-pick', path: `${gitDir}/CHERRY_PICK_HEAD` },
-    { name: 'revert', path: `${gitDir}/REVERT_HEAD` },
-    { name: 'bisect', path: `${gitDir}/BISECT_LOG` },
-  ];
-  for (const check of checks) {
-    if (await fileExists(check.path)) return check.name;
-  }
-  return null;
-}
-
-async function getRepositoryState(
-  runGit: GitCommandRunner,
-  logger: Logger | null,
-): Promise<RepositoryState> {
-  const status = await runGit(['status', '--porcelain=v1', '-z']);
-  if (status.truncated) {
-    throw new Error(
-      'Repository status output was truncated. Reduce the worktree size, then try again.',
-    );
-  }
-  const parsed = parsePorcelainStatus(status.text);
-  const inProgressOperation = await detectInProgressOperation(runGit);
-  const result: RepositoryState = { ...parsed, inProgressOperation };
-  logger?.log('debug', 'Repository state', { ...result });
-  return result;
 }

@@ -1,5 +1,11 @@
 import { integerInRange } from './config-values.js';
-import { MAX_CHILD_OUTPUT_BYTES } from './constants.js';
+import {
+  BYTES_PER_KIBIBYTE,
+  KIBIBYTES_PER_MEBIBYTE,
+  MAX_CHILD_OUTPUT_BYTES,
+  MILLISECONDS_PER_SECOND,
+  SECONDS_PER_MINUTE,
+} from './constants.js';
 
 export type GitFailureKind = 'not-a-repository' | 'unknown-revision';
 
@@ -14,8 +20,12 @@ export class GitCommandError extends Error {
 }
 
 function classifyGitFailure(stderr: string): GitFailureKind | undefined {
-  if (/not a git repository/i.test(stderr)) return 'not-a-repository';
-  if (/unknown revision/i.test(stderr)) return 'unknown-revision';
+  if (/not a git repository/iv.test(stderr)) {
+    return 'not-a-repository';
+  }
+  if (/unknown revision/iv.test(stderr)) {
+    return 'unknown-revision';
+  }
   return undefined;
 }
 
@@ -36,6 +46,48 @@ const PROVIDER_CREDENTIAL_NAMES = new Set([
   'GCM_FREELLMAPI_TOKEN',
   'LM_API_TOKEN',
 ]);
+const CHILD_KILL_GRACE_MS = 2_000;
+const DEFAULT_GIT_OUTPUT_BYTES = BYTES_PER_KIBIBYTE * KIBIBYTES_PER_MEBIBYTE;
+const DEFAULT_GIT_TIMEOUT_MS = 120_000;
+const MAX_GIT_TIMEOUT_MINUTES = 10;
+const MAX_GIT_TIMEOUT_MS =
+  MAX_GIT_TIMEOUT_MINUTES * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
+const MAX_STDERR_KIBIBYTES = 64;
+const MAX_STDERR_BYTES = MAX_STDERR_KIBIBYTES * BYTES_PER_KIBIBYTE;
+const DEFAULT_STREAM_OUTPUT_MEBIBYTES = 50;
+const DEFAULT_STREAM_OUTPUT_BYTES =
+  DEFAULT_STREAM_OUTPUT_MEBIBYTES * BYTES_PER_KIBIBYTE * KIBIBYTES_PER_MEBIBYTE;
+
+interface KillState {
+  killed: boolean;
+  markKilled: () => void;
+}
+
+function validateSpawnOutcome(options: {
+  args: string[];
+  execName: string;
+  code: number;
+  stderr: string;
+  truncated: boolean;
+  timedOut: boolean;
+  killed: boolean;
+  allowTruncated: boolean | undefined;
+}): void {
+  if (options.truncated && options.allowTruncated !== true) {
+    throw new Error(
+      `${options.execName} ${options.args.join(' ')} output was truncated`,
+    );
+  }
+  if (options.timedOut) {
+    throw new Error(`git ${options.args.join(' ')} timed out`);
+  }
+  if (options.code !== 0 && !options.killed) {
+    throw new GitCommandError(
+      `${options.execName} ${options.args.join(' ')} failed: ${options.stderr}`,
+      classifyGitFailure(options.stderr),
+    );
+  }
+}
 
 export function childEnvironment(
   env: Record<string, string | undefined> = process.env,
@@ -60,15 +112,19 @@ export interface SpawnGitStreamResult {
 
 async function killSpawnedChild(
   child: ReturnType<typeof Bun.spawn>,
-  state: { killed: boolean },
+  state: KillState,
 ): Promise<void> {
-  if (state.killed || child.exitCode !== null) return;
+  if (state.killed || child.exitCode !== null) {
+    return;
+  }
   const alreadyExited = await Promise.race([
     child.exited.then(() => true),
     Bun.sleep(1).then(() => false),
   ]);
-  if (alreadyExited) return;
-  state.killed = true;
+  if (alreadyExited) {
+    return;
+  }
+  state.markKilled();
   try {
     child.kill('SIGTERM');
   } catch {
@@ -80,7 +136,7 @@ async function killSpawnedChild(
     } catch {
       /* ignore */
     }
-  }, 2000);
+  }, CHILD_KILL_GRACE_MS);
   void child.exited.then(() => {
     clearTimeout(forceKillTimer);
   });
@@ -90,13 +146,21 @@ async function spawnCore(
   args: string[],
   onChunk: (chunk: string) => void,
   options: SpawnGitOptions = {},
-  defaultMaxBytes = 1024 * 1024,
+  defaultMaxBytes = DEFAULT_GIT_OUTPUT_BYTES,
 ): Promise<{ truncated: boolean }> {
-  const maxBytes = integerInRange(options.maxBytes, 1, MAX_CHILD_OUTPUT_BYTES, defaultMaxBytes);
+  const maxBytes = integerInRange(options.maxBytes, {
+    minimum: 1,
+    maximum: MAX_CHILD_OUTPUT_BYTES,
+    fallback: defaultMaxBytes,
+  });
   const timeoutMs =
     options.timeoutMs === 0
       ? undefined
-      : integerInRange(options.timeoutMs, 1, 10 * 60 * 1000, 120_000);
+      : integerInRange(options.timeoutMs, {
+          minimum: 1,
+          maximum: MAX_GIT_TIMEOUT_MS,
+          fallback: DEFAULT_GIT_TIMEOUT_MS,
+        });
   const execName = options.execName ?? 'git';
   const child = Bun.spawn({
     cmd: [execName, ...args],
@@ -105,34 +169,50 @@ async function spawnCore(
     stderr: 'pipe',
   });
   let bytes = 0;
-  let truncated = false;
-  let timedOut = false;
-  const killState = { killed: false };
+  const outcome = { truncated: false, timedOut: false };
+  let killed = false;
+  const killState: KillState = {
+    get killed() {
+      return killed;
+    },
+    markKilled() {
+      killed = true;
+    },
+  };
   const timeout =
     timeoutMs === undefined
       ? undefined
       : setTimeout(() => {
-          timedOut = true;
+          outcome.timedOut = true;
           void killSpawnedChild(child, killState);
         }, timeoutMs);
 
   const stdoutTask = (async (): Promise<void> => {
-    const reader = child.stdout?.getReader();
-    if (!reader) return;
+    const reader = child.stdout.getReader();
     const decoder = new TextDecoder();
     for (;;) {
+      // eslint-disable-next-line no-await-in-loop -- stream chunks must be read in order.
       const { done, value } = await reader.read();
       if (done) {
         const tail = decoder.decode();
-        if (tail && !truncated) onChunk(tail);
+        if (tail !== '' && !outcome.truncated) {
+          onChunk(tail);
+        }
         break;
       }
-      if (truncated) continue;
+      if (outcome.truncated) {
+        continue;
+      }
       if (bytes + value.byteLength > maxBytes) {
-        truncated = true;
-        onChunk(decoder.decode(value.subarray(0, maxBytes - bytes), { stream: true }));
+        outcome.truncated = true;
+        onChunk(
+          decoder.decode(value.subarray(0, maxBytes - bytes), { stream: true }),
+        );
         // Hooks may outlive the cap: keep draining so git can finish its write.
-        if (options.timeoutMs === 0) continue;
+        if (options.timeoutMs === 0) {
+          continue;
+        }
+        // eslint-disable-next-line no-await-in-loop -- stream must stop only after ordered child termination.
         await killSpawnedChild(child, killState);
         break;
       }
@@ -142,20 +222,24 @@ async function spawnCore(
   })();
 
   const stderrTask = (async (): Promise<string> => {
-    const reader = child.stderr?.getReader();
-    if (!reader) return '';
+    const reader = child.stderr.getReader();
     const decoder = new TextDecoder();
     let stderr = '';
     let stderrBytes = 0;
-    const maxStderrBytes = 64 * 1024;
+    const maxStderrBytes = MAX_STDERR_BYTES;
     for (;;) {
+      // eslint-disable-next-line no-await-in-loop -- stream chunks must be read in order.
       const { done, value } = await reader.read();
       if (done) {
-        if (stderrBytes <= maxStderrBytes) stderr += decoder.decode();
+        if (stderrBytes <= maxStderrBytes) {
+          stderr += decoder.decode();
+        }
         break;
       }
       stderrBytes += value.byteLength;
-      if (stderrBytes <= maxStderrBytes) stderr += decoder.decode(value, { stream: true });
+      if (stderrBytes <= maxStderrBytes) {
+        stderr += decoder.decode(value, { stream: true });
+      }
     }
     return stderr;
   })();
@@ -163,17 +247,17 @@ async function spawnCore(
   await stdoutTask;
   const [code, stderr] = await Promise.all([child.exited, stderrTask]);
   clearTimeout(timeout);
-  if (truncated && !options.allowTruncated) {
-    throw new Error(execName + ' ' + args.join(' ') + ' output was truncated');
-  }
-  if (timedOut) throw new Error('git ' + args.join(' ') + ' timed out');
-  if (code !== 0 && !killState.killed) {
-    throw new GitCommandError(
-      execName + ' ' + args.join(' ') + ' failed: ' + stderr,
-      classifyGitFailure(stderr),
-    );
-  }
-  return { truncated };
+  validateSpawnOutcome({
+    args,
+    execName,
+    code,
+    stderr,
+    truncated: outcome.truncated,
+    timedOut: outcome.timedOut,
+    killed: killState.killed,
+    allowTruncated: options.allowTruncated,
+  });
+  return { truncated: outcome.truncated };
 }
 
 export async function spawnGitLines(
@@ -184,19 +268,24 @@ export async function spawnGitLines(
   let buf = '';
   const { truncated } = await spawnCore(
     args,
-    chunk => {
+    (chunk) => {
       buf += chunk;
-      let idx;
-      while ((idx = buf.indexOf('\n')) !== -1) {
+      let idx = buf.indexOf('\n');
+      while (idx !== -1) {
         lines.push(buf.slice(0, idx + 1));
         buf = buf.slice(idx + 1);
+        idx = buf.indexOf('\n');
       }
     },
     options,
   );
-  if (buf.length) lines.push(buf);
+  if (buf.length > 0) {
+    lines.push(buf);
+  }
   return { lines, truncated };
 }
+
+export type GitCommandRunner = typeof spawnGitStream;
 
 export async function spawnGitStream(
   args: string[],
@@ -205,11 +294,11 @@ export async function spawnGitStream(
   let text = '';
   const { truncated } = await spawnCore(
     args,
-    chunk => {
+    (chunk) => {
       text += chunk;
     },
     options,
-    50 * 1024 * 1024,
+    DEFAULT_STREAM_OUTPUT_BYTES,
   );
   return { text, truncated };
 }

@@ -1,17 +1,22 @@
-import { test, expect } from 'bun:test';
+import { expect, test } from 'bun:test';
+
 import { CLI_OPTION_DEFINITIONS, parseArgs } from '../src/cli';
 
-test('README installs from this repository', async function () {
-  const readme = await Bun.file(new URL('../README.md', import.meta.url)).text();
+test('README installs from this repository', async () => {
+  const readme = await Bun.file(
+    new URL('../README.md', import.meta.url),
+  ).text();
   expect(readme).toContain('git clone https://github.com/cebreus/gcm.git');
   expect(readme).toContain('cd gcm');
 });
 
 test('cli: every public long flag is documented in README', async () => {
-  const readme = await Bun.file(new URL('../README.md', import.meta.url)).text();
+  const readme = await Bun.file(
+    new URL('../README.md', import.meta.url),
+  ).text();
 
   for (const option of CLI_OPTION_DEFINITIONS) {
-    const longFlag = option.aliases.find(alias => alias.startsWith('--'));
+    const longFlag = option.aliases.find((alias) => alias.startsWith('--'));
     expect(longFlag).toBeDefined();
     expect(readme).toContain(longFlag ?? '');
   }
@@ -65,18 +70,22 @@ test('cli: should handle -c/--commit flag with a SHA value', () => {
 });
 
 test('cli: accepts a non-interactive commit range', () => {
-  const result = parseArgs(['--commit-range', 'base^..HEAD', '--non-interactive']);
+  const result = parseArgs([
+    '--commit-range',
+    'base^..HEAD',
+    '--non-interactive',
+  ]);
 
   expect(result.commitRange).toBe('base^..HEAD');
 });
 
 test('cli: rejects a dash-prefixed token as the commit range value', () => {
-  expect(() => parseArgs(['--commit-range', '--all', '--non-interactive', '--apply'])).toThrow(
-    'Missing value for flag: --commit-range',
-  );
-  expect(() => parseArgs(['--commit-range', '-5', '--non-interactive'])).toThrow(
-    'Missing value for flag: --commit-range',
-  );
+  expect(() =>
+    parseArgs(['--commit-range', '--all', '--non-interactive', '--apply']),
+  ).toThrow('Missing value for flag: --commit-range');
+  expect(() =>
+    parseArgs(['--commit-range', '-5', '--non-interactive']),
+  ).toThrow('Missing value for flag: --commit-range');
 });
 
 test('cli: validates commit range combinations before execution', () => {
@@ -84,11 +93,17 @@ test('cli: validates commit range combinations before execution', () => {
     '--commit-range requires --non-interactive',
   );
   expect(() =>
-    parseArgs(['--commit', 'HEAD', '--commit-range', 'base..HEAD', '--non-interactive']),
+    parseArgs([
+      '--commit',
+      'HEAD',
+      '--commit-range',
+      'base..HEAD',
+      '--non-interactive',
+    ]),
   ).toThrow('--commit and --commit-range cannot be combined');
-  expect(() => parseArgs(['--commit-range=-danger', '--non-interactive'])).toThrow(
-    '--commit-range cannot start with -',
-  );
+  expect(() =>
+    parseArgs(['--commit-range=-danger', '--non-interactive']),
+  ).toThrow('--commit-range cannot start with -');
 });
 
 test('cli: should handle -h/--help flag', () => {
@@ -115,14 +130,24 @@ test('cli: --print implies non-interactive and rejects incompatible modes', () =
   const result = parseArgs(['--print']);
   expect(result.print).toBe(true);
   expect(result.nonInteractive).toBe(true);
-  for (const flag of ['--apply', '--commit-range', '--models-list', '--providers-list']) {
-    const args = flag === '--commit-range' ? ['--print', flag, 'HEAD'] : ['--print', flag];
-    expect(() => parseArgs(args)).toThrow(`--print cannot be combined with ${flag}`);
+  for (const flag of [
+    '--apply',
+    '--commit-range',
+    '--models-list',
+    '--providers-list',
+  ]) {
+    const args =
+      flag === '--commit-range' ? ['--print', flag, 'HEAD'] : ['--print', flag];
+    expect(() => parseArgs(args)).toThrow(
+      `--print cannot be combined with ${flag}`,
+    );
   }
 });
 
 test('cli: refuses --apply without --non-interactive', () => {
-  expect(() => parseArgs(['--apply'])).toThrow('--apply requires --non-interactive');
+  expect(() => parseArgs(['--apply'])).toThrow(
+    '--apply requires --non-interactive',
+  );
 });
 
 test('cli: should handle -v/--verbose flag', () => {
@@ -156,9 +181,9 @@ test('cli: rejects repeated single-value flags', () => {
   expect(() => parseArgs(['--commit', 'abc', '--commit', 'def'])).toThrow(
     'Flag may only be specified once: --commit',
   );
-  expect(() => parseArgs(['--model', 'gemini-pro', '--model', 'gemini-flash'])).toThrow(
-    'Flag may only be specified once: --model',
-  );
+  expect(() =>
+    parseArgs(['--model', 'gemini-pro', '--model', 'gemini-flash']),
+  ).toThrow('Flag may only be specified once: --model');
 });
 
 test('cli: should handle combined flags', () => {
@@ -177,14 +202,24 @@ test('cli: should handle clustered boolean flags', () => {
 
 test('cli: gives precedence to flags over string arguments', () => {
   const fakeSha = '-h';
-  expect(() => parseArgs(['-c', fakeSha])).toThrow('Missing value for flag: -c');
+  expect(() => parseArgs(['-c', fakeSha])).toThrow(
+    'Missing value for flag: -c',
+  );
 });
 
 test('cli: rejects unknown flags', () => {
-  expect(() => parseArgs(['--commmit', 'abc123'])).toThrow('Unknown flag: --commmit');
-  expect(() => parseArgs(['--listModels'])).toThrow('Unknown flag: --listModels');
-  expect(() => parseArgs(['--list-models'])).toThrow('Unknown flag: --list-models');
-  expect(() => parseArgs(['--list-providers'])).toThrow('Unknown flag: --list-providers');
+  expect(() => parseArgs(['--commmit', 'abc123'])).toThrow(
+    'Unknown flag: --commmit',
+  );
+  expect(() => parseArgs(['--listModels'])).toThrow(
+    'Unknown flag: --listModels',
+  );
+  expect(() => parseArgs(['--list-models'])).toThrow(
+    'Unknown flag: --list-models',
+  );
+  expect(() => parseArgs(['--list-providers'])).toThrow(
+    'Unknown flag: --list-providers',
+  );
 });
 
 test('cli: rejects unknown clustered flags', () => {
@@ -192,7 +227,9 @@ test('cli: rejects unknown clustered flags', () => {
 });
 
 test('cli: rejects clusters with a non-final value-taking flag', () => {
-  expect(() => parseArgs(['-cv', 'sha'])).toThrow('Value-taking flag must be last in cluster: -cv');
+  expect(() => parseArgs(['-cv', 'sha'])).toThrow(
+    'Value-taking flag must be last in cluster: -cv',
+  );
 });
 
 test('cli: rejects malformed short flags and a bare positional dash', () => {
@@ -202,7 +239,9 @@ test('cli: rejects malformed short flags and a bare positional dash', () => {
 });
 
 test('cli: rejects string flags without a value', () => {
-  expect(() => parseArgs(['--commit'])).toThrow('Missing value for flag: --commit');
+  expect(() => parseArgs(['--commit'])).toThrow(
+    'Missing value for flag: --commit',
+  );
 });
 
 test('cli: should handle -e/--exclude flag with a single pattern', () => {
@@ -231,7 +270,12 @@ test('cli: should handle multiple --exclude flags', () => {
 });
 
 test('cli: should handle --exclude with mixed comma-separated and multiple flags', () => {
-  const result = parseArgs(['--exclude', '*manifest*,*.lock', '--exclude', 'dist/*']);
+  const result = parseArgs([
+    '--exclude',
+    '*manifest*,*.lock',
+    '--exclude',
+    'dist/*',
+  ]);
   expect(result.exclude).toEqual(['*manifest*', '*.lock', 'dist/*']);
 });
 
@@ -257,7 +301,9 @@ for (const inputCase of [
 
 test('cli: rejects an option terminator and known flags as separated exclude values', () => {
   for (const value of ['--', '-v', '--commit']) {
-    expect(() => parseArgs(['--exclude', value])).toThrow('Missing value for flag: --exclude');
+    expect(() => parseArgs(['--exclude', value])).toThrow(
+      'Missing value for flag: --exclude',
+    );
   }
 });
 
@@ -294,9 +340,15 @@ const valueTakingFlagCases = [
 for (const flagCase of valueTakingFlagCases) {
   test(`cli: validates missing values for ${flagCase.longAlias}`, () => {
     for (const alias of flagCase.aliases) {
-      expect(() => parseArgs([alias])).toThrow(`Missing value for flag: ${alias}`);
-      expect(() => parseArgs([alias, '--help'])).toThrow(`Missing value for flag: ${alias}`);
-      expect(parseArgs([alias, flagCase.value])[flagCase.option]).toEqual(flagCase.expected);
+      expect(() => parseArgs([alias])).toThrow(
+        `Missing value for flag: ${alias}`,
+      );
+      expect(() => parseArgs([alias, '--help'])).toThrow(
+        `Missing value for flag: ${alias}`,
+      );
+      expect(parseArgs([alias, flagCase.value])[flagCase.option]).toEqual(
+        flagCase.expected,
+      );
     }
 
     expect(() => parseArgs([`${flagCase.longAlias}=`])).toThrow(

@@ -1,12 +1,18 @@
-import { expect, test, mock, describe, beforeEach, afterEach } from 'bun:test';
-import { executeCommitMessageGeneration } from '../src/runner.js';
-import { createGenerationState } from '../src/generation.js';
-import { parseArgs } from '../src/cli.js';
-import packageJson from '../package.json';
-import type { Logger } from '../src/logger.js';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
+
 import { loadConfig } from '../gcm.config.js';
-const CONFIG = loadConfig({});
+import packageJson from '../package.json';
+import { parseArgs } from '../src/cli.js';
+import { createGenerationState } from '../src/generation.js';
+import type {
+  LanguageModelProvider,
+  LanguageModelProviderFactory,
+} from '../src/language-model-service.js';
+import type { Logger } from '../src/logger.js';
+import { executeCommitMessageGeneration } from '../src/runner.js';
 import { estimateTokenCount } from '../src/utils.js';
+
+const CONFIG = loadConfig({});
 
 // Mock @clack/prompts
 const mockIntro = mock();
@@ -15,15 +21,14 @@ const mockSpinner = mock(() => ({ start: mock(), stop: mock() }));
 const mockNote = mock();
 interface MockSelectRequest {
   message: string;
-  options?: { value: string }[];
+  options?: Array<{ value: string }>;
 }
 
-const mockSelect = mock((arg: MockSelectRequest) => {
-  console.log('Unexpected Select:', arg.message);
-  return Promise.resolve('cancel');
-});
-const mockText = mock(() => Promise.resolve('edited message'));
-const mockIsCancel = mock(val => val === 'cancel');
+const mockSelect = mock(
+  async (_arg: MockSelectRequest) => await Promise.resolve('cancel'),
+);
+const mockText = mock(async () => await Promise.resolve('edited message'));
+const mockIsCancel = mock((val) => val === 'cancel');
 const mockCancel = mock();
 
 void mock.module('@clack/prompts', () => ({
@@ -38,20 +43,21 @@ void mock.module('@clack/prompts', () => ({
 }));
 
 // Mock ../src/session.js
-const mockLoadSession = mock(() =>
-  Promise.resolve({
-    providerId: null as string | null,
-    modelName: null as string | null,
-  }),
+const mockLoadSession = mock(
+  async () =>
+    await Promise.resolve({
+      providerId: null as string | null,
+      modelName: null as string | null,
+    }),
 );
-const mockSaveSession = mock(() => Promise.resolve());
+const mockSaveSession = mock(async () => await Promise.resolve());
 void mock.module('../src/session.js', () => ({
   loadSession: mockLoadSession,
   saveSession: mockSaveSession,
 }));
 
 // Mock clipboardy
-const mockClipboardyWrite = mock(() => Promise.resolve());
+const mockClipboardyWrite = mock(async () => await Promise.resolve());
 void mock.module('clipboardy', () => ({
   default: {
     write: mockClipboardyWrite,
@@ -75,51 +81,95 @@ const mockGitService = {
 };
 const mockContextService = { constructLLMPromptContext: mock() };
 const mockGeminiService = { generate: mock() };
-const mockListModels = mock(() =>
-  Promise.resolve([
-    {
-      name: 'models/gemini-3.7-flash',
-      label: 'Gemini 3.7 Flash',
-      limits: { kind: 'separate' as const, maxInputTokens: 1_048_576, maxOutputTokens: 65_536 },
-    },
-    {
-      name: 'models/gemini-3.1-pro-preview',
-      label: 'Gemini 3.1 Pro Preview',
-      limits: { kind: 'separate' as const, maxInputTokens: 1_048_576, maxOutputTokens: 65_536 },
-    },
-    {
-      name: 'models/gemini-special',
-      label: 'Gemini Special',
-      limits: { kind: 'separate' as const, maxInputTokens: 1_048_576, maxOutputTokens: 65_536 },
-    },
-    {
-      name: 'models/gemini-2.5-flash',
-      label: 'Gemini 2.5 Flash',
-      limits: { kind: 'separate' as const, maxInputTokens: 1_048_576, maxOutputTokens: 65_536 },
-    },
-    {
-      name: 'models/gemini-2.5-pro',
-      label: 'Gemini 2.5 Pro',
-      limits: { kind: 'separate' as const, maxInputTokens: 1_048_576, maxOutputTokens: 65_536 },
-    },
-  ]),
+const mockListModels = mock(
+  async () =>
+    await Promise.resolve([
+      {
+        name: 'models/gemini-3.7-flash',
+        label: 'Gemini 3.7 Flash',
+        limits: {
+          kind: 'separate' as const,
+          maxInputTokens: 1_048_576,
+          maxOutputTokens: 65_536,
+        },
+      },
+      {
+        name: 'models/gemini-3.1-pro-preview',
+        label: 'Gemini 3.1 Pro Preview',
+        limits: {
+          kind: 'separate' as const,
+          maxInputTokens: 1_048_576,
+          maxOutputTokens: 65_536,
+        },
+      },
+      {
+        name: 'models/gemini-special',
+        label: 'Gemini Special',
+        limits: {
+          kind: 'separate' as const,
+          maxInputTokens: 1_048_576,
+          maxOutputTokens: 65_536,
+        },
+      },
+      {
+        name: 'models/gemini-2.5-flash',
+        label: 'Gemini 2.5 Flash',
+        limits: {
+          kind: 'separate' as const,
+          maxInputTokens: 1_048_576,
+          maxOutputTokens: 65_536,
+        },
+      },
+      {
+        name: 'models/gemini-2.5-pro',
+        label: 'Gemini 2.5 Pro',
+        limits: {
+          kind: 'separate' as const,
+          maxInputTokens: 1_048_576,
+          maxOutputTokens: 65_536,
+        },
+      },
+    ]),
 );
 
 describe('Refactored Runner', () => {
   test('Should scope restored models to their provider', () => {
-    const session = { providerId: 'gemini', modelName: 'gemini-model' } as const;
+    const session = {
+      providerId: 'gemini',
+      modelName: 'gemini-model',
+    } as const;
     expect(
-      createGenerationState(parseArgs([]), session, 'local-model', 'local').state.modelName,
+      createGenerationState({
+        parsedArgs: parseArgs([]),
+        session,
+        defaultModel: 'local-model',
+        providerId: 'local',
+      }).state.modelName,
     ).toBe('local-model');
     expect(
-      createGenerationState(parseArgs([]), session, 'fallback', 'gemini').state.modelName,
+      createGenerationState({
+        parsedArgs: parseArgs([]),
+        session,
+        defaultModel: 'fallback',
+        providerId: 'gemini',
+      }).state.modelName,
     ).toBe('gemini-model');
   });
 
   test('Should rank --model, configured model, session, then default', () => {
     const session = { providerId: 'freellmapi', modelName: 'auto' } as const;
-    const make = (args: string[], provider: string, configured?: string) =>
-      createGenerationState(parseArgs(args), session, 'dflt', provider, configured).state.modelName;
+    const make = (
+      args: string[],
+      provider: string,
+      configured?: string,
+    ): string =>
+      createGenerationState({
+        parsedArgs: parseArgs(args),
+        session,
+        defaultModel: 'dflt',
+        providerId: provider,
+        configuredModel: configured,
+      }).state.modelName;
     expect(make([], 'freellmapi', 'other')).toBe('other');
     expect(make([], 'freellmapi')).toBe('auto');
     expect(make(['--model', 'flag'], 'freellmapi', 'other')).toBe('flag');
@@ -129,12 +179,12 @@ describe('Refactored Runner', () => {
 
   test('Should seed generation with a CLI hint', () => {
     const session = { providerId: null, modelName: null } as const;
-    const state = createGenerationState(
-      parseArgs(['--hint', 'emphasize migration']),
+    const { state } = createGenerationState({
+      parsedArgs: parseArgs(['--hint', 'emphasize migration']),
       session,
-      'gemini-model',
-      'gemini',
-    ).state;
+      defaultModel: 'gemini-model',
+      providerId: 'gemini',
+    });
 
     expect(state.userHint).toBe('emphasize migration');
   });
@@ -169,12 +219,13 @@ describe('Refactored Runner', () => {
     mockSpinner.mockClear();
     mockNote.mockClear();
     mockSelect.mockReset();
-    mockSelect.mockImplementation((arg: MockSelectRequest) => {
-      console.log('Unexpected Select:', arg.message);
-      return Promise.resolve('cancel');
-    });
+    mockSelect.mockImplementation(
+      async (_arg: MockSelectRequest) => await Promise.resolve('cancel'),
+    );
     mockText.mockReset();
-    mockText.mockImplementation(() => Promise.resolve('edited message'));
+    mockText.mockImplementation(
+      async () => await Promise.resolve('edited message'),
+    );
 
     // Clear clipboardy mock
     mockClipboardyWrite.mockClear();
@@ -185,24 +236,26 @@ describe('Refactored Runner', () => {
     const model = {
       name: 'model',
       label: 'Model',
-      limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+      limits: {
+        kind: 'separate' as const,
+        maxInputTokens: 8_192,
+        maxOutputTokens: 1_024,
+      },
     };
-    const availableCreate = mock(async function (options?: { probeOnly?: boolean }) {
-      return {
-        id: 'available',
-        label: 'Available',
-        defaultModel: model.name,
-        models: async function () {
-          return [model];
+    const availableCreate = mock(async (options?: { probeOnly?: boolean }) => ({
+      id: 'available',
+      label: 'Available',
+      defaultModel: model.name,
+      models: async function () {
+        return [model];
+      },
+      service: {
+        generate: async function () {
+          return null;
         },
-        service: {
-          generate: async function () {
-            return null;
-          },
-        },
-      };
-    });
-    const missingCreate = mock(async function () {
+      },
+    }));
+    const missingCreate = mock(async () => {
       throw new Error('offline');
     });
 
@@ -219,17 +272,25 @@ describe('Refactored Runner', () => {
     expect(missingCreate).toHaveBeenCalledWith({ probeOnly: true });
     expect(process.exitCode).toBe(1);
     expect(mockGitService.getRepositoryState).not.toHaveBeenCalled();
-    if (!process.stdout.isTTY) expect(mockNote.mock.calls[0]?.[0]).not.toContain('\u001b');
+    if (!process.stdout.isTTY) {
+      expect(mockNote.mock.calls[0]?.[0]).not.toContain('\u001b');
+    }
   });
 
   test('Should list providers even when the configured provider is unknown', async () => {
-    const originalProvider = process.env.GCM_PROVIDER;
+    const {
+      env: { GCM_PROVIDER: originalProvider },
+    } = process;
     process.env.GCM_PROVIDER = 'openai';
-    const create = mock(async function () {
+    const create = mock(async () => {
       const model = {
         name: 'model',
         label: 'Model',
-        limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+        limits: {
+          kind: 'separate' as const,
+          maxInputTokens: 8_192,
+          maxOutputTokens: 1_024,
+        },
       };
       return {
         id: 'ready',
@@ -249,18 +310,23 @@ describe('Refactored Runner', () => {
     try {
       await executeCommitMessageGeneration(['--providers-list'], {
         logger: mockLogger,
-        languageModelProviderFactories: [{ id: 'ready', label: 'Ready', create }],
+        languageModelProviderFactories: [
+          { id: 'ready', label: 'Ready', create },
+        ],
       });
       expect(create).toHaveBeenCalledWith({ probeOnly: true });
       expect(process.exitCode).toBe(0);
     } finally {
-      if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
-      else process.env.GCM_PROVIDER = originalProvider;
+      if (originalProvider === undefined) {
+        delete process.env.GCM_PROVIDER;
+      } else {
+        process.env.GCM_PROVIDER = originalProvider;
+      }
     }
   });
 
   test('Should show help without probing providers when providers-list is also present', async () => {
-    const create = mock(async function () {
+    const create = mock(async () => {
       throw new Error('must not probe');
     });
 
@@ -291,7 +357,9 @@ describe('Refactored Runner', () => {
     });
 
     // Pre-flight: generate, Review: commit
-    mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+    mockSelect
+      .mockResolvedValueOnce('generate')
+      .mockResolvedValueOnce('commit');
 
     // Execute
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
@@ -308,16 +376,20 @@ describe('Refactored Runner', () => {
     expect(mockContextService.constructLLMPromptContext).toHaveBeenCalled();
     expect(mockGeminiService.generate).toHaveBeenCalled();
     expect(mockListModels).toHaveBeenCalledTimes(1);
-    const generationParams = mockGeminiService.generate.mock.calls[0]?.[0] as unknown as {
+    const generationParams = mockGeminiService.generate.mock
+      .calls[0]?.[0] as unknown as {
       systemPrompt: string;
     };
     const contextParams = mockContextService.constructLLMPromptContext.mock
       .calls[0]?.[0] as unknown as {
       maxAvailableTokens: number;
     };
-    expect(contextParams?.maxAvailableTokens).toBe(
+    expect(contextParams.maxAvailableTokens).toBe(
       1_048_576 -
-        estimateTokenCount(generationParams?.systemPrompt ?? '', CONFIG.TOKEN_BYTES_RATIO),
+        estimateTokenCount(
+          generationParams.systemPrompt,
+          CONFIG.TOKEN_BYTES_RATIO,
+        ),
     );
     expect(mockGeminiService.generate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -359,13 +431,16 @@ describe('Refactored Runner', () => {
       usage: {},
     });
 
-    await executeCommitMessageGeneration(['--non-interactive', '--model', 'gemini-3.7-flash'], {
-      logger: mockLogger,
-      gitService: mockGitService,
-      contextService: mockContextService,
-      geminiService: mockGeminiService,
-      geminiModelLister: mockListModels,
-    });
+    await executeCommitMessageGeneration(
+      ['--non-interactive', '--model', 'gemini-3.7-flash'],
+      {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        geminiModelLister: mockListModels,
+      },
+    );
 
     expect(mockSelect).not.toHaveBeenCalled();
     expect(mockNote).toHaveBeenCalledWith(
@@ -443,9 +518,12 @@ describe('Refactored Runner', () => {
     );
 
     expect(mockGitService.commitChanges).not.toHaveBeenCalled();
-    expect(mockCancel).toHaveBeenCalledWith(expect.stringContaining('truncated'), {
-      output: process.stderr,
-    });
+    expect(mockCancel).toHaveBeenCalledWith(
+      expect.stringContaining('truncated'),
+      {
+        output: process.stderr,
+      },
+    );
   });
   test('--print refuses to print a truncated message', async () => {
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
@@ -464,13 +542,16 @@ describe('Refactored Runner', () => {
       usage: {},
       truncated: true,
     });
-    await executeCommitMessageGeneration(['--print', '--model', 'gemini-3.7-flash'], {
-      logger: mockLogger,
-      gitService: mockGitService,
-      contextService: mockContextService,
-      geminiService: mockGeminiService,
-      geminiModelLister: mockListModels,
-    });
+    await executeCommitMessageGeneration(
+      ['--print', '--model', 'gemini-3.7-flash'],
+      {
+        logger: mockLogger,
+        gitService: mockGitService,
+        contextService: mockContextService,
+        geminiService: mockGeminiService,
+        geminiModelLister: mockListModels,
+      },
+    );
     expect(mockCancel).toHaveBeenCalledWith(
       expect.stringContaining('Refusing to print it.'),
       expect.anything(),
@@ -495,17 +576,19 @@ describe('Refactored Runner', () => {
       inProgressOperation: null,
       changedFiles: [],
     });
-    mockGitService.inspectCommitTarget.mockImplementation(async (hash: string) => ({
-      hash,
-      headHash: currentHead,
-      subject: 'feat: original',
-      isHead: false,
-      isPublished: false,
-      isAncestorOfHead: true,
-      isHeadDetached: false,
-      hasParent: true,
-      hasAmbiguousSubject: false,
-    }));
+    mockGitService.inspectCommitTarget.mockImplementation(
+      async (hash: string) => ({
+        hash,
+        headHash: currentHead,
+        subject: 'feat: original',
+        isHead: false,
+        isPublished: false,
+        isAncestorOfHead: true,
+        isHeadDetached: false,
+        hasParent: true,
+        hasAmbiguousSubject: false,
+      }),
+    );
     mockContextService.constructLLMPromptContext.mockResolvedValue({
       promptContext: 'ctx',
       processedDiffContent: 'diff',
@@ -536,9 +619,12 @@ describe('Refactored Runner', () => {
     );
 
     expect(mockGeminiService.generate).toHaveBeenCalled();
-    expect(mockCancel).toHaveBeenCalledWith(expect.stringContaining('truncated'), {
-      output: process.stderr,
-    });
+    expect(mockCancel).toHaveBeenCalledWith(
+      expect.stringContaining('truncated'),
+      {
+        output: process.stderr,
+      },
+    );
     expect(mockGitService.rewordCommit).not.toHaveBeenCalled();
     expect(mockGitService.amendCommit).not.toHaveBeenCalled();
   });
@@ -563,21 +649,26 @@ describe('Refactored Runner', () => {
       inProgressOperation: null,
       changedFiles: [],
     });
-    mockGitService.inspectCommitTarget.mockImplementation(async (hash: string) => ({
-      hash,
-      headHash: currentHead,
-      subject: 'feat: original',
-      isHead: hash === currentHead,
-      isPublished: false,
-      isAncestorOfHead: true,
-      isHeadDetached: false,
-      hasParent: true,
-      hasAmbiguousSubject: false,
-    }));
-    mockGitService.rewordCommit.mockImplementation(async (target: { hash: string }) => {
-      rewordedTargets.push(target.hash);
-      currentHead = currentHead === 'c'.repeat(40) ? 'd'.repeat(40) : 'e'.repeat(40);
-    });
+    mockGitService.inspectCommitTarget.mockImplementation(
+      async (hash: string) => ({
+        hash,
+        headHash: currentHead,
+        subject: 'feat: original',
+        isHead: hash === currentHead,
+        isPublished: false,
+        isAncestorOfHead: true,
+        isHeadDetached: false,
+        hasParent: true,
+        hasAmbiguousSubject: false,
+      }),
+    );
+    mockGitService.rewordCommit.mockImplementation(
+      async (target: { hash: string }) => {
+        rewordedTargets.push(target.hash);
+        currentHead =
+          currentHead === 'c'.repeat(40) ? 'd'.repeat(40) : 'e'.repeat(40);
+      },
+    );
     mockContextService.constructLLMPromptContext.mockResolvedValue({
       promptContext: 'ctx',
       processedDiffContent: 'diff',
@@ -671,7 +762,11 @@ describe('Refactored Runner', () => {
           {
             name: 'local-alt',
             label: 'Local Alternative',
-            limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+            limits: {
+              kind: 'separate' as const,
+              maxInputTokens: 8_192,
+              maxOutputTokens: 1_024,
+            },
           },
         ];
       },
@@ -693,18 +788,25 @@ describe('Refactored Runner', () => {
     expect(mockSaveSession).toHaveBeenCalledWith(
       expect.objectContaining({ providerId: 'local', modelName: 'local-alt' }),
     );
-    expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('Local Commit Message Helper'), {
-      output: process.stderr,
-    });
+    expect(mockIntro).toHaveBeenCalledWith(
+      expect.stringContaining('Local Commit Message Helper'),
+      {
+        output: process.stderr,
+      },
+    );
 
-    const originalStdoutWrite = process.stdout.write;
+    const {
+      stdout: { write: originalStdoutWrite },
+    } = process;
     const helpOutput: string[] = [];
     process.stdout.write = mock((chunk: string | Uint8Array) => {
       helpOutput.push(String(chunk));
       return true;
-    }) as unknown as typeof process.stdout.write;
+    });
     try {
-      await executeCommitMessageGeneration(['--help'], { languageModelProvider: provider });
+      await executeCommitMessageGeneration(['--help'], {
+        languageModelProvider: provider,
+      });
     } finally {
       process.stdout.write = originalStdoutWrite;
     }
@@ -713,7 +815,10 @@ describe('Refactored Runner', () => {
   });
 
   test('Should recompose services after selecting another provider', async () => {
-    const geminiGenerate = mock(async () => ({ text: 'test: wrong', usage: {} }));
+    const geminiGenerate = mock(async () => ({
+      text: 'test: wrong',
+      usage: {},
+    }));
     const localGenerate = mock(async () => ({
       text: 'test: local result',
       usage: {},
@@ -735,7 +840,11 @@ describe('Refactored Runner', () => {
       .mockResolvedValueOnce('local')
       .mockResolvedValueOnce('generate')
       .mockResolvedValueOnce('commit');
-    function provider(id: string, label: string, generate: typeof localGenerate) {
+    function provider(
+      id: string,
+      label: string,
+      generate: typeof localGenerate,
+    ): LanguageModelProvider {
       return {
         id,
         label,
@@ -745,7 +854,11 @@ describe('Refactored Runner', () => {
             {
               name: `${id}-model`,
               label,
-              limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+              limits: {
+                kind: 'separate' as const,
+                maxInputTokens: 8_192,
+                maxOutputTokens: 1_024,
+              },
             },
           ];
         },
@@ -779,7 +892,10 @@ describe('Refactored Runner', () => {
     expect(geminiGenerate).not.toHaveBeenCalled();
     expect(localGenerate).toHaveBeenCalledTimes(1);
     expect(mockSaveSession).toHaveBeenCalledWith(
-      expect.objectContaining({ providerId: 'local', modelName: 'local-model' }),
+      expect.objectContaining({
+        providerId: 'local',
+        modelName: 'local-model',
+      }),
     );
   });
 
@@ -808,7 +924,11 @@ describe('Refactored Runner', () => {
     const spec = {
       name: 'model',
       label: 'Model',
-      limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+      limits: {
+        kind: 'separate' as const,
+        maxInputTokens: 8_192,
+        maxOutputTokens: 1_024,
+      },
     };
     await executeCommitMessageGeneration([], {
       isInteractive: true,
@@ -853,34 +973,53 @@ describe('Refactored Runner', () => {
   });
 
   test('Should keep version independent from invalid provider selection', async () => {
-    const originalProvider = process.env.GCM_PROVIDER;
+    const {
+      env: { GCM_PROVIDER: originalProvider },
+    } = process;
     process.env.GCM_PROVIDER = 'missing';
     try {
-      await executeCommitMessageGeneration(['--version'], { logger: mockLogger });
+      await executeCommitMessageGeneration(['--version'], {
+        logger: mockLogger,
+      });
       expect(process.exitCode).not.toBe(1);
     } finally {
-      if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
-      else process.env.GCM_PROVIDER = originalProvider;
+      if (originalProvider === undefined) {
+        delete process.env.GCM_PROVIDER;
+      } else {
+        process.env.GCM_PROVIDER = originalProvider;
+      }
     }
   });
 
   test('Should prefer the freellmapi provider over the environment', async () => {
-    const originalProvider = process.env.GCM_PROVIDER;
+    const {
+      env: { GCM_PROVIDER: originalProvider },
+    } = process;
     process.env.GCM_PROVIDER = 'lm-studio';
     try {
-      await executeCommitMessageGeneration(['--provider', 'freellmapi', '--help'], {
-        logger: mockLogger,
-      });
+      await executeCommitMessageGeneration(
+        ['--provider', 'freellmapi', '--help'],
+        {
+          logger: mockLogger,
+        },
+      );
       expect(process.exitCode).toBe(0);
-      expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('FreeLLMAPI'));
+      expect(mockIntro).toHaveBeenCalledWith(
+        expect.stringContaining('FreeLLMAPI'),
+      );
     } finally {
-      if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
-      else process.env.GCM_PROVIDER = originalProvider;
+      if (originalProvider === undefined) {
+        delete process.env.GCM_PROVIDER;
+      } else {
+        process.env.GCM_PROVIDER = originalProvider;
+      }
     }
   });
 
   test('Should still show help for an unknown provider', async () => {
-    const originalProvider = process.env.GCM_PROVIDER;
+    const {
+      env: { GCM_PROVIDER: originalProvider },
+    } = process;
     process.env.GCM_PROVIDER = 'missing';
     try {
       await executeCommitMessageGeneration(['--help'], { logger: mockLogger });
@@ -888,31 +1027,45 @@ describe('Refactored Runner', () => {
       expect(mockCancel).not.toHaveBeenCalled();
       expect(mockIntro).toHaveBeenCalled();
     } finally {
-      if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
-      else process.env.GCM_PROVIDER = originalProvider;
+      if (originalProvider === undefined) {
+        delete process.env.GCM_PROVIDER;
+      } else {
+        process.env.GCM_PROVIDER = originalProvider;
+      }
     }
   });
 
   test('Should show LM Studio help without contacting the server', async () => {
-    const originalProvider = process.env.GCM_PROVIDER;
-    const originalUrl = process.env.GCM_LM_STUDIO_URL;
+    const {
+      env: { GCM_PROVIDER: originalProvider, GCM_LM_STUDIO_URL: originalUrl },
+    } = process;
     process.env.GCM_PROVIDER = 'lm-studio';
     process.env.GCM_LM_STUDIO_URL = 'http://127.0.0.1:1';
     try {
       await executeCommitMessageGeneration(['--help'], { logger: mockLogger });
       expect(process.exitCode).toBe(0);
-      expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('LM Studio'));
+      expect(mockIntro).toHaveBeenCalledWith(
+        expect.stringContaining('LM Studio'),
+      );
       expect(mockCancel).not.toHaveBeenCalled();
     } finally {
-      if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
-      else process.env.GCM_PROVIDER = originalProvider;
-      if (originalUrl === undefined) delete process.env.GCM_LM_STUDIO_URL;
-      else process.env.GCM_LM_STUDIO_URL = originalUrl;
+      if (originalProvider === undefined) {
+        delete process.env.GCM_PROVIDER;
+      } else {
+        process.env.GCM_PROVIDER = originalProvider;
+      }
+      if (originalUrl === undefined) {
+        delete process.env.GCM_LM_STUDIO_URL;
+      } else {
+        process.env.GCM_LM_STUDIO_URL = originalUrl;
+      }
     }
   });
 
   test('Should show the session provider in help when nothing else selects one', async () => {
-    const originalProvider = process.env.GCM_PROVIDER;
+    const {
+      env: { GCM_PROVIDER: originalProvider },
+    } = process;
     delete process.env.GCM_PROVIDER;
     mockLoadSession.mockResolvedValueOnce({
       providerId: 'lm-studio',
@@ -920,10 +1073,15 @@ describe('Refactored Runner', () => {
     });
     try {
       await executeCommitMessageGeneration(['--help'], { logger: mockLogger });
-      expect(mockIntro).toHaveBeenCalledWith(expect.stringContaining('LM Studio'));
+      expect(mockIntro).toHaveBeenCalledWith(
+        expect.stringContaining('LM Studio'),
+      );
     } finally {
-      if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
-      else process.env.GCM_PROVIDER = originalProvider;
+      if (originalProvider === undefined) {
+        delete process.env.GCM_PROVIDER;
+      } else {
+        process.env.GCM_PROVIDER = originalProvider;
+      }
     }
   });
 
@@ -935,9 +1093,14 @@ describe('Refactored Runner', () => {
       sessionProvider: string | null,
       sessionModel: string | null = null,
     ): Promise<{ created: string[]; generate: ReturnType<typeof mock> }> {
-      const originalProvider = process.env.GCM_PROVIDER;
-      if (env === undefined) delete process.env.GCM_PROVIDER;
-      else process.env.GCM_PROVIDER = env;
+      const {
+        env: { GCM_PROVIDER: originalProvider },
+      } = process;
+      if (env === undefined) {
+        delete process.env.GCM_PROVIDER;
+      } else {
+        process.env.GCM_PROVIDER = env;
+      }
       mockLoadSession.mockResolvedValueOnce({
         providerId: sessionProvider,
         modelName: sessionModel,
@@ -952,16 +1115,24 @@ describe('Refactored Runner', () => {
         processedDiffContent: 'diff',
         tokens: 10,
       });
-      mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+      mockSelect
+        .mockResolvedValueOnce('generate')
+        .mockResolvedValueOnce('commit');
       const created: string[] = [];
-      const generate = mock(() => Promise.resolve({ text: 'test: msg', usage: {} }));
-      const limits = { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 };
+      const generate = mock(
+        async () => await Promise.resolve({ text: 'test: msg', usage: {} }),
+      );
+      const limits = {
+        kind: 'separate' as const,
+        maxInputTokens: 8_192,
+        maxOutputTokens: 1_024,
+      };
       try {
         await executeCommitMessageGeneration(args, {
           logger: mockLogger,
           gitService: mockGitService,
           contextService: mockContextService,
-          languageModelProviderFactories: ids.map(id => ({
+          languageModelProviderFactories: ids.map((id) => ({
             id,
             label: id,
             create: async () => {
@@ -971,27 +1142,36 @@ describe('Refactored Runner', () => {
                 label: id,
                 defaultModel: 'dflt',
                 models: async () =>
-                  ['dflt', 'saved-model'].map(name => ({ name, label: name, limits })),
+                  ['dflt', 'saved-model'].map((name) => ({
+                    name,
+                    label: name,
+                    limits,
+                  })),
                 service: { generate },
               };
             },
           })),
         });
       } finally {
-        if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
-        else process.env.GCM_PROVIDER = originalProvider;
+        if (originalProvider === undefined) {
+          delete process.env.GCM_PROVIDER;
+        } else {
+          process.env.GCM_PROVIDER = originalProvider;
+        }
       }
       return { created, generate };
     }
 
     test('Should use the session provider without flag or environment', async () => {
-      expect((await createdProviders([], undefined, 'lm-studio')).created).toEqual(['lm-studio']);
+      expect(
+        (await createdProviders([], undefined, 'lm-studio')).created,
+      ).toEqual(['lm-studio']);
     });
 
     test('Should rank GCM_PROVIDER above the session provider', async () => {
-      expect((await createdProviders([], 'freellmapi', 'lm-studio')).created).toEqual([
-        'freellmapi',
-      ]);
+      expect(
+        (await createdProviders([], 'freellmapi', 'lm-studio')).created,
+      ).toEqual(['freellmapi']);
     });
 
     test('Should rank --provider above environment and session', async () => {
@@ -1004,19 +1184,29 @@ describe('Refactored Runner', () => {
     });
 
     describe('provider creation failures', () => {
-      const limits = { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 };
-      const factories = (failing: string, error: Error) =>
-        ids.map(id => ({
+      const limits = {
+        kind: 'separate' as const,
+        maxInputTokens: 8_192,
+        maxOutputTokens: 1_024,
+      };
+      const factories = (
+        failing: string,
+        error: Error,
+      ): LanguageModelProviderFactory[] =>
+        ids.map((id) => ({
           id,
           label: id,
-          create: () =>
+          create: async () =>
             id === failing
-              ? Promise.reject(error)
-              : Promise.resolve({
+              ? await Promise.reject(error)
+              : await Promise.resolve({
                   id,
                   label: id,
                   defaultModel: 'dflt',
-                  models: () => Promise.resolve([{ name: 'dflt', label: 'dflt', limits }]),
+                  models: async () =>
+                    await Promise.resolve([
+                      { name: 'dflt', label: 'dflt', limits },
+                    ]),
                   service: { generate: mock() },
                 }),
         }));
@@ -1026,16 +1216,26 @@ describe('Refactored Runner', () => {
         error: Error,
         isInteractive: boolean,
       ): Promise<string[]> {
-        const originalProvider = process.env.GCM_PROVIDER;
-        if (env === undefined) delete process.env.GCM_PROVIDER;
-        else process.env.GCM_PROVIDER = env;
-        mockLoadSession.mockResolvedValueOnce({ providerId: 'lm-studio', modelName: null });
+        const {
+          env: { GCM_PROVIDER: originalProvider },
+        } = process;
+        if (env === undefined) {
+          delete process.env.GCM_PROVIDER;
+        } else {
+          process.env.GCM_PROVIDER = env;
+        }
+        mockLoadSession.mockResolvedValueOnce({
+          providerId: 'lm-studio',
+          modelName: null,
+        });
         const writes: string[] = [];
-        const originalWrite = process.stderr.write;
+        const {
+          stderr: { write: originalWrite },
+        } = process;
         process.stderr.write = mock((chunk: string | Uint8Array) => {
           writes.push(String(chunk));
           return true;
-        }) as unknown as typeof process.stderr.write;
+        });
         try {
           await executeCommitMessageGeneration(args, {
             logger: mockLogger,
@@ -1045,8 +1245,11 @@ describe('Refactored Runner', () => {
           });
         } finally {
           process.stderr.write = originalWrite;
-          if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
-          else process.env.GCM_PROVIDER = originalProvider;
+          if (originalProvider === undefined) {
+            delete process.env.GCM_PROVIDER;
+          } else {
+            process.env.GCM_PROVIDER = originalProvider;
+          }
         }
         return writes;
       }
@@ -1055,7 +1258,12 @@ describe('Refactored Runner', () => {
         mockCancel.mockClear();
         mockNote.mockClear();
         process.exitCode = 0;
-        const writes = await run(['--models-list'], undefined, new Error('down'), false);
+        const writes = await run(
+          ['--models-list'],
+          undefined,
+          new Error('down'),
+          false,
+        );
         expect(process.exitCode).toBe(0);
         expect(writes.join('')).toContain('lm-studio');
         expect(mockCancel).not.toHaveBeenCalled();
@@ -1076,34 +1284,52 @@ describe('Refactored Runner', () => {
           processedDiffContent: 'diff',
           tokens: 10,
         });
-        mockLoadSession.mockResolvedValueOnce({ providerId: 'lm-studio', modelName: 'saved' });
-        const originalProvider = process.env.GCM_PROVIDER;
+        mockLoadSession.mockResolvedValueOnce({
+          providerId: 'lm-studio',
+          modelName: 'saved',
+        });
+        const {
+          env: { GCM_PROVIDER: originalProvider },
+        } = process;
         delete process.env.GCM_PROVIDER;
-        const originalWrite = process.stderr.write;
-        process.stderr.write = mock(() => true) as unknown as typeof process.stderr.write;
+        const {
+          stderr: { write: originalWrite },
+        } = process;
+        process.stderr.write = mock(() => true);
         try {
-          await executeCommitMessageGeneration(['--non-interactive', '--apply'], {
-            logger: mockLogger,
-            gitService: mockGitService,
-            contextService: mockContextService,
-            isInteractive: false,
-            languageModelProviderFactories: factories('lm-studio', new Error('down')).map(f => ({
-              ...f,
-              create: async () => {
-                const p = await f.create();
-                return {
-                  ...p,
-                  service: {
-                    generate: () =>
-                      Promise.resolve({ text: 'fix(scope): generated message', usage: {} }),
-                  },
-                };
-              },
-            })),
-          });
+          await executeCommitMessageGeneration(
+            ['--non-interactive', '--apply'],
+            {
+              logger: mockLogger,
+              gitService: mockGitService,
+              contextService: mockContextService,
+              isInteractive: false,
+              languageModelProviderFactories: factories(
+                'lm-studio',
+                new Error('down'),
+              ).map((f) => ({
+                ...f,
+                create: async () => {
+                  const p = await f.create();
+                  return {
+                    ...p,
+                    service: {
+                      generate: async () =>
+                        await Promise.resolve({
+                          text: 'fix(scope): generated message',
+                          usage: {},
+                        }),
+                    },
+                  };
+                },
+              })),
+            },
+          );
         } finally {
           process.stderr.write = originalWrite;
-          if (originalProvider !== undefined) process.env.GCM_PROVIDER = originalProvider;
+          if (originalProvider !== undefined) {
+            process.env.GCM_PROVIDER = originalProvider;
+          }
         }
         expect(mockCancel.mock.calls).toEqual([]);
         expect(mockGitService.commitChanges).toHaveBeenCalled();
@@ -1127,24 +1353,36 @@ describe('Refactored Runner', () => {
       test('Should fail plainly when the failing session provider is the first one', async () => {
         mockCancel.mockClear();
         process.exitCode = 0;
-        mockLoadSession.mockResolvedValueOnce({ providerId: 'gemini', modelName: null });
+        mockLoadSession.mockResolvedValueOnce({
+          providerId: 'gemini',
+          modelName: null,
+        });
         const writes: string[] = [];
-        const originalWrite = process.stderr.write;
+        const {
+          stderr: { write: originalWrite },
+        } = process;
         process.stderr.write = mock((chunk: string | Uint8Array) => {
           writes.push(String(chunk));
           return true;
-        }) as unknown as typeof process.stderr.write;
-        const originalProvider = process.env.GCM_PROVIDER;
+        });
+        const {
+          env: { GCM_PROVIDER: originalProvider },
+        } = process;
         delete process.env.GCM_PROVIDER;
         try {
           await executeCommitMessageGeneration(['--models-list'], {
             logger: mockLogger,
             isInteractive: false,
-            languageModelProviderFactories: factories('gemini', new Error('down')),
+            languageModelProviderFactories: factories(
+              'gemini',
+              new Error('down'),
+            ),
           });
         } finally {
           process.stderr.write = originalWrite;
-          if (originalProvider !== undefined) process.env.GCM_PROVIDER = originalProvider;
+          if (originalProvider !== undefined) {
+            process.env.GCM_PROVIDER = originalProvider;
+          }
         }
         expect(process.exitCode).toBe(1);
         expect(mockCancel.mock.calls[0]?.[0]).toBe('Error: down.');
@@ -1164,8 +1402,15 @@ describe('Refactored Runner', () => {
         const error = Object.assign(new Error('LM Studio request timed out'), {
           name: 'LanguageModelApiError',
         });
-        await run(['--models-list', '--provider', 'lm-studio'], undefined, error, false);
-        expect(mockCancel.mock.calls[0]?.[0]).toBe('Error: LM Studio request timed out.');
+        await run(
+          ['--models-list', '--provider', 'lm-studio'],
+          undefined,
+          error,
+          false,
+        );
+        expect(mockCancel.mock.calls[0]?.[0]).toBe(
+          'Error: LM Studio request timed out.',
+        );
       });
 
       test('Should route the unavailable note and selector to stderr', async () => {
@@ -1174,12 +1419,19 @@ describe('Refactored Runner', () => {
         mockSelect.mockResolvedValueOnce('cancel');
         await run([], 'lm-studio', new Error('down'), true);
         expect(mockNote.mock.calls[0]?.[2]).toEqual({ output: process.stderr });
-        expect(mockSelect.mock.calls[0]?.[0]).toMatchObject({ output: process.stderr });
+        expect(mockSelect.mock.calls[0]?.[0]).toMatchObject({
+          output: process.stderr,
+        });
       });
 
       test('Should name the rejected provider and the valid ids', async () => {
         mockCancel.mockClear();
-        await run(['--provider', 'bogus\u001b'], undefined, new Error('x'), false);
+        await run(
+          ['--provider', 'bogus\u001b'],
+          undefined,
+          new Error('x'),
+          false,
+        );
         expect(mockCancel.mock.calls[0]?.[0]).toBe(
           'Error: Unknown language model provider "bogus". Valid: gemini, freellmapi, lm-studio.',
         );
@@ -1188,17 +1440,28 @@ describe('Refactored Runner', () => {
 
     test('Should ignore an unknown session provider silently', async () => {
       mockCancel.mockClear();
-      expect((await createdProviders([], undefined, 'ghost')).created).toEqual(['gemini']);
+      expect((await createdProviders([], undefined, 'ghost')).created).toEqual([
+        'gemini',
+      ]);
       expect(mockCancel).not.toHaveBeenCalled();
     });
 
     test('Should use the first provider without a session', async () => {
-      expect((await createdProviders([], undefined, null)).created).toEqual(['gemini']);
+      expect((await createdProviders([], undefined, null)).created).toEqual([
+        'gemini',
+      ]);
     });
 
     test('Should use the session model of the session provider', async () => {
-      const { generate } = await createdProviders([], undefined, 'lm-studio', 'saved-model');
-      expect(generate).toHaveBeenCalledWith(expect.objectContaining({ modelName: 'saved-model' }));
+      const { generate } = await createdProviders(
+        [],
+        undefined,
+        'lm-studio',
+        'saved-model',
+      );
+      expect(generate).toHaveBeenCalledWith(
+        expect.objectContaining({ modelName: 'saved-model' }),
+      );
     });
   });
 
@@ -1213,7 +1476,11 @@ describe('Refactored Runner', () => {
           {
             name: 'gemini-3.7-flash',
             label: 'Gemini',
-            limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+            limits: {
+              kind: 'separate' as const,
+              maxInputTokens: 8_192,
+              maxOutputTokens: 1_024,
+            },
           },
         ];
       },
@@ -1241,17 +1508,21 @@ describe('Refactored Runner', () => {
       ],
     });
     expect(
-      mockSelect.mock.calls.some(call => String(call[0]?.message).startsWith('Settings:')),
+      mockSelect.mock.calls.some((call) =>
+        call[0].message.startsWith('Settings:'),
+      ),
     ).toBe(false);
   });
 
   test('Should print package version and exit on --version', async () => {
-    const originalStdoutWrite = process.stdout.write;
+    const {
+      stdout: { write: originalStdoutWrite },
+    } = process;
     const stdoutChunks: string[] = [];
     process.stdout.write = mock((chunk: string | Uint8Array) => {
       stdoutChunks.push(String(chunk));
       return true;
-    }) as unknown as typeof process.stdout.write;
+    });
 
     try {
       await executeCommitMessageGeneration(['--version'], {
@@ -1272,7 +1543,7 @@ describe('Refactored Runner', () => {
   });
 
   test('Should report argument validation failures without throwing', async () => {
-    const originalExitCode = process.exitCode;
+    const { exitCode: originalExitCode } = process;
     process.exitCode = 0;
 
     try {
@@ -1290,7 +1561,7 @@ describe('Refactored Runner', () => {
         'Error: Unknown flag: --commmit. Run gcm --help for usage.',
         { output: process.stderr },
       );
-      expect(Number(process.exitCode)).toBe(1);
+      expect(process.exitCode).toBe(1);
     } finally {
       process.exitCode = originalExitCode ?? 0;
     }
@@ -1331,7 +1602,11 @@ describe('Refactored Runner', () => {
             {
               name: 'local-model',
               label: 'Local model',
-              limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+              limits: {
+                kind: 'separate' as const,
+                maxInputTokens: 8_192,
+                maxOutputTokens: 1_024,
+              },
             },
           ];
         },
@@ -1343,15 +1618,21 @@ describe('Refactored Runner', () => {
       },
     });
 
-    expect(mockCancel).toHaveBeenCalledWith('Error: Invalid credential: [REDACTED-KEY]', {
-      output: process.stderr,
-    });
+    expect(mockCancel).toHaveBeenCalledWith(
+      'Error: Invalid credential: [REDACTED-KEY]',
+      {
+        output: process.stderr,
+      },
+    );
   });
 
   test('Should report provider API errors by metadata shape', async () => {
     const error = Object.assign(new Error('quota exhausted'), {
       name: 'LanguageModelApiError',
-      metadata: { status: 429, snippet: '{"error":{"message":"quota exhausted"}}' },
+      metadata: {
+        status: 429,
+        snippet: '{"error":{"message":"quota exhausted"}}',
+      },
     });
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
@@ -1365,7 +1646,10 @@ describe('Refactored Runner', () => {
     });
     mockGeminiService.generate
       .mockRejectedValueOnce(error)
-      .mockResolvedValueOnce({ text: 'BRANCH: fix/retry\nfix: recover generation', usage: {} });
+      .mockResolvedValueOnce({
+        text: 'BRANCH: fix/retry\nfix: recover generation',
+        usage: {},
+      });
     mockSelect
       .mockResolvedValueOnce('generate')
       .mockResolvedValueOnce('retry')
@@ -1381,7 +1665,10 @@ describe('Refactored Runner', () => {
 
     expect(mockGeminiService.generate).toHaveBeenCalledTimes(2);
     expect(mockGitService.retrieveStagedChanges).toHaveBeenCalledTimes(1);
-    expect(mockNote).toHaveBeenCalledWith('API Error (429): quota exhausted', 'Details');
+    expect(mockNote).toHaveBeenCalledWith(
+      'API Error (429): quota exhausted',
+      'Details',
+    );
   });
 
   test('Should present request timeouts without an unknown API status', async () => {
@@ -1410,7 +1697,10 @@ describe('Refactored Runner', () => {
       geminiModelLister: mockListModels,
     });
 
-    expect(mockNote).toHaveBeenCalledWith('FreeLLMAPI request timed out', 'Details');
+    expect(mockNote).toHaveBeenCalledWith(
+      'FreeLLMAPI request timed out',
+      'Details',
+    );
   });
 
   test('Should remove terminal controls from Gemini API error messages', async () => {
@@ -1443,16 +1733,21 @@ describe('Refactored Runner', () => {
       geminiModelLister: mockListModels,
     });
 
-    expect(mockNote).toHaveBeenCalledWith('API Error (429): badlink', 'Details');
+    expect(mockNote).toHaveBeenCalledWith(
+      'API Error (429): badlink',
+      'Details',
+    );
   });
 
   test('Should include version details in --help output', async () => {
-    const originalStdoutWrite = process.stdout.write;
+    const {
+      stdout: { write: originalStdoutWrite },
+    } = process;
     const stdoutChunks: string[] = [];
     process.stdout.write = mock((chunk: string | Uint8Array) => {
       stdoutChunks.push(String(chunk));
       return true;
-    }) as unknown as typeof process.stdout.write;
+    });
 
     try {
       await executeCommitMessageGeneration(['--help'], {
@@ -1522,7 +1817,9 @@ describe('Refactored Runner', () => {
       truncated: false,
       snapshot: {
         tree: 'original-tree',
-        entries: [{ path: 'file.ts', mode: '100644', objectId: '1'.repeat(40) }],
+        entries: [
+          { path: 'file.ts', mode: '100644', objectId: '1'.repeat(40) },
+        ],
       },
     });
     mockGitService.getIndexTree
@@ -1542,7 +1839,9 @@ describe('Refactored Runner', () => {
       text: 'test: initial message',
       usage: {},
     });
-    mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+    mockSelect
+      .mockResolvedValueOnce('generate')
+      .mockResolvedValueOnce('commit');
 
     await executeCommitMessageGeneration([], {
       logger: mockLogger as unknown as Logger,
@@ -1562,7 +1861,7 @@ describe('Refactored Runner', () => {
   test('Should handle no staged changes', async () => {
     mockGitService.retrieveStagedChanges.mockResolvedValue(null);
     mockSelect.mockResolvedValueOnce('generate'); // Pre-flight
-    const originalExitCode = process.exitCode;
+    const { exitCode: originalExitCode } = process;
     process.exitCode = 0;
 
     try {
@@ -1574,15 +1873,17 @@ describe('Refactored Runner', () => {
         geminiModelLister: mockListModels,
       });
       expect(mockGeminiService.generate).not.toHaveBeenCalled();
-      expect(Number(process.exitCode)).toBe(1);
+      expect(process.exitCode).toBe(1);
     } finally {
       process.exitCode = originalExitCode ?? 0;
     }
   });
 
   test('Should fail when Git has unresolved conflicts', async () => {
-    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
-    const originalExitCode = process.exitCode;
+    const {
+      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      exitCode: originalExitCode,
+    } = process;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
     process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
@@ -1613,11 +1914,14 @@ describe('Refactored Runner', () => {
       );
       expect(mockSelect).not.toHaveBeenCalled();
       expect(mockGeminiService.generate).not.toHaveBeenCalled();
-      expect(Number(process.exitCode)).toBe(1);
+      expect(process.exitCode).toBe(1);
     } finally {
       process.exitCode = originalExitCode ?? 0;
-      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      if (originalApiKey === undefined) {
+        delete process.env.GOOGLE_GEMINI_API_KEY;
+      } else {
+        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      }
     }
   });
 
@@ -1634,7 +1938,9 @@ describe('Refactored Runner', () => {
     },
   ]) {
     test(`Should offer settings unless ${inputCase.name}`, async () => {
-      const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+      const {
+        env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      } = process;
       process.env.GOOGLE_GEMINI_API_KEY = 'test';
       mockGitService.retrieveStagedChanges.mockResolvedValue({
         stagedDiff: 'diff',
@@ -1653,7 +1959,7 @@ describe('Refactored Runner', () => {
         });
 
         if (inputCase.expectSettings === null) {
-          const settingsPrompts = mockSelect.mock.calls.filter(function (call) {
+          const settingsPrompts = mockSelect.mock.calls.filter((call) => {
             const options: unknown = call[0];
             return (
               typeof options === 'object' &&
@@ -1670,14 +1976,19 @@ describe('Refactored Runner', () => {
           expect(mockGeminiService.generate).not.toHaveBeenCalled();
         }
       } finally {
-        if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-        else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+        if (originalApiKey === undefined) {
+          delete process.env.GOOGLE_GEMINI_API_KEY;
+        } else {
+          process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+        }
       }
     });
   }
 
   test('Should show the latest repository state discovered during preflight', async () => {
-    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    const {
+      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+    } = process;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
@@ -1724,13 +2035,18 @@ describe('Refactored Runner', () => {
       );
       expect(mockSelect).toHaveBeenCalled();
     } finally {
-      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      if (originalApiKey === undefined) {
+        delete process.env.GOOGLE_GEMINI_API_KEY;
+      } else {
+        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      }
     }
   });
 
   test('Should keep generation read-only while a rebase is in progress', async () => {
-    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    const {
+      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+    } = process;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
     mockGitService.commitChanges.mockClear();
     mockGitService.amendCommit.mockClear();
@@ -1774,25 +2090,28 @@ describe('Refactored Runner', () => {
         'Commit unavailable',
       );
       const reviewRequest = mockSelect.mock.calls
-        .map(function ([request]) {
-          return request;
-        })
-        .find(function (request) {
-          return request.message === 'What would you like to do?';
-        });
-      expect(reviewRequest?.options?.some(({ value }) => value === 'commit')).toBe(false);
+        .map(([request]) => request)
+        .find((request) => request.message === 'What would you like to do?');
+      expect(
+        reviewRequest?.options?.some(({ value }) => value === 'commit'),
+      ).toBe(false);
       expect(mockGitService.commitChanges).not.toHaveBeenCalled();
       expect(mockGitService.amendCommit).not.toHaveBeenCalled();
       expect(mockGitService.rewordCommit).not.toHaveBeenCalled();
       expect(mockSaveSession).not.toHaveBeenCalled();
     } finally {
-      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      if (originalApiKey === undefined) {
+        delete process.env.GOOGLE_GEMINI_API_KEY;
+      } else {
+        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      }
     }
   });
 
   test('Should stop before settings when the staged snapshot changed', async () => {
-    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    const {
+      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+    } = process;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
@@ -1819,14 +2138,19 @@ describe('Refactored Runner', () => {
       expect(mockSelect).not.toHaveBeenCalled();
       expect(mockGeminiService.generate).not.toHaveBeenCalled();
     } finally {
-      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      if (originalApiKey === undefined) {
+        delete process.env.GOOGLE_GEMINI_API_KEY;
+      } else {
+        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      }
     }
   });
 
   test('Should fail when Gemini returns malformed full output', async () => {
-    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
-    const originalExitCode = process.exitCode;
+    const {
+      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      exitCode: originalExitCode,
+    } = process;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
     process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
@@ -1853,20 +2177,28 @@ describe('Refactored Runner', () => {
         geminiModelLister: mockListModels,
       });
 
-      expect(mockCancel).toHaveBeenCalledWith('Failed to parse structured output.', {
-        output: process.stderr,
-      });
-      expect(Number(process.exitCode)).toBe(1);
+      expect(mockCancel).toHaveBeenCalledWith(
+        'Failed to parse structured output.',
+        {
+          output: process.stderr,
+        },
+      );
+      expect(process.exitCode).toBe(1);
     } finally {
       process.exitCode = originalExitCode ?? 0;
-      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      if (originalApiKey === undefined) {
+        delete process.env.GOOGLE_GEMINI_API_KEY;
+      } else {
+        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      }
     }
   });
 
   test('Should remove terminal controls before logging an unparseable model response', async () => {
-    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
-    const originalExitCode = process.exitCode;
+    const {
+      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      exitCode: originalExitCode,
+    } = process;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
     process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
@@ -1893,17 +2225,25 @@ describe('Refactored Runner', () => {
         geminiModelLister: mockListModels,
       });
 
-      expect(mockLogger.log).toHaveBeenCalledWith('info', 'unparseable response');
+      expect(mockLogger.log).toHaveBeenCalledWith(
+        'info',
+        'unparseable response',
+      );
     } finally {
       process.exitCode = originalExitCode ?? 0;
-      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      if (originalApiKey === undefined) {
+        delete process.env.GOOGLE_GEMINI_API_KEY;
+      } else {
+        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      }
     }
   });
 
   test('Should return to review when the commit action fails', async () => {
-    const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
-    const originalExitCode = process.exitCode;
+    const {
+      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      exitCode: originalExitCode,
+    } = process;
     process.env.GOOGLE_GEMINI_API_KEY = 'test';
     process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
@@ -1920,7 +2260,9 @@ describe('Refactored Runner', () => {
       text: 'test: message',
       usage: {},
     });
-    mockGitService.commitChanges.mockRejectedValueOnce(new Error('git commit failed'));
+    mockGitService.commitChanges.mockRejectedValueOnce(
+      new Error('git commit failed'),
+    );
     mockSelect.mockResolvedValueOnce('commit').mockResolvedValueOnce('cancel');
 
     try {
@@ -1938,11 +2280,14 @@ describe('Refactored Runner', () => {
         { output: process.stderr },
       );
       expect(mockSelect).toHaveBeenCalledTimes(2);
-      expect(Number(process.exitCode)).toBe(0);
+      expect(process.exitCode).toBe(0);
     } finally {
       process.exitCode = originalExitCode ?? 0;
-      if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-      else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      if (originalApiKey === undefined) {
+        delete process.env.GOOGLE_GEMINI_API_KEY;
+      } else {
+        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      }
     }
   });
 
@@ -1979,7 +2324,10 @@ describe('Refactored Runner', () => {
     // Verify clipboardy.write was called with correct message (extracted)
     expect(mockClipboardyWrite).toHaveBeenCalledWith('test: message');
     // Verify note was shown about successful copy
-    expect(mockNote).toHaveBeenCalledWith('Commit message copied to clipboard!', 'Success');
+    expect(mockNote).toHaveBeenCalledWith(
+      'Commit message copied to clipboard!',
+      'Success',
+    );
     // Verify commit was eventually called
     expect(mockCancel.mock.calls).toEqual([]);
     expect(mockGitService.commitChanges).toHaveBeenCalled();
@@ -2063,8 +2411,12 @@ describe('Refactored Runner', () => {
     });
 
     // Verify hint was passed to context service in second call
-    expect(mockContextService.constructLLMPromptContext).toHaveBeenCalledTimes(2);
-    expect(mockContextService.constructLLMPromptContext).toHaveBeenLastCalledWith(
+    expect(mockContextService.constructLLMPromptContext).toHaveBeenCalledTimes(
+      2,
+    );
+    expect(
+      mockContextService.constructLLMPromptContext,
+    ).toHaveBeenLastCalledWith(
       expect.objectContaining({
         userHint: 'make it shorter',
       }),
@@ -2087,7 +2439,9 @@ describe('Refactored Runner', () => {
       usage: {},
     });
 
-    mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+    mockSelect
+      .mockResolvedValueOnce('generate')
+      .mockResolvedValueOnce('commit');
 
     await executeCommitMessageGeneration(['--model', 'gemini-special'], {
       logger: mockLogger as unknown as Logger,
@@ -2122,7 +2476,9 @@ describe('Refactored Runner', () => {
       text: 'test: msg',
       usage: {},
     });
-    mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+    mockSelect
+      .mockResolvedValueOnce('generate')
+      .mockResolvedValueOnce('commit');
 
     await executeCommitMessageGeneration([], {
       logger: mockLogger as unknown as Logger,
@@ -2158,7 +2514,9 @@ describe('Refactored Runner', () => {
       usage: { outputTokens: 20, promptTokens: 10 },
     });
 
-    mockSelect.mockResolvedValueOnce('generate').mockResolvedValueOnce('commit');
+    mockSelect
+      .mockResolvedValueOnce('generate')
+      .mockResolvedValueOnce('commit');
 
     await executeCommitMessageGeneration([], {
       logger: mockLogger as unknown as Logger,

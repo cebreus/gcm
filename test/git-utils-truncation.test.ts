@@ -1,4 +1,5 @@
-import { test, expect } from 'bun:test';
+import { expect, test } from 'bun:test';
+
 import { spawnGitLines, spawnGitStream } from '../src/git-utils';
 
 const maxBytes = 1024;

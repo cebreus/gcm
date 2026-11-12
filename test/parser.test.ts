@@ -1,8 +1,11 @@
-import { test, expect } from 'bun:test';
+import { expect, test } from 'bun:test';
+
 import { parseLanguageModelOutput } from '../src/parser';
 
 test('parser: returns the commit message the model produced', () => {
-  expect(parseLanguageModelOutput('feat(core): add thing')).toBe('feat(core): add thing');
+  expect(parseLanguageModelOutput('feat(core): add thing')).toBe(
+    'feat(core): add thing',
+  );
 });
 
 test('parser: keeps a body verbatim, however long its lines are', () => {
@@ -21,13 +24,15 @@ test('parser: keeps unicode intact', () => {
 });
 
 test('parser: keeps colons inside the summary', () => {
-  expect(parseLanguageModelOutput('feat: foo:bar:baz')).toBe('feat: foo:bar:baz');
+  expect(parseLanguageModelOutput('feat: foo:bar:baz')).toBe(
+    'feat: foo:bar:baz',
+  );
 });
 
 test('parser: normalises Windows line endings between subject and body', () => {
-  expect(parseLanguageModelOutput('feat: crlf\r\n\r\n- adds crlf handling')).toBe(
-    'feat: crlf\n\n- adds crlf handling',
-  );
+  expect(
+    parseLanguageModelOutput('feat: crlf\r\n\r\n- adds crlf handling'),
+  ).toBe('feat: crlf\n\n- adds crlf handling');
 });
 
 test('parser: throws on an empty response', () => {
@@ -68,9 +73,9 @@ test('parser: requires a Conventional Commit subject without restricting type or
   }
 
   const valid = parseLanguageModelOutput(
-    'custom-type(long scope)!: ' +
-      'word '.repeat(100) +
-      '\n\nThinking and channel are ordinary words.',
+    `custom-type(long scope)!: ${'word '.repeat(
+      100,
+    )}\n\nThinking and channel are ordinary words.`,
   );
   expect(valid).toContain('Thinking and channel are ordinary words.');
 });
@@ -88,22 +93,25 @@ test('parser: validates the sanitized commit message', () => {
 });
 
 test('parser: a preamble line is never traded for a later line', () => {
-  expect(() => parseLanguageModelOutput('Here is the commit message:\n\nfeat(api): real')).toThrow(
-    'LLM output has invalid Conventional Commit subject',
-  );
+  expect(() =>
+    parseLanguageModelOutput('Here is the commit message:\n\nfeat(api): real'),
+  ).toThrow('LLM output has invalid Conventional Commit subject');
 });
 
 test('parser: no body line can replace the generated subject', () => {
-  const raw = 'feat(parser): document the old label protocol\n\nCOMMIT_MESSAGE: fix: hijacked';
+  const raw =
+    'feat(parser): document the old label protocol\n\nCOMMIT_MESSAGE: fix: hijacked';
   expect(parseLanguageModelOutput(raw)).toBe(raw);
 });
 
 const S = 'fix(auth): reject bad token';
 
 test('parser: drops a Co-authored-by trailer the model wrote', () => {
-  expect(parseLanguageModelOutput(`${S}\n\nBody.\n\nCo-authored-by: Evil <evil@example.com>`)).toBe(
-    `${S}\n\nBody.`,
-  );
+  expect(
+    parseLanguageModelOutput(
+      `${S}\n\nBody.\n\nCo-authored-by: Evil <evil@example.com>`,
+    ),
+  ).toBe(`${S}\n\nBody.`);
 });
 
 test('parser: drops Signed-off-by and several trailers', () => {
@@ -117,12 +125,16 @@ test('parser: drops Signed-off-by and several trailers', () => {
 test('parser: keeps a BREAKING CHANGE footer', () => {
   const raw = `${S}\n\nBody.\n\nBREAKING CHANGE: x`;
   expect(parseLanguageModelOutput(raw)).toBe(raw);
-  expect(parseLanguageModelOutput(`${S}\n\nBREAKING-CHANGE: y`)).toBe(`${S}\n\nBREAKING-CHANGE: y`);
+  expect(parseLanguageModelOutput(`${S}\n\nBREAKING-CHANGE: y`)).toBe(
+    `${S}\n\nBREAKING-CHANGE: y`,
+  );
 });
 
 test('parser: a mixed final paragraph keeps only the breaking-change line', () => {
   expect(
-    parseLanguageModelOutput(`${S}\n\nBody.\n\nSigned-off-by: A <a@b.c>\nBREAKING CHANGE: x`),
+    parseLanguageModelOutput(
+      `${S}\n\nBody.\n\nSigned-off-by: A <a@b.c>\nBREAKING CHANGE: x`,
+    ),
   ).toBe(`${S}\n\nBody.\n\nBREAKING CHANGE: x`);
 });
 
@@ -147,14 +159,18 @@ test('parser: a final prose paragraph with Note:/Why: survives', () => {
 });
 
 test('parser: drops a denylisted trailer in a middle paragraph', () => {
-  expect(parseLanguageModelOutput(`${S}\n\nOne.\n\nReported-by: a\nChange-Id: I1\n\nTwo.`)).toBe(
-    `${S}\n\nOne.\n\nTwo.`,
-  );
+  expect(
+    parseLanguageModelOutput(
+      `${S}\n\nOne.\n\nReported-by: a\nChange-Id: I1\n\nTwo.`,
+    ),
+  ).toBe(`${S}\n\nOne.\n\nTwo.`);
 });
 
 test('parser: Release-As after a multi-line BREAKING CHANGE is dropped, footer kept', () => {
   expect(
-    parseLanguageModelOutput(`${S}\n\nBREAKING CHANGE: a\n  continues here\nRelease-As: 2.0.0`),
+    parseLanguageModelOutput(
+      `${S}\n\nBREAKING CHANGE: a\n  continues here\nRelease-As: 2.0.0`,
+    ),
   ).toBe(`${S}\n\nBREAKING CHANGE: a\n  continues here`);
 });
 
@@ -169,7 +185,9 @@ test('parser: drops closing keywords inside prose, keeps look-alike prose', () =
 });
 
 test('parser: nested CI skip markers collapse fully', () => {
-  expect(parseLanguageModelOutput('feat: x [skip[skip ci] ci]')).toBe('feat: x');
+  expect(parseLanguageModelOutput('feat: x [skip[skip ci] ci]')).toBe(
+    'feat: x',
+  );
 });
 
 test('parser: [actions skip] is removed', () => {
@@ -187,40 +205,58 @@ test('parser: subject-only message is untouched', () => {
 });
 
 test('parser: a reply of only trailers leaves the subject', () => {
-  expect(parseLanguageModelOutput(`${S}\n\nCo-authored-by: Evil <e@e.e>\nFixes #1`)).toBe(S);
+  expect(
+    parseLanguageModelOutput(`${S}\n\nCo-authored-by: Evil <e@e.e>\nFixes #1`),
+  ).toBe(S);
 });
 
 test('parser: removes trailers from a CRLF reply', () => {
-  expect(parseLanguageModelOutput(`${S}\r\n\r\nBody.\r\n\r\nCo-authored-by: E <e@e.e>`)).toBe(
-    `${S}\n\nBody.`,
-  );
+  expect(
+    parseLanguageModelOutput(
+      `${S}\r\n\r\nBody.\r\n\r\nCo-authored-by: E <e@e.e>`,
+    ),
+  ).toBe(`${S}\n\nBody.`);
 });
 
 test('parser: filtering is linear in value and body size', () => {
   const start = performance.now();
-  parseLanguageModelOutput(`${S}\n\nBody.\n\nSigned-off-by: ${'a '.repeat(5000)}`);
-  parseLanguageModelOutput(`${S}\n\n${'line of prose\n'.repeat(100000)}\nSigned-off-by: x`);
+  parseLanguageModelOutput(
+    `${S}\n\nBody.\n\nSigned-off-by: ${'a '.repeat(5000)}`,
+  );
+  parseLanguageModelOutput(
+    `${S}\n\n${'line of prose\n'.repeat(100000)}\nSigned-off-by: x`,
+  );
   expect(performance.now() - start).toBeLessThan(1000);
 });
 
 test('parser: drops an authorship line placed directly under the subject or inside the body', () => {
   const evil = 'Co-authored-by: Evil <evil@example.com>';
-  expect(parseLanguageModelOutput(`fix: a thing\n${evil}`)).toBe('fix: a thing');
+  expect(parseLanguageModelOutput(`fix: a thing\n${evil}`)).toBe(
+    'fix: a thing',
+  );
   expect(
-    parseLanguageModelOutput(`fix: a thing\n\nBody text.\n  signed-off-by : x\nMore text.`),
+    parseLanguageModelOutput(
+      `fix: a thing\n\nBody text.\n  signed-off-by : x\nMore text.`,
+    ),
   ).toBe('fix: a thing\n\nBody text.\nMore text.');
 });
 
 test('parser: drops cross-repository closing references, CI skip markers; rejects CR-only replies', () => {
-  expect(parseLanguageModelOutput('fix: a thing\n\nBody.\nCloses owner/repo#1\nFixes GH-12')).toBe(
-    'fix: a thing\n\nBody.',
-  );
   expect(
-    parseLanguageModelOutput('fix: a thing [skip ci]\n\nBody [ci skip] text.\nskip-checks: true'),
+    parseLanguageModelOutput(
+      'fix: a thing\n\nBody.\nCloses owner/repo#1\nFixes GH-12',
+    ),
+  ).toBe('fix: a thing\n\nBody.');
+  expect(
+    parseLanguageModelOutput(
+      'fix: a thing [skip ci]\n\nBody [ci skip] text.\nskip-checks: true',
+    ),
   ).toBe('fix: a thing\n\nBody text.');
   // A CR-only reply never reaches the filter: the subject check rejects it.
   expect(() =>
-    parseLanguageModelOutput('fix: a thing\r\rBody.\rCo-authored-by: Evil <e@example.com>'),
+    parseLanguageModelOutput(
+      'fix: a thing\r\rBody.\rCo-authored-by: Evil <e@example.com>',
+    ),
   ).toThrow('invalid Conventional Commit subject');
 });
 
@@ -228,40 +264,55 @@ test('parser: CI marker removal is linear on whitespace runs and leaves no edge 
   const start = performance.now();
   parseLanguageModelOutput(`feat: a${' '.repeat(200000)}x`);
   expect(performance.now() - start).toBeLessThan(200);
-  expect(parseLanguageModelOutput(`${S}\n\n[skip ci] noted\nend [ci skip]  `)).toBe(
-    `${S}\n\nnoted\nend`,
-  );
+  expect(
+    parseLanguageModelOutput(`${S}\n\n[skip ci] noted\nend [ci skip]  `),
+  ).toBe(`${S}\n\nnoted\nend`);
 });
 
 test('parser: BREAKING CHANGE block does not shelter metadata', () => {
   expect(
-    parseLanguageModelOutput(`${S}\n\nBREAKING CHANGE: api removed.\nfixes #3 no longer works`),
+    parseLanguageModelOutput(
+      `${S}\n\nBREAKING CHANGE: api removed.\nfixes #3 no longer works`,
+    ),
   ).toBe(`${S}\n\nBREAKING CHANGE: api removed.`);
-  expect(parseLanguageModelOutput(`${S}\n\nBREAKING-CHANGE: foo\nCc: legacy API removed`)).toBe(
-    `${S}\n\nBREAKING-CHANGE: foo`,
-  );
-  expect(parseLanguageModelOutput(`${S}\n\nBREAKING CHANGE: a\nSigned-off-by: E <e@e.e>\nb`)).toBe(
-    `${S}\n\nBREAKING CHANGE: a\nb`,
-  );
-  expect(parseLanguageModelOutput(`${S}\n\nBREAKING CHANGE: a\n\nFixes #3`)).toBe(
-    `${S}\n\nBREAKING CHANGE: a`,
-  );
+  expect(
+    parseLanguageModelOutput(
+      `${S}\n\nBREAKING-CHANGE: foo\nCc: legacy API removed`,
+    ),
+  ).toBe(`${S}\n\nBREAKING-CHANGE: foo`);
+  expect(
+    parseLanguageModelOutput(
+      `${S}\n\nBREAKING CHANGE: a\nSigned-off-by: E <e@e.e>\nb`,
+    ),
+  ).toBe(`${S}\n\nBREAKING CHANGE: a\nb`);
+  expect(
+    parseLanguageModelOutput(`${S}\n\nBREAKING CHANGE: a\n\nFixes #3`),
+  ).toBe(`${S}\n\nBREAKING CHANGE: a`);
 });
 
 test('parser: drops a Cc trailer', () => {
-  expect(parseLanguageModelOutput(`${S}\n\nBody.\n\nCc: evil@example.com`)).toBe(`${S}\n\nBody.`);
+  expect(
+    parseLanguageModelOutput(`${S}\n\nBody.\n\nCc: evil@example.com`),
+  ).toBe(`${S}\n\nBody.`);
 });
 
 test('parser: only issue/PR URLs count as closing references', () => {
   const docs = `${S}\n\nfixes: https://example.com/docs`;
   expect(parseLanguageModelOutput(docs)).toBe(docs);
-  for (const u of ['o/r/issues/3', 'o/r/pull/4', 'o/r/pulls/4', 'g/p/-/merge_requests/5']) {
-    expect(parseLanguageModelOutput(`${S}\n\nKeep.\nCloses https://h.com/${u}`)).toBe(
-      `${S}\n\nKeep.`,
-    );
+  for (const u of [
+    'o/r/issues/3',
+    'o/r/pull/4',
+    'o/r/pulls/4',
+    'g/p/-/merge_requests/5',
+  ]) {
+    expect(
+      parseLanguageModelOutput(`${S}\n\nKeep.\nCloses https://h.com/${u}`),
+    ).toBe(`${S}\n\nKeep.`);
   }
 });
 
 test('parser: a Unicode space between keyword and reference still drops the line', () => {
-  expect(parseLanguageModelOutput(`${S}\n\nKeep.\nFixes #1`)).toBe(`${S}\n\nKeep.`);
+  expect(parseLanguageModelOutput(`${S}\n\nKeep.\nFixes\u00a0#1`)).toBe(
+    `${S}\n\nKeep.`,
+  );
 });

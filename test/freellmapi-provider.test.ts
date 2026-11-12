@@ -1,14 +1,21 @@
 import { expect, test } from 'bun:test';
-import { createFreeLlmApiProvider as createFreeLlmApiProviderWithConfig } from '../src/freellmapi-provider.js';
-import { loadConfig } from '../gcm.config.js';
 
-function createFreeLlmApiProvider(
-  options: Omit<Parameters<typeof createFreeLlmApiProviderWithConfig>[0], 'config'>,
-) {
-  return createFreeLlmApiProviderWithConfig({ ...options, config: loadConfig({}) });
+import { loadConfig } from '../gcm.config.js';
+import { createFreeLlmApiProvider as createFreeLlmApiProviderWithConfig } from '../src/freellmapi-provider.js';
+
+async function createFreeLlmApiProvider(
+  options: Omit<
+    Parameters<typeof createFreeLlmApiProviderWithConfig>[0],
+    'config'
+  >,
+): Promise<Awaited<ReturnType<typeof createFreeLlmApiProviderWithConfig>>> {
+  return await createFreeLlmApiProviderWithConfig({
+    ...options,
+    config: loadConfig({}),
+  });
 }
 
-test('FreeLLMAPI tries each derived model endpoint once', async function () {
+test('FreeLLMAPI tries each derived model endpoint once', async () => {
   const modelPaths: string[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -30,10 +37,10 @@ test('FreeLLMAPI tries each derived model endpoint once', async function () {
   }
 });
 
-test('createFreeLlmApiProvider rejects plaintext remote URLs', async function () {
-  await expect(createFreeLlmApiProvider({ baseUrl: 'http://example.com/v1' })).rejects.toThrow(
-    'FreeLLMAPI URL must use HTTPS or a loopback hostname',
-  );
+test('createFreeLlmApiProvider rejects plaintext remote URLs', async () => {
+  await expect(
+    createFreeLlmApiProvider({ baseUrl: 'http://example.com/v1' }),
+  ).rejects.toThrow('FreeLLMAPI URL must use HTTPS or a loopback hostname');
 });
 
 for (const baseUrl of [
@@ -44,12 +51,12 @@ for (const baseUrl of [
   'http://2130706433:3001',
   'http://0177.0.0.1:3001',
 ]) {
-  test(`createFreeLlmApiProvider rejects unsafe URL ${baseUrl}`, async function () {
+  test(`createFreeLlmApiProvider rejects unsafe URL ${baseUrl}`, async () => {
     await expect(createFreeLlmApiProvider({ baseUrl })).rejects.toThrow();
   });
 }
 
-test('createFreeLlmApiProvider fetches models and generates text', async function () {
+test('createFreeLlmApiProvider fetches models and generates text', async () => {
   let receivedAuthHeader = '';
   let receivedChatBody: Record<string, unknown> = {};
 
@@ -79,7 +86,10 @@ test('createFreeLlmApiProvider fetches models and generates text', async functio
         });
       }
 
-      if (request.method === 'POST' && url.pathname === '/v1/chat/completions') {
+      if (
+        request.method === 'POST' &&
+        url.pathname === '/v1/chat/completions'
+      ) {
         receivedChatBody = (await request.json()) as Record<string, unknown>;
         return Response.json({
           id: 'chatcmpl-123',
@@ -117,9 +127,7 @@ test('createFreeLlmApiProvider fetches models and generates text', async functio
     expect(provider.id).toBe('freellmapi');
     expect(provider.label).toBe('FreeLLMAPI');
 
-    const models = (await provider.models()).map(function (model) {
-      return model.name;
-    });
+    const models = (await provider.models()).map((model) => model.name);
     expect(provider.defaultModel).toBe('auto');
     expect(models).toContain('auto');
     expect(models).toContain('gemini-2.5-flash');
@@ -143,7 +151,7 @@ test('createFreeLlmApiProvider fetches models and generates text', async functio
   }
 });
 
-test('createFreeLlmApiProvider handles custom baseUrl endings', async function () {
+test('createFreeLlmApiProvider handles custom baseUrl endings', async () => {
   let chatCalled = false;
 
   const server = Bun.serve({
@@ -205,7 +213,7 @@ test('createFreeLlmApiProvider handles custom baseUrl endings', async function (
   }
 });
 
-test('createFreeLlmApiProvider preserves a custom base path', async function () {
+test('createFreeLlmApiProvider preserves a custom base path', async () => {
   let chatCalled = false;
 
   const server = Bun.serve({
@@ -221,7 +229,10 @@ test('createFreeLlmApiProvider preserves a custom base path', async function () 
           ],
         });
       }
-      if (request.method === 'POST' && url.pathname === '/proxy/chat/completions') {
+      if (
+        request.method === 'POST' &&
+        url.pathname === '/proxy/chat/completions'
+      ) {
         chatCalled = true;
         return Response.json({
           choices: [{ message: { content: 'fix: preserve path' } }],
@@ -232,7 +243,9 @@ test('createFreeLlmApiProvider preserves a custom base path', async function () 
   });
 
   try {
-    const provider = await createFreeLlmApiProvider({ baseUrl: `${server.url.origin}/proxy` });
+    const provider = await createFreeLlmApiProvider({
+      baseUrl: `${server.url.origin}/proxy`,
+    });
     await provider.service.generate({
       promptContext: 'Diff snippet',
       systemPrompt: 'System instructions',
@@ -246,7 +259,7 @@ test('createFreeLlmApiProvider preserves a custom base path', async function () 
   }
 });
 
-test('createFreeLlmApiProvider derives model discovery from a full chat endpoint', async function () {
+test('createFreeLlmApiProvider derives model discovery from a full chat endpoint', async () => {
   let modelPath = '';
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -254,7 +267,7 @@ test('createFreeLlmApiProvider derives model discovery from a full chat endpoint
     fetch: function (request) {
       const url = new URL(request.url);
       if (request.method === 'GET') {
-        modelPath = url.pathname;
+        ({ pathname: modelPath } = url);
         return Response.json({
           data: [
             { id: 'auto', context_window: 24_000 },
@@ -262,18 +275,22 @@ test('createFreeLlmApiProvider derives model discovery from a full chat endpoint
           ],
         });
       }
-      return Response.json({ choices: [{ message: { content: 'fix: proxy' } }] });
+      return Response.json({
+        choices: [{ message: { content: 'fix: proxy' } }],
+      });
     },
   });
   try {
-    await createFreeLlmApiProvider({ baseUrl: `${server.url.origin}/proxy/v1/chat/completions` });
+    await createFreeLlmApiProvider({
+      baseUrl: `${server.url.origin}/proxy/v1/chat/completions`,
+    });
     expect(modelPath).toBe('/proxy/v1/models');
   } finally {
     await server.stop(true);
   }
 });
 
-test('createFreeLlmApiProvider excludes known non-text models', async function () {
+test('createFreeLlmApiProvider excludes known non-text models', async () => {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -291,18 +308,19 @@ test('createFreeLlmApiProvider excludes known non-text models', async function (
     },
   });
   try {
-    const provider = await createFreeLlmApiProvider({ baseUrl: server.url.origin });
-    expect(
-      (await provider.models()).map(function (model) {
-        return model.name;
-      }),
-    ).toEqual(['auto', 'gpt-4o']);
+    const provider = await createFreeLlmApiProvider({
+      baseUrl: server.url.origin,
+    });
+    expect((await provider.models()).map((model) => model.name)).toEqual([
+      'auto',
+      'gpt-4o',
+    ]);
   } finally {
     await server.stop(true);
   }
 });
 
-test('createFreeLlmApiProvider rejects unknown model overrides', async function () {
+test('createFreeLlmApiProvider rejects unknown model overrides', async () => {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -316,7 +334,9 @@ test('createFreeLlmApiProvider rejects unknown model overrides', async function 
     },
   });
   try {
-    const provider = await createFreeLlmApiProvider({ baseUrl: server.url.origin });
+    const provider = await createFreeLlmApiProvider({
+      baseUrl: server.url.origin,
+    });
     await expect(
       provider.service.generate({
         promptContext: 'Diff',
@@ -331,7 +351,7 @@ test('createFreeLlmApiProvider rejects unknown model overrides', async function 
   }
 });
 
-test('createFreeLlmApiProvider preserves authentication errors during endpoint fallback', async function () {
+test('createFreeLlmApiProvider preserves authentication errors during endpoint fallback', async () => {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -342,7 +362,9 @@ test('createFreeLlmApiProvider preserves authentication errors during endpoint f
     },
   });
   try {
-    await expect(createFreeLlmApiProvider({ baseUrl: server.url.origin })).rejects.toMatchObject({
+    await expect(
+      createFreeLlmApiProvider({ baseUrl: server.url.origin }),
+    ).rejects.toMatchObject({
       metadata: { status: 401 },
     });
   } finally {
@@ -350,7 +372,7 @@ test('createFreeLlmApiProvider preserves authentication errors during endpoint f
   }
 });
 
-test('createFreeLlmApiProvider rejects secret-bearing catalogue metadata', async function () {
+test('createFreeLlmApiProvider rejects secret-bearing catalogue metadata', async () => {
   const token = 'catalogue-secret-token';
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -360,23 +382,25 @@ test('createFreeLlmApiProvider rejects secret-bearing catalogue metadata', async
     },
   });
   try {
-    await expect(createFreeLlmApiProvider({ baseUrl: server.url.origin, token })).rejects.toThrow(
-      'Invalid FreeLLMAPI model metadata',
-    );
+    await expect(
+      createFreeLlmApiProvider({ baseUrl: server.url.origin, token }),
+    ).rejects.toThrow('Invalid FreeLLMAPI model metadata');
   } finally {
     await server.stop(true);
   }
 });
 
-test('createFreeLlmApiProvider falls back only after a missing model endpoint', async function () {
+test('createFreeLlmApiProvider falls back only after a missing model endpoint', async () => {
   const requestedPaths: string[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch: function (request) {
-      const pathname = new URL(request.url).pathname;
+      const { pathname } = new URL(request.url);
       requestedPaths.push(pathname);
-      if (pathname === '/v1/models') return new Response('missing', { status: 404 });
+      if (pathname === '/v1/models') {
+        return new Response('missing', { status: 404 });
+      }
       return Response.json({
         data: [
           { id: 'auto', context_window: 24_000 },
@@ -386,19 +410,20 @@ test('createFreeLlmApiProvider falls back only after a missing model endpoint', 
     },
   });
   try {
-    const provider = await createFreeLlmApiProvider({ baseUrl: server.url.origin });
-    expect(
-      (await provider.models()).map(function (model) {
-        return model.name;
-      }),
-    ).toEqual(['auto', 'gpt-4o']);
+    const provider = await createFreeLlmApiProvider({
+      baseUrl: server.url.origin,
+    });
+    expect((await provider.models()).map((model) => model.name)).toEqual([
+      'auto',
+      'gpt-4o',
+    ]);
     expect(requestedPaths).toEqual(['/v1/models', '/models']);
   } finally {
     await server.stop(true);
   }
 });
 
-test('createFreeLlmApiProvider rejects malformed catalogues', async function () {
+test('createFreeLlmApiProvider rejects malformed catalogues', async () => {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -407,15 +432,15 @@ test('createFreeLlmApiProvider rejects malformed catalogues', async function () 
     },
   });
   try {
-    await expect(createFreeLlmApiProvider({ baseUrl: server.url.origin })).rejects.toThrow(
-      'FreeLLMAPI returned no compatible text models',
-    );
+    await expect(
+      createFreeLlmApiProvider({ baseUrl: server.url.origin }),
+    ).rejects.toThrow('FreeLLMAPI returned no compatible text models');
   } finally {
     await server.stop(true);
   }
 });
 
-test('createFreeLlmApiProvider uses only the published auto context window', async function () {
+test('createFreeLlmApiProvider uses only the published auto context window', async () => {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -430,7 +455,9 @@ test('createFreeLlmApiProvider uses only the published auto context window', asy
     },
   });
   try {
-    const provider = await createFreeLlmApiProvider({ baseUrl: server.url.origin });
+    const provider = await createFreeLlmApiProvider({
+      baseUrl: server.url.origin,
+    });
     expect((await provider.models())[0]).toEqual({
       name: 'auto',
       label: 'Auto',
@@ -441,20 +468,26 @@ test('createFreeLlmApiProvider uses only the published auto context window', asy
   }
 });
 
-test('createFreeLlmApiProvider tries the next catalogue after an empty result', async function () {
+test('createFreeLlmApiProvider tries the next catalogue after an empty result', async () => {
   const requestedPaths: string[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch: function (request) {
-      const path = new URL(request.url).pathname;
+      const { pathname: path } = new URL(request.url);
       requestedPaths.push(path);
-      if (path === '/v1/models') return Response.json({ data: [] });
-      return Response.json({ data: [{ id: 'auto', context_window: 0, context_length: 12_345 }] });
+      if (path === '/v1/models') {
+        return Response.json({ data: [] });
+      }
+      return Response.json({
+        data: [{ id: 'auto', context_window: 0, context_length: 12_345 }],
+      });
     },
   });
   try {
-    const provider = await createFreeLlmApiProvider({ baseUrl: server.url.origin });
+    const provider = await createFreeLlmApiProvider({
+      baseUrl: server.url.origin,
+    });
     expect(await provider.models()).toEqual([
       {
         name: 'auto',
@@ -468,13 +501,13 @@ test('createFreeLlmApiProvider tries the next catalogue after an empty result', 
   }
 });
 
-test('createFreeLlmApiProvider tries the next catalogue after duplicate identifiers', async function () {
+test('createFreeLlmApiProvider tries the next catalogue after duplicate identifiers', async () => {
   const requestedPaths: string[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch: function (request) {
-      const path = new URL(request.url).pathname;
+      const { pathname: path } = new URL(request.url);
       requestedPaths.push(path);
       if (path === '/v1/models') {
         return Response.json({
@@ -488,7 +521,9 @@ test('createFreeLlmApiProvider tries the next catalogue after duplicate identifi
     },
   });
   try {
-    const provider = await createFreeLlmApiProvider({ baseUrl: server.url.origin });
+    const provider = await createFreeLlmApiProvider({
+      baseUrl: server.url.origin,
+    });
     expect((await provider.models())[0]?.limits).toEqual({
       kind: 'shared-context',
       contextWindowTokens: 3_000,
@@ -504,17 +539,25 @@ const TRACE_SECRET = `ghp_${'a1B2'.repeat(9)}`;
 async function collectFreeLlmApiTrace(options: {
   debugApi?: boolean;
   configDebug?: boolean;
-}): Promise<{ message: string; meta?: Record<string, unknown> }[]> {
-  const entries: { message: string; meta?: Record<string, unknown> }[] = [];
+}): Promise<Array<{ message: string; meta?: Record<string, unknown> }>> {
+  const entries: Array<{ message: string; meta?: Record<string, unknown> }> =
+    [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch: async function (request) {
       if (request.method === 'GET') {
-        return Response.json({ data: [{ id: 'auto', context_window: 24_000 }] });
+        return Response.json({
+          data: [{ id: 'auto', context_window: 24_000 }],
+        });
       }
       return Response.json({
-        choices: [{ message: { content: `feat: ${TRACE_SECRET}` }, finish_reason: 'stop' }],
+        choices: [
+          {
+            message: { content: `feat: ${TRACE_SECRET}` },
+            finish_reason: 'stop',
+          },
+        ],
         usage: {},
       });
     },
@@ -525,7 +568,11 @@ async function collectFreeLlmApiTrace(options: {
       config: { ...loadConfig({}), DEBUG_API: options.configDebug === true },
       debugApi: options.debugApi,
       logger: {
-        log: function (_level: string, message: string, meta?: Record<string, unknown>) {
+        log: function (
+          _level: string,
+          message: string,
+          meta?: Record<string, unknown>,
+        ) {
           entries.push({ message, meta });
         },
       },
@@ -546,18 +593,21 @@ async function collectFreeLlmApiTrace(options: {
 test.each([
   ['debugApi flag', { debugApi: true }],
   ['config.DEBUG_API', { configDebug: true }],
-])('FreeLLMAPI traces redacted request and response with %s', async function (_name, options) {
-  const entries = await collectFreeLlmApiTrace(options);
+])(
+  'FreeLLMAPI traces redacted request and response with %s',
+  async (_name, options) => {
+    const entries = await collectFreeLlmApiTrace(options);
 
-  expect(entries.map(entry => entry.message)).toEqual([
-    'FreeLLMAPI API request',
-    'FreeLLMAPI API response',
-  ]);
-  expect(String(entries[0]?.meta?.body)).toContain('diff ');
-  expect(entries[1]?.meta?.status).toBe(200);
-  expect(JSON.stringify(entries)).not.toContain(TRACE_SECRET);
-});
+    expect(entries.map((entry) => entry.message)).toEqual([
+      'FreeLLMAPI API request',
+      'FreeLLMAPI API response',
+    ]);
+    expect(String(entries[0]?.meta?.body)).toContain('diff ');
+    expect(entries[1]?.meta?.status).toBe(200);
+    expect(JSON.stringify(entries)).not.toContain(TRACE_SECRET);
+  },
+);
 
-test('FreeLLMAPI logs no trace when debug is off', async function () {
+test('FreeLLMAPI logs no trace when debug is off', async () => {
   expect(await collectFreeLlmApiTrace({})).toEqual([]);
 });

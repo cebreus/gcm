@@ -1,3 +1,5 @@
+import { hasText } from './utils.js';
+
 export interface CommitContextHints {
   scopeSuggestions: string[];
   recentCommitSubjects: string[];
@@ -9,43 +11,80 @@ export interface CommitContextFacts {
   repoType: 'monorepo' | 'single';
 }
 
-export const WORKSPACE_PATH_PATTERN = /^(apps|packages)\/([^/]+)/;
+export const WORKSPACE_PATH_PATTERN =
+  /^(?:apps|packages)\/(?<workspace>[^\/]+)/v;
+const BUILD_FILE_PATTERN =
+  /^(?:package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lock|tsconfig\.json)$/v;
+const COMMIT_SCOPE_PATTERN = /^[a-z][a-z0-9\-]*\((?<scope>[^\)]+)\)!?:/v;
+const MAX_RECENT_SUBJECTS = 10;
+const MIN_SCOPED_PATH_PARTS = 3;
 
-function getPathScope(file: string, repoType: CommitContextFacts['repoType']): string | null {
+function getPathScope(
+  file: string,
+  repoType: CommitContextFacts['repoType'],
+): string | null {
   if (repoType === 'monorepo') {
     const workspace = WORKSPACE_PATH_PATTERN.exec(file);
-    if (workspace?.[2]) return workspace[2];
+    const workspaceName = workspace?.groups?.workspace;
+    if (workspaceName !== undefined) {
+      return workspaceName;
+    }
   }
-  if (file.startsWith('.github/')) return 'ci';
-  if (
-    /^(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lock|tsconfig\.json)$/.test(
-      file,
-    )
-  )
+  if (file.startsWith('.github/')) {
+    return 'ci';
+  }
+  if (BUILD_FILE_PATTERN.test(file)) {
     return 'build';
+  }
   const parts = file.split('/');
-  return parts[0] === 'src' && parts.length > 2 ? (parts[1] ?? null) : null;
+  return parts[0] === 'src' && parts.length >= MIN_SCOPED_PATH_PARTS
+    ? (parts[1] ?? null)
+    : null;
+}
+
+function collectScopes(
+  changedFiles: string[],
+  facts: CommitContextFacts,
+): string[] {
+  const scopes = new Set<string>();
+  for (const subject of facts.scopeHistorySubjects) {
+    const scope = COMMIT_SCOPE_PATTERN.exec(subject)?.groups?.scope.trim();
+    if (hasText(scope)) {
+      scopes.add(scope);
+    }
+  }
+  for (const file of changedFiles) {
+    const scope = getPathScope(file, facts.repoType);
+    if (scope !== null) {
+      scopes.add(scope);
+    }
+  }
+  return [...scopes];
+}
+
+function collectRecentSubjects(lines: string[]): string[] {
+  const subjects = new Set<string>();
+  for (const line of lines) {
+    const subject = line.trim();
+    if (subject !== '') {
+      subjects.add(subject);
+    }
+    if (subjects.size === MAX_RECENT_SUBJECTS) {
+      break;
+    }
+  }
+  return [...subjects];
 }
 
 export function getCommitContextHints(
   changedFiles: string[],
   facts: CommitContextFacts,
 ): CommitContextHints {
-  if (changedFiles.length === 0) return { scopeSuggestions: [], recentCommitSubjects: [] };
-  const scopes = new Set<string>();
-  for (const subject of facts.scopeHistorySubjects) {
-    const scope = /^[a-z][a-z0-9-]*\(([^)]+)\)!?:/.exec(subject)?.[1]?.trim();
-    if (scope) scopes.add(scope);
+  if (changedFiles.length === 0) {
+    return { scopeSuggestions: [], recentCommitSubjects: [] };
   }
-  for (const file of changedFiles) {
-    const scope = getPathScope(file, facts.repoType);
-    if (scope) scopes.add(scope);
-  }
-  const subjects = new Set<string>();
-  for (const line of facts.recentSubjects) {
-    const subject = line.trim();
-    if (subject) subjects.add(subject);
-    if (subjects.size === 10) break;
-  }
-  return { scopeSuggestions: [...scopes], recentCommitSubjects: [...subjects] };
+  return {
+    scopeSuggestions: collectScopes(changedFiles, facts),
+    recentCommitSubjects: collectRecentSubjects(facts.recentSubjects),
+  };
 }

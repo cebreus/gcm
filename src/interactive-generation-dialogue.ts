@@ -1,8 +1,24 @@
-import type { ModelSpec } from './model-registry.js';
-import { CHANGESET_SKIP_REASONS, type ChangesetSkipReason } from './auto-changeset.js';
-import { buildAtomicSplitProposal, detectAtomicGroup } from './atomic-commit-planner.js';
+import {
+  buildAtomicSplitProposal,
+  detectAtomicGroup,
+} from './atomic-commit-planner.js';
+import {
+  CHANGESET_SKIP_REASONS,
+  type ChangesetSkipReason,
+} from './auto-changeset.js';
 import { describeExcludedPaths } from './commit-action-service.js';
-import { stripTerminalControlSequences } from './utils.js';
+import {
+  getModelSelectionOptions,
+  handleActionChoice,
+  selectAction,
+} from './interactive-review-actions.js';
+import type { ModelSpec } from './model-registry.js';
+import { hasText } from './utils.js';
+
+export interface ProviderChoice {
+  id: string;
+  label: string;
+}
 
 export interface GenerationState {
   providerId: string;
@@ -33,248 +49,201 @@ export interface ReviewCommitCapability {
 }
 
 export interface PromptAdapter {
-  select(options: { message: string; options: PromptOption[] }): Promise<unknown>;
-  text(options: { message: string; initialValue?: string; placeholder?: string }): Promise<unknown>;
-  confirm(options: { message: string; initialValue?: boolean }): Promise<unknown>;
-  note(message: string, title?: string): void;
-  outro(message: string): void;
-  cancel(message: string): void;
-  isCancel(value: unknown): boolean;
+  select: (options: {
+    message: string;
+    options: PromptOption[];
+  }) => Promise<unknown>;
+  text: (options: {
+    message: string;
+    initialValue?: string;
+    placeholder?: string;
+  }) => Promise<unknown>;
+  confirm: (options: {
+    message: string;
+    initialValue?: boolean;
+  }) => Promise<unknown>;
+  note: (message: string, title?: string) => void;
+  outro: (message: string) => void;
+  cancel: (message: string) => void;
+  isCancel: (value: unknown) => boolean;
 }
 
-interface PromptOption {
+export interface PromptOption {
   value: string;
   label: string;
   hint?: string;
 }
 
-interface DialogueDependencies {
+export interface DialogueDependencies {
   prompts: PromptAdapter;
-  clipboard: { write(message: string): Promise<void> };
-  models(): Promise<ModelSpec[]>;
-  providers: Array<{ id: string; label: string }>;
+  clipboard: { write: (message: string) => Promise<void> };
+  models: () => Promise<ModelSpec[]>;
+  providers: ProviderChoice[];
 }
 
 export interface InteractiveGenerationDialogue {
-  configure(
+  configure: (
     state: GenerationState,
-  ): Promise<'continue' | 'exit' | { type: 'switch-provider'; providerId: string }>;
-  handleEmptyStaging(
+  ) => Promise<
+    'continue' | 'exit' | { type: 'switch-provider'; providerId: string }
+  >;
+  handleEmptyStaging: (
     targetCommit: string | null,
     stagedFilesFromWorktree: readonly string[],
-  ): Promise<'retry' | 'cancel'>;
-  recoverGeneration(
+  ) => Promise<'retry' | 'cancel'>;
+  recoverGeneration: (
     message: string,
-  ): Promise<'retry' | 'cancel' | { type: 'switch-model'; modelName: string }>;
-  review(params: {
+  ) => Promise<
+    'retry' | 'cancel' | { type: 'switch-model'; modelName: string }
+  >;
+  review: (params: {
     state: GenerationState;
     commitMessage: string;
     commitCapability: ReviewCommitCapability;
     changeset?: string | null;
-  }): Promise<ActionMenuResult>;
-  confirmAtomicity(stagedFiles: string[], targetCommit: string | null): Promise<boolean>;
+  }) => Promise<ActionMenuResult>;
+  confirmAtomicity: (
+    stagedFiles: string[],
+    targetCommit: string | null,
+  ) => Promise<boolean>;
 }
 
-type ActionChoice =
-  | 'commit-with-changeset'
-  | 'commit'
-  | 'copy'
-  | 'edit'
-  | 'regenerate'
-  | 'regenerate-hint'
-  | 'switch'
-  | 'cancel';
-
-function toModelOption(model: ModelSpec): PromptOption {
-  return {
-    value: model.name,
-    label: stripTerminalControlSequences(model.label).replace(/[\r\n\t]/g, ' '),
-  };
-}
-
-async function getModelSelectionOptions(
+async function changeProvider(
   dependencies: DialogueDependencies,
-): Promise<PromptOption[]> {
-  const models = await dependencies.models();
-  return models.map(toModelOption);
-}
-
-function commitActionLabel(commitCapability: ReviewCommitCapability): string {
-  const subject = stripTerminalControlSequences(commitCapability.target?.subject ?? '');
-  if (commitCapability.mode === 'amend') return `Amend HEAD (${subject})`;
-  if (commitCapability.mode === 'reword') {
-    return `Reword via amend! commit; manual rebase required (${subject})`;
-  }
-  return 'Commit';
-}
-
-async function selectAction(
-  prompts: PromptAdapter,
-  commitCapability: ReviewCommitCapability,
-  changeset?: string | null,
-): Promise<ActionChoice | null> {
-  const options: PromptOption[] = [];
-  if (commitCapability.allowed) {
-    if (typeof changeset === 'string')
-      options.push({ value: 'commit-with-changeset', label: 'Commit with changeset' });
-    options.push({
-      value: 'commit',
-      label:
-        changeset !== undefined ? 'Commit without changeset' : commitActionLabel(commitCapability),
-    });
-  }
-  options.push(
-    { value: 'copy', label: 'Copy to clipboard' },
-    { value: 'edit', label: 'Edit message' },
-    { value: 'regenerate', label: 'Regenerate (same model)' },
-    { value: 'regenerate-hint', label: 'Regenerate with Hint...' },
-    { value: 'switch', label: 'Switch Model & Regenerate' },
-    { value: 'cancel', label: 'Cancel' },
-  );
-  const action = await prompts.select({ message: 'What would you like to do?', options });
-  if (prompts.isCancel(action)) return null;
-  return action as ActionChoice;
-}
-
-async function copyMessage(
-  prompts: PromptAdapter,
-  clipboard: DialogueDependencies['clipboard'],
-  message: string,
-): Promise<void> {
-  try {
-    await clipboard.write(message);
-    prompts.note('Commit message copied to clipboard!', 'Success');
-  } catch (error) {
-    prompts.note(`Failed to copy to clipboard: ${error}`, 'Error');
-  }
-}
-
-async function editMessage(prompts: PromptAdapter, message: string): Promise<string> {
-  const edited = await prompts.text({
-    message: 'Edit commit message',
-    initialValue: message,
-    placeholder: 'Enter commit message',
-  });
-  if (prompts.isCancel(edited)) return message;
-  const updated = String(edited).trim();
-  if (!updated) {
-    prompts.note('Commit message cannot be empty. The previous message was kept.', 'Error');
-    return message;
-  }
-  prompts.note(updated, 'Updated Commit Message');
-  return updated;
-}
-
-type ReviewActionResult =
-  | { type: 'continue' }
-  | { type: 'update-message'; message: string }
-  | { type: 'return'; result: ActionMenuResult };
-
-async function confirmExcludedPathCommit(
-  prompts: PromptAdapter,
-  excludedPaths: string[],
-): Promise<boolean> {
-  if (excludedPaths.length === 0) return true;
-  const acknowledged = await prompts.confirm({
-    message: `${describeExcludedPaths(excludedPaths)}\n\nCommit every staged path, including these excluded paths?`,
-    initialValue: false,
-  });
-  return !prompts.isCancel(acknowledged) && acknowledged === true;
-}
-
-async function chooseRegeneration(
-  action: 'regenerate' | 'regenerate-hint' | 'switch',
   state: GenerationState,
-  message: string,
+): Promise<{ type: 'switch-provider'; providerId: string } | null> {
+  const selectedProvider = await dependencies.prompts.select({
+    message: 'Select AI Provider',
+    options: dependencies.providers.map((provider) => ({
+      value: provider.id,
+      label: provider.label,
+    })),
+  });
+  if (
+    dependencies.prompts.isCancel(selectedProvider) ||
+    selectedProvider === state.providerId
+  ) {
+    return null;
+  }
+  return { type: 'switch-provider', providerId: String(selectedProvider) };
+}
+
+async function changeModel(
   dependencies: DialogueDependencies,
-): Promise<ReviewActionResult> {
-  if (action === 'regenerate') {
-    return {
-      type: 'return',
-      result: {
-        type: 'regenerate',
-        modelName: state.modelName,
-        commitMessage: message,
-        userHint: undefined,
-      },
-    };
-  }
-  if (action === 'regenerate-hint') {
-    const hint = await dependencies.prompts.text({
-      message: 'Enter hint for regeneration (e.g. "emphasize refactoring")',
-      placeholder: 'Add instructions...',
-    });
-    if (dependencies.prompts.isCancel(hint)) return { type: 'continue' };
-    return {
-      type: 'return',
-      result: {
-        type: 'regenerate',
-        modelName: state.modelName,
-        commitMessage: message,
-        userHint: String(hint),
-      },
-    };
-  }
+  state: GenerationState,
+): Promise<void> {
   const modelOptions = await getModelSelectionOptions(dependencies);
   const selectedModel = await dependencies.prompts.select({
-    message: 'Select AI Model for Regeneration',
+    message: 'Select AI Model',
     options: modelOptions,
   });
-  if (dependencies.prompts.isCancel(selectedModel)) return { type: 'continue' };
-  return {
-    type: 'return',
-    result: {
-      type: 'regenerate',
-      modelName: String(selectedModel),
-      commitMessage: message,
-      userHint: undefined,
-    },
-  };
+  if (dependencies.prompts.isCancel(selectedModel)) {
+    return;
+  }
+  const modelName = String(selectedModel);
+  Object.assign(state, { baselineModelName: modelName, modelName });
 }
 
-async function handleActionChoice(params: {
-  action: ActionChoice;
-  message: string;
-  state: GenerationState;
+async function handleConfigurationChange(
+  action: unknown,
+  dependencies: DialogueDependencies,
+  state: GenerationState,
+): Promise<{ type: 'switch-provider'; providerId: string } | null> {
+  if (action === 'provider') {
+    return await changeProvider(dependencies, state);
+  }
+  if (action === 'model') {
+    await changeModel(dependencies, state);
+  }
+  return null;
+}
+
+function isChangesetSkipReason(value: unknown): value is ChangesetSkipReason {
+  return CHANGESET_SKIP_REASONS.some((reason) => reason === value);
+}
+
+async function requestChangesetReason(
+  prompts: PromptAdapter,
+): Promise<ChangesetSkipReason | null> {
+  const reason = await prompts.select({
+    message: 'Why does this commit need no changeset?',
+    options: CHANGESET_SKIP_REASONS.map((value) => ({ value, label: value })),
+  });
+  return prompts.isCancel(reason) || !isChangesetSkipReason(reason)
+    ? null
+    : reason;
+}
+
+type ReviewStep =
+  | { type: 'repeat' }
+  | { type: 'message'; message: string }
+  | { type: 'result'; result: ActionMenuResult };
+
+async function runReviewStep(options: {
   dependencies: DialogueDependencies;
-  excludedPaths: string[];
-}): Promise<ReviewActionResult> {
-  const { action, message, state, dependencies, excludedPaths } = params;
-  if (action === 'commit' || action === 'commit-with-changeset') {
-    if (!(await confirmExcludedPathCommit(dependencies.prompts, excludedPaths))) {
-      dependencies.prompts.outro('Commit cancelled.');
-      return {
-        type: 'return',
-        result: {
-          type: 'cancel',
-          modelName: state.modelName,
-          commitMessage: message,
-          userHint: state.userHint,
-        },
-      };
-    }
+  state: GenerationState;
+  message: string;
+  commitCapability: ReviewCommitCapability;
+  changeset?: string | null;
+}): Promise<ReviewStep> {
+  const { dependencies, state, message, commitCapability, changeset } = options;
+  const action = await selectAction(
+    dependencies.prompts,
+    commitCapability,
+    changeset,
+  );
+  if (action === null || action === 'cancel') {
+    dependencies.prompts.outro('Commit cancelled.');
     return {
-      type: 'return',
+      type: 'result',
       result: {
-        type: 'commit',
-        ...(action === 'commit-with-changeset' ? { includeChangeset: true } : {}),
+        type: 'cancel',
         modelName: state.modelName,
         commitMessage: message,
         userHint: state.userHint,
-        ...(excludedPaths.length > 0 ? { exclusionsAcknowledged: true } : {}),
       },
     };
   }
-  if (action === 'copy') {
-    await copyMessage(dependencies.prompts, dependencies.clipboard, message);
-    return { type: 'continue' };
+  const actionResult = await handleActionChoice({
+    action,
+    message,
+    state,
+    dependencies,
+    excludedPaths: commitCapability.excludedPaths ?? [],
+  });
+  if (actionResult.type === 'update-message') {
+    return { type: 'message', message: actionResult.message };
   }
-  if (action === 'edit')
-    return { type: 'update-message', message: await editMessage(dependencies.prompts, message) };
-  if (action === 'regenerate' || action === 'regenerate-hint' || action === 'switch') {
-    return chooseRegeneration(action, state, message, dependencies);
+  if (actionResult.type === 'continue') {
+    return { type: 'repeat' };
   }
-  return { type: 'continue' };
+  if (
+    actionResult.result.type === 'commit' &&
+    actionResult.result.includeChangeset !== true &&
+    changeset !== undefined
+  ) {
+    const reason = await requestChangesetReason(dependencies.prompts);
+    if (reason === null) {
+      return { type: 'repeat' };
+    }
+    actionResult.result.changesetReason = reason;
+  }
+  return { type: 'result', result: actionResult.result };
+}
+
+function showReviewNotices(
+  prompts: PromptAdapter,
+  commitCapability: ReviewCommitCapability,
+): void {
+  if (!commitCapability.allowed && hasText(commitCapability.reason)) {
+    prompts.note(commitCapability.reason, 'Commit unavailable');
+  }
+  if ((commitCapability.excludedPaths?.length ?? 0) > 0) {
+    prompts.note(
+      describeExcludedPaths(commitCapability.excludedPaths ?? []),
+      'Commit warning',
+    );
+  }
 }
 
 export function createInteractiveGenerationDialogue(
@@ -282,7 +251,7 @@ export function createInteractiveGenerationDialogue(
 ): InteractiveGenerationDialogue {
   const { prompts } = dependencies;
   return {
-    recoverGeneration: async message => {
+    recoverGeneration: async (message) => {
       prompts.note(message, 'Details');
       const action = await prompts.select({
         message: 'What do you want to do?',
@@ -292,17 +261,23 @@ export function createInteractiveGenerationDialogue(
           { value: 'cancel', label: 'Cancel' },
         ],
       });
-      if (prompts.isCancel(action) || action === 'cancel') return 'cancel';
-      if (action === 'retry') return 'retry';
+      if (prompts.isCancel(action) || action === 'cancel') {
+        return 'cancel';
+      }
+      if (action === 'retry') {
+        return 'retry';
+      }
       const selectedModel = await prompts.select({
         message: 'Select AI Model',
         options: await getModelSelectionOptions(dependencies),
       });
-      if (prompts.isCancel(selectedModel)) return 'cancel';
+      if (prompts.isCancel(selectedModel)) {
+        return 'cancel';
+      }
       return { type: 'switch-model', modelName: String(selectedModel) };
     },
     handleEmptyStaging: async (targetCommit, stagedFilesFromWorktree) => {
-      if (targetCommit) {
+      if (targetCommit !== null) {
         prompts.cancel(`No changes found in commit ${targetCommit}.`);
         return 'cancel';
       }
@@ -321,6 +296,7 @@ export function createInteractiveGenerationDialogue(
       prompts.note(warningLines.join('\n'), 'TIP');
 
       for (;;) {
+        // eslint-disable-next-line no-await-in-loop -- user prompt sequence must remain ordered
         const action = await prompts.select({
           message: 'How do you want to proceed?',
           options: [
@@ -331,19 +307,26 @@ export function createInteractiveGenerationDialogue(
             { value: 'cancel', label: 'Cancel' },
           ],
         });
-        if (prompts.isCancel(action) || action === 'cancel') return 'cancel';
+        if (prompts.isCancel(action) || action === 'cancel') {
+          return 'cancel';
+        }
         if (action === 'split') {
-          prompts.note(buildAtomicSplitProposal(stagedFilesFromWorktree), 'Atomic split proposal');
+          prompts.note(
+            buildAtomicSplitProposal(stagedFilesFromWorktree),
+            'Atomic split proposal',
+          );
           continue;
         }
         return 'retry';
       }
     },
-    configure: async state => {
+    configure: async (state) => {
       for (;;) {
         const providerLabel =
-          dependencies.providers.find(provider => provider.id === state.providerId)?.label ??
-          state.providerId;
+          dependencies.providers.find(
+            (provider) => provider.id === state.providerId,
+          )?.label ?? state.providerId;
+        // eslint-disable-next-line no-await-in-loop -- user prompt sequence must remain ordered
         const action = await prompts.select({
           message: `Settings: [Provider: ${providerLabel}] [Model: ${state.modelName}]`,
           options: [
@@ -356,7 +339,10 @@ export function createInteractiveGenerationDialogue(
                   },
                 ]
               : []),
-            { value: 'model', label: `Change Model (Current: ${state.modelName})` },
+            {
+              value: 'model',
+              label: `Change Model (Current: ${state.modelName})`,
+            },
             { value: 'exit', label: 'Exit' },
           ],
         });
@@ -365,85 +351,56 @@ export function createInteractiveGenerationDialogue(
           prompts.outro('Bye!');
           return 'exit';
         }
-        if (action === 'generate') return 'continue';
+        if (action === 'generate') {
+          return 'continue';
+        }
 
-        if (action === 'provider') {
-          const selectedProvider = await prompts.select({
-            message: 'Select AI Provider',
-            options: dependencies.providers.map(provider => ({
-              value: provider.id,
-              label: provider.label,
-            })),
-          });
-          if (!prompts.isCancel(selectedProvider) && selectedProvider !== state.providerId) {
-            return { type: 'switch-provider', providerId: String(selectedProvider) };
-          }
-        } else if (action === 'model') {
-          const modelOptions = await getModelSelectionOptions(dependencies);
-          const selectedModel = await prompts.select({
-            message: 'Select AI Model',
-            options: modelOptions,
-          });
-          if (!prompts.isCancel(selectedModel)) {
-            state.baselineModelName = String(selectedModel);
-            state.modelName = state.baselineModelName;
-          }
+        // eslint-disable-next-line no-await-in-loop -- configuration prompts follow ordered settings prompt
+        const configurationChange = await handleConfigurationChange(
+          action,
+          dependencies,
+          state,
+        );
+        if (configurationChange !== null) {
+          return configurationChange;
         }
       }
     },
     review: async ({ state, commitMessage, commitCapability, changeset }) => {
       let finalMessage = commitMessage;
-      if (!commitCapability.allowed && commitCapability.reason) {
-        prompts.note(commitCapability.reason, 'Commit unavailable');
-      }
-      if (commitCapability.excludedPaths?.length) {
-        prompts.note(describeExcludedPaths(commitCapability.excludedPaths), 'Commit warning');
-      }
+      showReviewNotices(prompts, commitCapability);
 
       for (;;) {
-        const action = await selectAction(prompts, commitCapability, changeset);
-        if (action === null || action === 'cancel') {
-          prompts.outro('Commit cancelled.');
-          return {
-            type: 'cancel',
-            modelName: state.modelName,
-            commitMessage: finalMessage,
-            userHint: state.userHint,
-          };
-        }
-        const actionResult = await handleActionChoice({
-          action,
-          message: finalMessage,
-          state,
+        // eslint-disable-next-line no-await-in-loop -- each review step depends on previous user action
+        const step = await runReviewStep({
           dependencies,
-          excludedPaths: commitCapability.excludedPaths ?? [],
+          state,
+          message: finalMessage,
+          commitCapability,
+          changeset,
         });
-        if (actionResult.type === 'update-message') {
-          finalMessage = actionResult.message;
+        if (step.type === 'message') {
+          ({ message: finalMessage } = step);
           continue;
         }
-        if (actionResult.type === 'continue') continue;
-        if (
-          actionResult.result.type === 'commit' &&
-          !actionResult.result.includeChangeset &&
-          changeset !== undefined
-        ) {
-          const reason = await prompts.select({
-            message: 'Why does this commit need no changeset?',
-            options: CHANGESET_SKIP_REASONS.map(value => ({ value, label: value })),
-          });
-          if (prompts.isCancel(reason) || !CHANGESET_SKIP_REASONS.some(value => value === reason))
-            continue;
-          actionResult.result.changesetReason = reason as ChangesetSkipReason;
+        if (step.type === 'repeat') {
+          continue;
         }
-        return actionResult.result;
+        return step.result;
       }
     },
     confirmAtomicity: async (stagedFiles, targetCommit) => {
-      if (targetCommit) return true;
-      const stagedGroups = Array.from(new Set(stagedFiles.map(detectAtomicGroup)));
-      if (stagedGroups.length <= 1) return true;
+      if (targetCommit !== null) {
+        return true;
+      }
+      const stagedGroups = Array.from(
+        new Set(stagedFiles.map(detectAtomicGroup)),
+      );
+      if (stagedGroups.length <= 1) {
+        return true;
+      }
       for (;;) {
+        // eslint-disable-next-line no-await-in-loop -- user prompt sequence must remain ordered
         const action = await prompts.select({
           message: [
             `Staged files suggest multiple possible scopes: ${stagedGroups.join(', ')}.`,
@@ -459,8 +416,13 @@ export function createInteractiveGenerationDialogue(
           prompts.outro('Commit cancelled.');
           return false;
         }
-        if (action === 'continue') return true;
-        prompts.note(buildAtomicSplitProposal(stagedFiles, false), 'Atomic split proposal');
+        if (action === 'continue') {
+          return true;
+        }
+        prompts.note(
+          buildAtomicSplitProposal(stagedFiles, false),
+          'Atomic split proposal',
+        );
       }
     },
   };

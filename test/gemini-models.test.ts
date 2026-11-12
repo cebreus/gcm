@@ -1,18 +1,22 @@
 import { afterEach, expect, test } from 'bun:test';
+
 import { loadConfig } from '../gcm.config.js';
 
-const originalFetch = globalThis.fetch;
+const { fetch: originalFetch } = globalThis;
 
-afterEach(function () {
+afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test('listModels: returns validated metadata and sends the API key only as a header', async function () {
+test('listModels: returns validated metadata and sends the API key only as a header', async () => {
   const apiKey = 'AIzaFakeListModelsKey1234567890';
   let requestUrl = '';
   let requestHeaders = new Headers();
-  globalThis.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
-    requestUrl = String(input);
+  globalThis.fetch = async function (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) {
+    requestUrl = input instanceof Request ? input.url : input.toString();
     requestHeaders = new Headers(init?.headers);
     return Response.json({
       models: [
@@ -33,17 +37,26 @@ test('listModels: returns validated metadata and sends the API key only as a hea
     {
       name: 'models/gemini-test',
       label: 'Gemini Test',
-      limits: { kind: 'separate' as const, maxInputTokens: 1_000_000, maxOutputTokens: 8_192 },
+      limits: {
+        kind: 'separate' as const,
+        maxInputTokens: 1_000_000,
+        maxOutputTokens: 8_192,
+      },
     },
   ]);
   expect(requestUrl).not.toContain(apiKey);
-  expect(requestUrl).toBe('https://generativelanguage.googleapis.com/v1beta/models');
+  expect(requestUrl).toBe(
+    'https://generativelanguage.googleapis.com/v1beta/models',
+  );
   expect(requestHeaders.get('x-goog-api-key')).toBe(apiKey);
 });
 
-test('listModels: maps request cancellation to its timeout error', async function () {
+test('listModels: maps request cancellation to its timeout error', async () => {
   let signal: AbortSignal | null = null;
-  globalThis.fetch = async function (_input: RequestInfo | URL, init?: RequestInit) {
+  globalThis.fetch = async function (
+    _input: RequestInfo | URL,
+    init?: RequestInit,
+  ) {
     signal = init?.signal ?? null;
     throw new DOMException('Aborted', 'AbortError');
   } as unknown as typeof fetch;
@@ -56,10 +69,10 @@ test('listModels: maps request cancellation to its timeout error', async functio
   expect(signal).toBeInstanceOf(AbortSignal);
 });
 
-test('listModels: follows pagination and skips malformed model limits', async function () {
+test('listModels: follows pagination and skips malformed model limits', async () => {
   const urls: string[] = [];
   globalThis.fetch = async function (input: RequestInfo | URL) {
-    const url = String(input);
+    const url = input instanceof Request ? input.url : input.toString();
     urls.push(url);
     if (!url.includes('pageToken=')) {
       return Response.json({
@@ -95,16 +108,19 @@ test('listModels: follows pagination and skips malformed model limits', async fu
   const { listGeminiModels } = await import('../src/gemini-models.js');
   const models = await listGeminiModels('test-key', loadConfig({}));
 
-  expect(models.map(model => model.name)).toEqual(['models/gemini-first', 'models/gemini-second']);
+  expect(models.map((model) => model.name)).toEqual([
+    'models/gemini-first',
+    'models/gemini-second',
+  ]);
   expect(urls).toEqual([
     'https://generativelanguage.googleapis.com/v1beta/models',
     'https://generativelanguage.googleapis.com/v1beta/models?pageToken=next+token',
   ]);
 });
 
-test('listModels: rejects an oversized response body', async function () {
+test('listModels: rejects an oversized response body', async () => {
   globalThis.fetch = async function () {
-    return new Response('{"models":[' + '"x"'.repeat(400_000) + ']}');
+    return new Response(`{"models":[${'"x"'.repeat(400_000)}]}`);
   } as unknown as typeof fetch;
 
   const { listGeminiModels } = await import('../src/gemini-models.js');

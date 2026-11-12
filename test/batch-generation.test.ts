@@ -12,7 +12,9 @@ describe('commit range batch', () => {
       targets: ['first', 'second'],
       initialHead: 'head-0',
       getHead: async function () {
-        return heads[Math.min(headRead++, heads.length - 1)] ?? '';
+        const head = heads[Math.min(headRead, heads.length - 1)] ?? '';
+        headRead += 1;
+        return head;
       },
       hasAmendment: async function () {
         return false;
@@ -25,7 +27,11 @@ describe('commit range batch', () => {
     });
 
     expect(processed).toEqual(['first', 'second']);
-    expect(result).toEqual({ completed: ['first', 'second'], skipped: [], failed: null });
+    expect(result).toEqual({
+      completed: ['first', 'second'],
+      skipped: [],
+      failed: null,
+    });
   });
 
   test('skips existing amendments and stops on the first failure', async () => {
@@ -43,7 +49,9 @@ describe('commit range batch', () => {
       },
       runOne: async function (hash) {
         processed.push(hash);
-        if (hash === 'fails') return false;
+        if (hash === 'fails') {
+          return false;
+        }
         head = `after-${hash}`;
         return true;
       },
@@ -51,7 +59,11 @@ describe('commit range batch', () => {
     });
 
     expect(processed).toEqual(['fails']);
-    expect(result).toEqual({ completed: [], skipped: ['done'], failed: 'fails' });
+    expect(result).toEqual({
+      completed: [],
+      skipped: ['done'],
+      failed: 'fails',
+    });
   });
 
   test('refuses unexpected HEAD movement before processing the next target', async () => {
@@ -62,7 +74,9 @@ describe('commit range batch', () => {
       initialHead: currentHead,
       getHead: async function () {
         reads += 1;
-        if (reads === 3) currentHead = 'external-head';
+        if (reads === 3) {
+          currentHead = 'external-head';
+        }
         return currentHead;
       },
       hasAmendment: async function () {

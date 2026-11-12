@@ -1,8 +1,18 @@
+import {
+  HTTP_STATUS_BAD_GATEWAY,
+  HTTP_STATUS_BAD_REQUEST,
+  HTTP_STATUS_FORBIDDEN,
+  HTTP_STATUS_GATEWAY_TIMEOUT,
+  HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  HTTP_STATUS_NOT_FOUND,
+  HTTP_STATUS_REQUEST_TIMEOUT,
+  HTTP_STATUS_SERVICE_UNAVAILABLE,
+  HTTP_STATUS_TOO_MANY_REQUESTS,
+  HTTP_STATUS_UNAUTHORIZED,
+} from './constants.js';
 import type { LogMetadata } from './logger.js';
 import type { ModelSpec } from './model-registry.js';
 import { stripTerminalControlSequences } from './utils.js';
-
-export type { ModelSpec } from './model-registry.js';
 
 export interface LanguageModelResponse {
   text: string;
@@ -17,22 +27,25 @@ export interface LanguageModelResponse {
 export type LanguageModelErrorKind =
   'timeout' | 'missing-api-key' | 'no-models' | 'invalid-model' | 'connection';
 
-export type LanguageModelApiError = Error & {
+export interface LanguageModelApiError extends Error {
   name: 'LanguageModelApiError';
   metadata: Record<string, unknown>;
-};
+}
+const MAX_MODEL_NAME_LENGTH = 128;
 
 export function createLanguageModelApiError(
   message: string,
   metadata: Record<string, unknown> = {},
 ): LanguageModelApiError {
-  const error = new Error(message) as LanguageModelApiError;
-  error.name = 'LanguageModelApiError';
-  error.metadata = metadata;
-  return error;
+  return Object.assign(new Error(message), {
+    name: 'LanguageModelApiError',
+    metadata,
+  } satisfies Pick<LanguageModelApiError, 'name' | 'metadata'>);
 }
 
-export function isLanguageModelApiError(error: unknown): error is LanguageModelApiError {
+export function isLanguageModelApiError(
+  error: unknown,
+): error is LanguageModelApiError {
   return (
     error instanceof Error &&
     error.name === 'LanguageModelApiError' &&
@@ -51,25 +64,47 @@ export function hasLanguageModelErrorKind(
 }
 
 export function isModelUnavailableError(error: unknown): boolean {
-  if (!isLanguageModelApiError(error)) return false;
+  if (!isLanguageModelApiError(error)) {
+    return false;
+  }
   const status = Number(error.metadata.status);
-  if ([400, 401, 403].includes(status)) return false;
+  if (
+    [
+      HTTP_STATUS_BAD_REQUEST,
+      HTTP_STATUS_UNAUTHORIZED,
+      HTTP_STATUS_FORBIDDEN,
+    ].includes(status)
+  ) {
+    return false;
+  }
   return (
-    error.metadata.availability === true || [404, 408, 429, 500, 502, 503, 504].includes(status)
+    error.metadata.availability === true ||
+    [
+      HTTP_STATUS_NOT_FOUND,
+      HTTP_STATUS_REQUEST_TIMEOUT,
+      HTTP_STATUS_TOO_MANY_REQUESTS,
+      HTTP_STATUS_INTERNAL_SERVER_ERROR,
+      HTTP_STATUS_BAD_GATEWAY,
+      HTTP_STATUS_SERVICE_UNAVAILABLE,
+      HTTP_STATUS_GATEWAY_TIMEOUT,
+    ].includes(status)
   );
 }
 
 export function isLanguageModelProviderId(value: unknown): value is string {
-  return typeof value === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(value);
+  return (
+    typeof value === 'string' &&
+    /^[a-z0-9][a-z0-9._\u002D]{0,63}$/iv.test(value)
+  );
 }
 
 export function isLanguageModelName(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     value.length > 0 &&
-    value.length <= 128 &&
+    value.length <= MAX_MODEL_NAME_LENGTH &&
     value.trim() === value &&
-    !/[\r\n\t\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u.test(value) &&
+    !/[\r\n\t\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/v.test(value) &&
     stripTerminalControlSequences(value) === value
   );
 }
@@ -88,7 +123,6 @@ export function getModelSpecValidationError(model: ModelSpec): string | null {
       return 'Invalid model token limits';
     }
   } else if (
-    model.limits.kind !== 'shared-context' ||
     !Number.isSafeInteger(model.limits.contextWindowTokens) ||
     model.limits.contextWindowTokens <= 0
   ) {
@@ -98,7 +132,9 @@ export function getModelSpecValidationError(model: ModelSpec): string | null {
 }
 
 export interface LanguageModelService {
-  generate(params: LanguageModelGenerateParams): Promise<LanguageModelResponse | null>;
+  generate: (
+    params: LanguageModelGenerateParams,
+  ) => Promise<LanguageModelResponse | null>;
 }
 
 export interface LanguageModelProvider {
@@ -108,13 +144,13 @@ export interface LanguageModelProvider {
   defaultModel: string;
   service: LanguageModelService;
   /** Returns validated models compatible with this application's text-generation contract. */
-  models(): Promise<ModelSpec[]>;
+  models: () => Promise<ModelSpec[]>;
 }
 
 export interface LanguageModelProviderFactory {
   id: string;
   label: string;
-  create(options?: { probeOnly?: boolean }): Promise<LanguageModelProvider>;
+  create: (options?: { probeOnly?: boolean }) => Promise<LanguageModelProvider>;
 }
 
 export interface LanguageModelGenerateParams {

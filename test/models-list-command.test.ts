@@ -1,8 +1,9 @@
 import { expect, mock, test } from 'bun:test';
+
 import { runModelsListCommand } from '../src/models-list-command.js';
 
-test('list models redacts secrets from provider readiness errors', async function () {
-  const cancel = mock(function () {});
+test('list models redacts secrets from provider readiness errors', async () => {
+  const cancel = mock(() => {});
   const exitCode = await runModelsListCommand({
     providerLabel: 'Local',
     readinessError: 'Rejected sk-1234567890abcdef',
@@ -16,8 +17,8 @@ test('list models redacts secrets from provider readiness errors', async functio
   expect(cancel).toHaveBeenCalledWith('Error: Rejected [REDACTED-KEY]');
 });
 
-test('list models redacts secrets from provider discovery errors', async function () {
-  const cancel = mock(function () {});
+test('list models redacts secrets from provider discovery errors', async () => {
+  const cancel = mock(() => {});
   const exitCode = await runModelsListCommand({
     providerLabel: 'Local',
     models: async function () {
@@ -27,5 +28,7 @@ test('list models redacts secrets from provider discovery errors', async functio
   });
 
   expect(exitCode).toBe(2);
-  expect(cancel).toHaveBeenCalledWith('Failed to fetch models: Error: Rejected [REDACTED-KEY]');
+  expect(cancel).toHaveBeenCalledWith(
+    'Failed to fetch models: Error: Rejected [REDACTED-KEY]',
+  );
 });

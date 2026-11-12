@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
 import { createCommitActionService } from '../src/commit-action-service.js';
+import { spawnGitStream } from '../src/git-utils.js';
 import type {
   CommitTarget,
   GitService,
@@ -11,7 +13,6 @@ import type {
   RepositoryState,
 } from '../src/services/git-service.js';
 import { createGitService } from '../src/services/git-service.js';
-import { spawnGitStream } from '../src/git-utils.js';
 
 const CLEAN: RepositoryState = {
   hasStagedChanges: true,
@@ -33,9 +34,11 @@ const TARGET: CommitTarget = {
 };
 
 function entries(...paths: string[]): IndexEntry[] {
-  return paths.map(function (path, index) {
-    return { path, mode: '100644', objectId: String(index).padStart(40, '0') };
-  });
+  return paths.map((path, index) => ({
+    path,
+    mode: '100644',
+    objectId: String(index).padStart(40, '0'),
+  }));
 }
 
 function createFakeGitService(params: {
@@ -44,10 +47,13 @@ function createFakeGitService(params: {
   indexEntries?: IndexEntry[][];
   target?: CommitTarget | null;
   targets?: Array<CommitTarget | null>;
-}) {
+}): { service: GitService; writes: string[] } {
   const states = params.states ?? [CLEAN, CLEAN];
   const trees = params.trees ?? ['tree', 'tree'];
-  const snapshots = params.indexEntries ?? [entries('first.ts'), entries('first.ts')];
+  const snapshots = params.indexEntries ?? [
+    entries('first.ts'),
+    entries('first.ts'),
+  ];
   let stateIndex = 0;
   let treeIndex = 0;
   let snapshotIndex = 0;
@@ -77,30 +83,47 @@ function createFakeGitService(params: {
     },
     inspectCommitTarget: async function () {
       const targets = params.targets ?? [params.target ?? null];
-      const target = targets[Math.min(targetIndex++, targets.length - 1)];
-      if (!target) throw new Error('target unavailable');
+      const target = targets.at(Math.min(targetIndex, targets.length - 1));
+      targetIndex += 1;
+      if (target === undefined || target === null) {
+        throw new Error('target unavailable');
+      }
       return target;
     },
     getIndexTree: async function () {
-      return trees[Math.min(treeIndex++, trees.length - 1)] ?? '';
+      const tree = trees[Math.min(treeIndex, trees.length - 1)] ?? '';
+      treeIndex += 1;
+      return tree;
     },
     getIndexEntries: async function () {
-      return snapshots[Math.min(snapshotIndex++, snapshots.length - 1)] ?? [];
+      const snapshot =
+        snapshots[Math.min(snapshotIndex, snapshots.length - 1)] ?? [];
+      snapshotIndex += 1;
+      return snapshot;
     },
     getRepositoryState: async function () {
-      return states[Math.min(stateIndex++, states.length - 1)] ?? CLEAN;
+      const state = states[Math.min(stateIndex, states.length - 1)] ?? CLEAN;
+      stateIndex += 1;
+      return state;
     },
   };
   return { service, writes };
 }
 
-function createActionService(gitService: GitService) {
-  return createCommitActionService({ gitService, logger: { log: function () {} } });
+function createActionService(
+  gitService: GitService,
+): ReturnType<typeof createCommitActionService> {
+  return createCommitActionService({
+    gitService,
+    logger: { log: function () {} },
+  });
 }
 
 describe('commit action service', () => {
   test('refuses an observed snapshot that is already stale', async () => {
-    const fake = createFakeGitService({ trees: ['current-tree', 'current-tree'] });
+    const fake = createFakeGitService({
+      trees: ['current-tree', 'current-tree'],
+    });
     const actions = createActionService(fake.service);
 
     const inspection = await actions.inspect(null, {
@@ -128,8 +151,13 @@ describe('commit action service', () => {
   });
 
   test('keeps a stable snapshot and the exact rebase capability reason', async () => {
-    const repositoryState = { ...CLEAN, inProgressOperation: 'rebase' as const };
-    const fake = createFakeGitService({ states: [repositoryState, repositoryState] });
+    const repositoryState = {
+      ...CLEAN,
+      inProgressOperation: 'rebase' as const,
+    };
+    const fake = createFakeGitService({
+      states: [repositoryState, repositoryState],
+    });
     const actions = createActionService(fake.service);
     const snapshot = { tree: 'tree', entries: entries('first.ts') };
 
@@ -188,7 +216,12 @@ describe('commit action service', () => {
   });
 
   test('range policy creates amend! even when the target is unpublished HEAD', async () => {
-    const head = { ...TARGET, hash: 'b'.repeat(40), headHash: 'b'.repeat(40), isHead: true };
+    const head = {
+      ...TARGET,
+      hash: 'b'.repeat(40),
+      headHash: 'b'.repeat(40),
+      isHead: true,
+    };
     const fake = createFakeGitService({
       states: [
         { ...CLEAN, hasStagedChanges: false },
@@ -213,14 +246,20 @@ describe('commit action service', () => {
     const fake = createFakeGitService({});
     const actions = createActionService(fake.service);
     const inspection = await actions.inspect(null);
-    const capability = { ...inspection.capability, excludedPaths: ['secrets.txt'] };
+    const capability = {
+      ...inspection.capability,
+      excludedPaths: ['secrets.txt'],
+    };
 
     await expect(actions.apply(capability, 'feat: first')).rejects.toThrow(
       'Explicit confirmation is required before committing excluded staged paths',
     );
     expect(fake.writes).toEqual([]);
 
-    await actions.apply({ ...capability, exclusionsAcknowledged: true }, 'feat: first');
+    await actions.apply(
+      { ...capability, exclusionsAcknowledged: true },
+      'feat: first',
+    );
     expect(fake.writes).toEqual(['commit:feat: first']);
   });
 
@@ -243,26 +282,29 @@ describe('commit action service', () => {
     const actions = createActionService(fake.service);
     const inspection = await actions.inspect(null);
 
-    await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow(
-      'Added: "second.ts"',
-    );
-    await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow(
-      'Modified: "modified.ts", Removed: "removed.ts"',
-    );
+    await expect(
+      actions.apply(inspection.capability, 'feat: first'),
+    ).rejects.toThrow('Added: "second.ts"');
+    await expect(
+      actions.apply(inspection.capability, 'feat: first'),
+    ).rejects.toThrow('Modified: "modified.ts", Removed: "removed.ts"');
     expect(fake.writes).toEqual([]);
   });
 
   test('escapes changed paths before putting them in a refusal', async () => {
     const fake = createFakeGitService({
       trees: ['first-tree', 'first-tree', 'second-tree', 'second-tree'],
-      indexEntries: [entries('first.ts'), entries('first.ts', 'later\nAdded: forged\u001B[2J.ts')],
+      indexEntries: [
+        entries('first.ts'),
+        entries('first.ts', 'later\nAdded: forged\u001B[2J.ts'),
+      ],
     });
     const actions = createActionService(fake.service);
     const inspection = await actions.inspect(null);
 
-    await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow(
-      'Added: "later\\nAdded: forged\\u001b[2J.ts"',
-    );
+    await expect(
+      actions.apply(inspection.capability, 'feat: first'),
+    ).rejects.toThrow('Added: "later\\nAdded: forged\\u001b[2J.ts"');
     expect(fake.writes).toEqual([]);
   });
 
@@ -270,9 +312,9 @@ describe('commit action service', () => {
     const fake = createFakeGitService({});
     const actions = createActionService(fake.service);
 
-    await expect(actions.apply({ allowed: true, mode: 'commit' }, 'feat: first')).rejects.toThrow(
-      'the original staged snapshot is missing',
-    );
+    await expect(
+      actions.apply({ allowed: true, mode: 'commit' }, 'feat: first'),
+    ).rejects.toThrow('the original staged snapshot is missing');
     expect(fake.writes).toEqual([]);
   });
 
@@ -283,14 +325,17 @@ describe('commit action service', () => {
     const actions = createActionService(fake.service);
     const inspection = await actions.inspect(null);
 
-    await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow(
-      'Cannot safely determine the staged changes',
-    );
+    await expect(
+      actions.apply(inspection.capability, 'feat: first'),
+    ).rejects.toThrow('Cannot safely determine the staged changes');
     expect(fake.writes).toEqual([]);
   });
 
   test('refuses drift before amend and reword writes', async () => {
-    for (const target of [{ ...TARGET, isHead: true, isPublished: false }, TARGET]) {
+    for (const target of [
+      { ...TARGET, isHead: true, isPublished: false },
+      TARGET,
+    ]) {
       const fake = createFakeGitService({
         states: [
           { ...CLEAN, hasStagedChanges: false },
@@ -304,9 +349,9 @@ describe('commit action service', () => {
       const actions = createActionService(fake.service);
       const inspection = await actions.inspect(target.hash);
 
-      await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow(
-        'Added: "later.ts"',
-      );
+      await expect(
+        actions.apply(inspection.capability, 'feat: first'),
+      ).rejects.toThrow('Added: "later.ts"');
       expect(fake.writes).toEqual([]);
     }
   });
@@ -327,9 +372,9 @@ describe('commit action service', () => {
     const actions = createActionService(fake.service);
     const inspection = await actions.inspect(TARGET.hash);
 
-    await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow(
-      'HEAD or target commit moved',
-    );
+    await expect(
+      actions.apply(inspection.capability, 'feat: first'),
+    ).rejects.toThrow('HEAD or target commit moved');
     expect(fake.writes).toEqual([]);
   });
 
@@ -339,10 +384,22 @@ describe('commit action service', () => {
       targetHash: string | null;
       target: CommitTarget | null;
     }> = [
-      { state: { ...CLEAN, inProgressOperation: 'rebase' }, targetHash: null, target: null },
-      { state: { ...CLEAN, hasUnmergedPaths: true }, targetHash: null, target: null },
+      {
+        state: { ...CLEAN, inProgressOperation: 'rebase' },
+        targetHash: null,
+        target: null,
+      },
+      {
+        state: { ...CLEAN, hasUnmergedPaths: true },
+        targetHash: null,
+        target: null,
+      },
       { state: CLEAN, targetHash: 'missing', target: null },
-      { state: { ...CLEAN, hasStagedChanges: true }, targetHash: TARGET.hash, target: TARGET },
+      {
+        state: { ...CLEAN, hasStagedChanges: true },
+        targetHash: TARGET.hash,
+        target: TARGET,
+      },
       {
         state: { ...CLEAN, hasStagedChanges: false },
         targetHash: TARGET.hash,
@@ -356,12 +413,17 @@ describe('commit action service', () => {
     ];
 
     for (const refusal of cases) {
-      const fake = createFakeGitService({ states: [refusal.state], target: refusal.target });
+      const fake = createFakeGitService({
+        states: [refusal.state],
+        target: refusal.target,
+      });
       const actions = createActionService(fake.service);
       const inspection = await actions.inspect(refusal.targetHash);
 
       expect(inspection.capability.allowed).toBe(false);
-      await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow();
+      await expect(
+        actions.apply(inspection.capability, 'feat: first'),
+      ).rejects.toThrow();
       expect(fake.writes).toEqual([]);
     }
   });
@@ -379,7 +441,9 @@ async function runGit(repository: string, args: string[]): Promise<string> {
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
   ]);
-  if (exitCode !== 0) throw new Error(stderr);
+  if (exitCode !== 0) {
+    throw new Error(stderr);
+  }
   return stdout;
 }
 
@@ -392,28 +456,42 @@ test('integration: refuses staging drift without creating a commit', async () =>
     await writeFile(join(repository, 'base.ts'), 'export const base = true;\n');
     await runGit(repository, ['add', 'base.ts']);
     await runGit(repository, ['commit', '-qm', 'chore: base']);
-    await writeFile(join(repository, 'first.ts'), 'export const first = true;\n');
+    await writeFile(
+      join(repository, 'first.ts'),
+      'export const first = true;\n',
+    );
     await runGit(repository, ['add', 'first.ts']);
 
     let writeEntered = false;
     const gitService = createGitService({
-      gitCommandRunner: function (args) {
-        if (args[0] === 'commit') writeEntered = true;
-        return spawnGitStream(['-C', repository, ...args]);
+      gitCommandRunner: async function (args) {
+        if (args[0] === 'commit') {
+          writeEntered = true;
+        }
+        return await spawnGitStream(['-C', repository, ...args]);
       },
     });
     const actions = createActionService(gitService);
     const staged = await gitService.retrieveStagedChanges(null, null);
-    if (!staged) throw new Error('Expected staged changes');
-    await writeFile(join(repository, 'second.ts'), 'export const second = true;\n');
+    if (staged === null) {
+      throw new Error('Expected staged changes');
+    }
+    await writeFile(
+      join(repository, 'second.ts'),
+      'export const second = true;\n',
+    );
     await runGit(repository, ['add', 'second.ts']);
     const inspection = await actions.inspect(null, staged.snapshot);
 
-    expect(inspection.capability.reason).toContain('the index changed after its diff was read');
-    await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow(
+    expect(inspection.capability.reason).toContain(
       'the index changed after its diff was read',
     );
-    expect((await runGit(repository, ['rev-list', '--count', 'HEAD'])).trim()).toBe('1');
+    await expect(
+      actions.apply(inspection.capability, 'feat: first'),
+    ).rejects.toThrow('the index changed after its diff was read');
+    expect(
+      (await runGit(repository, ['rev-list', '--count', 'HEAD'])).trim(),
+    ).toBe('1');
     expect(writeEntered).toBe(false);
   } finally {
     await rm(repository, { recursive: true, force: true });
@@ -431,19 +509,26 @@ test('integration: keeps a stable snapshot read-only during a rebase', async () 
     await writeFile(join(repository, 'base.ts'), 'export const base = true;\n');
     await runGit(repository, ['add', 'base.ts']);
     await runGit(repository, ['commit', '-qm', 'chore: base']);
-    await writeFile(join(repository, 'first.ts'), 'export const first = true;\n');
+    await writeFile(
+      join(repository, 'first.ts'),
+      'export const first = true;\n',
+    );
     await runGit(repository, ['add', 'first.ts']);
     process.chdir(repository);
 
     const gitService = createGitService({
-      gitCommandRunner: function (args) {
-        if (args[0] === 'commit') writeEntered = true;
-        return spawnGitStream(args);
+      gitCommandRunner: async function (args) {
+        if (args[0] === 'commit') {
+          writeEntered = true;
+        }
+        return await spawnGitStream(args);
       },
     });
     const actions = createActionService(gitService);
     const staged = await gitService.retrieveStagedChanges(null, null);
-    if (!staged?.snapshot) throw new Error('Expected a stable staged snapshot');
+    if (staged?.snapshot === undefined) {
+      throw new Error('Expected a stable staged snapshot');
+    }
     await mkdir(join(repository, '.git', 'rebase-merge'));
 
     const inspection = await actions.inspect(null, staged.snapshot);
@@ -453,10 +538,12 @@ test('integration: keeps a stable snapshot read-only during a rebase', async () 
     expect(inspection.capability.reason).toBe(
       'Commit is disabled while a git rebase is in progress. Finish or abort the operation first.',
     );
-    await expect(actions.apply(inspection.capability, 'feat: first')).rejects.toThrow(
-      'Commit is disabled while a git rebase is in progress.',
-    );
-    expect((await runGit(repository, ['rev-list', '--count', 'HEAD'])).trim()).toBe('1');
+    await expect(
+      actions.apply(inspection.capability, 'feat: first'),
+    ).rejects.toThrow('Commit is disabled while a git rebase is in progress.');
+    expect(
+      (await runGit(repository, ['rev-list', '--count', 'HEAD'])).trim(),
+    ).toBe('1');
     expect(writeEntered).toBe(false);
   } finally {
     process.chdir(previousDirectory);

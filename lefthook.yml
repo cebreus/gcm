@@ -1,0 +1,21 @@
+pre-commit:
+  commands:
+    lint-staged:
+      run: bunx lint-staged
+    typecheck:
+      run: bun run check
+
+commit-msg:
+  commands:
+    commitlint:
+      run: bunx commitlint --edit {1}
+    changeset:
+      run: bun scripts/changeset-gate.mjs commit-msg {1}
+
+pre-push:
+  commands:
+    changeset:
+      run: bun scripts/changeset-gate.mjs pre-push {1}
+      use_stdin: true
+    verify:
+      run: bun run verify:push

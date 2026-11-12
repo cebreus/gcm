@@ -1,8 +1,11 @@
-import { test, expect, mock } from 'bun:test';
+import { expect, mock, test } from 'bun:test';
+
+import type {
+  LanguageModelResponse,
+  LanguageModelService,
+} from '../src/language-model-service.ts';
 import { createLogger } from '../src/logger.ts';
 import runner from '../src/runner.ts';
-import type { SpawnGitStreamResult } from '../src/git-utils.ts';
-import type { LanguageModelResponse, LanguageModelService } from '../src/language-model-service.ts';
 import type { GitService } from '../src/services/git-service.ts';
 
 void mock.module('@clack/prompts', () => ({
@@ -10,15 +13,15 @@ void mock.module('@clack/prompts', () => ({
   outro: mock(() => {}),
   spinner: mock(() => ({ start: mock(() => {}), stop: mock(() => {}) })),
   note: mock(() => {}),
-  select: mock(function (prompt: { options: Array<{ value: string }> }) {
-    const values = prompt.options.map(function (option) {
-      return option.value;
-    });
-    return Promise.resolve(values.includes('generate') ? 'generate' : 'continue');
+  select: mock(async (prompt: { options: Array<{ value: string }> }) => {
+    const values = prompt.options.map((option) => option.value);
+    return await Promise.resolve(
+      values.includes('generate') ? 'generate' : 'continue',
+    );
   }),
-  text: mock(() => Promise.resolve('')),
+  text: mock(async () => await Promise.resolve('')),
   isCancel: mock((value: unknown) => value === 'cancel'),
-  cancel: mock(function (message: string) {
+  cancel: mock((message: string) => {
     process.stderr.write(message);
   }),
 }));
@@ -26,21 +29,6 @@ void mock.module('@clack/prompts', () => ({
 async function runnerFallbackStructuredOutputTest(
   response: LanguageModelResponse | null,
 ): Promise<void> {
-  // Stubbed spawnStream implementation to simulate a staged diff and file list
-  async function spawnStreamImpl(args: string[]): Promise<SpawnGitStreamResult> {
-    const argStr = args.join(' ');
-    if (argStr.includes('--stat')) {
-      return await Promise.resolve({ text: ' 2 files changed\n', truncated: false });
-    }
-    if (argStr.includes('--name-only')) {
-      return await Promise.resolve({ text: 'src/index.js\nREADME.md', truncated: false });
-    }
-    if (argStr.includes('diff --staged')) {
-      return await Promise.resolve({ text: 'diff --staged content', truncated: false });
-    }
-    return await Promise.resolve({ text: '', truncated: false });
-  }
-
   // Provide a git service that returns staged changes
   function createGitServiceFake(): GitService {
     return {
@@ -51,13 +39,11 @@ async function runnerFallbackStructuredOutputTest(
         commitHash: string | null,
         _logger: Parameters<GitService['retrieveStagedChanges']>[1],
         excludePatterns: string[] = [],
-      ) => {
-        return {
-          stagedDiff: 'diff --staged content',
-          stagedFiles: ['src/index.js', 'README.md'],
-          truncated: false,
-        };
-      },
+      ) => ({
+        stagedDiff: 'diff --staged content',
+        stagedFiles: ['src/index.js', 'README.md'],
+        truncated: false,
+      }),
       commitChanges: async (
         _message: Parameters<GitService['commitChanges']>[0],
         _logger: Parameters<GitService['commitChanges']>[1],
@@ -77,9 +63,15 @@ async function runnerFallbackStructuredOutputTest(
       ) => {
         throw new Error('not used in this test');
       },
-      getIndexTree: async (_logger: Parameters<GitService['getIndexTree']>[0]) => '',
-      getIndexEntries: async (_logger: Parameters<GitService['getIndexEntries']>[0]) => [],
-      getRepositoryState: async (_logger: Parameters<GitService['getRepositoryState']>[0]) => ({
+      getIndexTree: async (
+        _logger: Parameters<GitService['getIndexTree']>[0],
+      ) => '',
+      getIndexEntries: async (
+        _logger: Parameters<GitService['getIndexEntries']>[0],
+      ) => [],
+      getRepositoryState: async (
+        _logger: Parameters<GitService['getRepositoryState']>[0],
+      ) => ({
         hasStagedChanges: true,
         hasUnmergedPaths: false,
         inProgressOperation: null,
@@ -91,51 +83,63 @@ async function runnerFallbackStructuredOutputTest(
   // Provide a service whose response carries no usable text
   function createGeminiServiceFake(): LanguageModelService {
     return {
-      generate: async (_params: Parameters<LanguageModelService['generate']>[0]) => response,
+      generate: async (
+        _params: Parameters<LanguageModelService['generate']>[0],
+      ) => response,
     };
   }
 
   const logs: string[] = [];
-  const originalStdoutWrite = process.stdout.write;
-  const originalStderrWrite = process.stderr.write;
-  const originalExitCode = process.exitCode;
-  process.stdout.write = ((chunk: string | Uint8Array) => {
+  const {
+    stdout: { write: originalStdoutWrite },
+    stderr: { write: originalStderrWrite },
+    exitCode: originalExitCode,
+  } = process;
+  process.stdout.write = (chunk: string | Uint8Array) => {
     logs.push(String(chunk));
     return true;
-  }) as unknown as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array) => {
+  };
+  process.stderr.write = (chunk: string | Uint8Array) => {
     logs.push(String(chunk));
     return true;
-  }) as unknown as typeof process.stderr.write;
+  };
 
   // Ensure API key is present
-  const origApiKey = process.env.GOOGLE_GEMINI_API_KEY;
+  const {
+    env: { GOOGLE_GEMINI_API_KEY: origApiKey },
+  } = process;
   process.env.GOOGLE_GEMINI_API_KEY = 'fake-key';
   try {
-    await runner.executeCommitMessageGeneration(['--model', 'gemini-3.7-flash'], {
-      gitService: createGitServiceFake(),
-      geminiService: createGeminiServiceFake(),
-      geminiModelLister: async function () {
-        return [
-          {
-            name: 'models/gemini-3.7-flash',
-            label: 'Gemini 3.7 Flash',
-            limits: {
-              kind: 'separate' as const,
-              maxInputTokens: 1_048_576,
-              maxOutputTokens: 65_536,
+    await runner.executeCommitMessageGeneration(
+      ['--model', 'gemini-3.7-flash'],
+      {
+        gitService: createGitServiceFake(),
+        geminiService: createGeminiServiceFake(),
+        geminiModelLister: async function () {
+          return [
+            {
+              name: 'models/gemini-3.7-flash',
+              label: 'Gemini 3.7 Flash',
+              limits: {
+                kind: 'separate' as const,
+                maxInputTokens: 1_048_576,
+                maxOutputTokens: 65_536,
+              },
             },
-          },
-        ];
+          ];
+        },
+        logger: createLogger({ LOG_LEVEL: 'info' }),
       },
-      logger: createLogger({ LOG_LEVEL: 'info' }),
-    });
+    );
   } finally {
     process.stdout.write = originalStdoutWrite;
     process.stderr.write = originalStderrWrite;
     process.exitCode = originalExitCode ?? 0;
-    if (origApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-    else process.env.GOOGLE_GEMINI_API_KEY = origApiKey;
+    if (origApiKey === undefined) {
+      delete process.env.GOOGLE_GEMINI_API_KEY;
+    } else {
+      process.env.GOOGLE_GEMINI_API_KEY = origApiKey;
+    }
   }
 
   const joined = logs.join('\n');
@@ -144,8 +148,8 @@ async function runnerFallbackStructuredOutputTest(
   expect(joined).not.toContain('Failed to parse');
 }
 for (const text of [null, '', ' \n\t']) {
-  test(`runner: ${JSON.stringify(text)} provider text is reported as no usable response`, () =>
-    runnerFallbackStructuredOutputTest(
+  test(`runner: ${JSON.stringify(text)} provider text is reported as no usable response`, async () =>
+    await runnerFallbackStructuredOutputTest(
       text === null ? null : { text, usage: {}, truncated: false },
     ));
 }

@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { chmod, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { afterEach, beforeEach, expect, test } from 'bun:test';
+
 import { spawnGitStream } from '../src/git-utils.js';
 import { createGitService } from '../src/services/git-service.js';
 
@@ -9,8 +11,11 @@ const savedEnv = { ...process.env };
 let repository = '';
 
 // Simulates the 120 s default at test speed; explicit timeouts are honoured.
-const runner: typeof spawnGitStream = (args, options = {}) =>
-  spawnGitStream(['-C', repository, ...args], { timeoutMs: 300, ...options });
+const runner: typeof spawnGitStream = async (args, options) =>
+  await spawnGitStream(['-C', repository, ...args], {
+    timeoutMs: 300,
+    ...options,
+  });
 
 beforeEach(async () => {
   process.env.GIT_CONFIG_GLOBAL = '/dev/null';
@@ -20,8 +25,9 @@ beforeEach(async () => {
     ['init', '-q'],
     ['config', 'user.name', 'T'],
     ['config', 'user.email', 't@e.x'],
-  ])
+  ]) {
     await spawnGitStream(['-C', repository, ...args]);
+  }
   const hook = join(repository, '.git', 'hooks', 'pre-commit');
   await Bun.write(hook, '#!/bin/sh\nsleep 1\ntouch hook-ran\n');
   await chmod(hook, 0o755);
@@ -35,9 +41,14 @@ afterEach(async () => {
 });
 
 test('commit waits for a hook that outlasts the default timeout', async () => {
-  await createGitService({ gitCommandRunner: runner }).commitChanges('feat: a', null);
+  await createGitService({ gitCommandRunner: runner }).commitChanges(
+    'feat: a',
+    null,
+  );
   expect(await Bun.file(join(repository, 'hook-ran')).exists()).toBeTrue();
-  expect((await runner(['rev-parse', '--verify', 'HEAD'])).text.trim()).toMatch(/^[0-9a-f]{40}$/);
+  expect((await runner(['rev-parse', '--verify', 'HEAD'])).text.trim()).toMatch(
+    /^[0-9a-f]{40}$/v,
+  );
 });
 
 const nap = ['-c', 'alias.nap=!sleep 0.4', 'nap'];
@@ -50,7 +61,9 @@ test('spawnGitStream timeoutMs 0 means no timeout', async () => {
 });
 
 test('spawnGitStream kills a command that exceeds timeoutMs', async () => {
-  await expect(spawnGitStream(nap, { timeoutMs: 100 })).rejects.toThrow('timed out');
+  await expect(spawnGitStream(nap, { timeoutMs: 100 })).rejects.toThrow(
+    'timed out',
+  );
 });
 
 // Real stdout overflow (hook output goes to stderr, so it cannot reach the cap).
@@ -82,7 +95,7 @@ test('stdout above the cap with a normal timeout kills the command', async () =>
   expect(result.truncated).toBeTrue();
   await Bun.sleep(500);
   expect(await Bun.file(marker).exists()).toBeFalse();
-  await expect(spawnGitStream(flood(marker), { timeoutMs: 5000, maxBytes: 10 })).rejects.toThrow(
-    'truncated',
-  );
+  await expect(
+    spawnGitStream(flood(marker), { timeoutMs: 5000, maxBytes: 10 }),
+  ).rejects.toThrow('truncated');
 });

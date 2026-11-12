@@ -14,7 +14,12 @@ test('returns deterministic empty hints without changed files', () => {
 
 test('deduplicates historical and single-repository path scopes in encounter order', async () => {
   const result = await getCommitContextHints(
-    ['src/api/index.ts', 'src/api/other.ts', '.github/workflows/ci.yml', 'package.json'],
+    [
+      'src/api/index.ts',
+      'src/api/other.ts',
+      '.github/workflows/ci.yml',
+      'package.json',
+    ],
     {
       scopeHistorySubjects: [
         'feat(core): add command',
@@ -43,7 +48,11 @@ test('deduplicates historical and single-repository path scopes in encounter ord
 
 test('detects app and package scopes in a monorepo', async () => {
   const result = await getCommitContextHints(
-    ['apps/web/src/index.ts', 'packages/shared/src/index.ts', 'apps/web/src/other.ts'],
+    [
+      'apps/web/src/index.ts',
+      'packages/shared/src/index.ts',
+      'apps/web/src/other.ts',
+    ],
     { scopeHistorySubjects: [], recentSubjects: [], repoType: 'monorepo' },
   );
 
@@ -102,11 +111,14 @@ test('ignores direct src files and accepts valid conventional scope variants', (
 });
 
 test('does not special-case sites, tools, infra or scripts', () => {
-  const result = getCommitContextHints(['sites/a/x.ts', 'tools/b/x.ts', 'infra/x', 'scripts/x'], {
-    scopeHistorySubjects: [],
-    recentSubjects: [],
-    repoType: 'monorepo',
-  });
+  const result = getCommitContextHints(
+    ['sites/a/x.ts', 'tools/b/x.ts', 'infra/x', 'scripts/x'],
+    {
+      scopeHistorySubjects: [],
+      recentSubjects: [],
+      repoType: 'monorepo',
+    },
+  );
   expect(result.scopeSuggestions).toEqual([]);
 });
 

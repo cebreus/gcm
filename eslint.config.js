@@ -1,39 +1,64 @@
+import love from 'eslint-config-love';
 import globals from 'globals';
-import loveInfrastructure from 'eslint-config-love';
 
 export default [
   {
     ignores: ['node_modules', 'dist'],
   },
   {
+    ...love,
     files: ['**/*.js', '**/*.ts'],
-    linterOptions: loveInfrastructure.linterOptions,
     languageOptions: {
-      ...loveInfrastructure.languageOptions,
-      globals: {
-        ...loveInfrastructure.languageOptions?.globals,
-        ...globals.bunBuiltin,
-      },
+      ...love.languageOptions,
+      globals: { ...love.languageOptions?.globals, ...globals.bunBuiltin },
     },
-    plugins: loveInfrastructure.plugins,
     rules: {
-      '@typescript-eslint/consistent-type-assertions': [
+      ...love.rules,
+      // love flags even -1, 0, 1 and 2; naming them adds noise, not meaning:
+      // 2 is a pair, a half, a hex byte, argv offset or exponential base.
+      '@typescript-eslint/no-magic-numbers': [
         'error',
-        { objectLiteralTypeAssertions: 'never' },
+        {
+          ...love.rules['@typescript-eslint/no-magic-numbers'][1],
+          ignore: [-1, 0, 1, 2],
+          ignoreArrayIndexes: true,
+          ignoreDefaultValues: true,
+        },
       ],
-      '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/no-misused-promises': 'error',
-      '@typescript-eslint/no-non-null-assertion': 'error',
-      '@typescript-eslint/no-unsafe-argument': 'error',
-      '@typescript-eslint/no-unsafe-assignment': 'error',
-      '@typescript-eslint/no-unsafe-call': 'error',
-      '@typescript-eslint/no-unsafe-member-access': 'error',
-      '@typescript-eslint/no-unsafe-return': 'error',
-      '@typescript-eslint/prefer-nullish-coalescing': 'error',
-      '@typescript-eslint/switch-exhaustiveness-check': 'error',
-      'no-warning-comments': ['error', { terms: ['todo', 'fixme', 'xxx'], location: 'start' }],
+      // love allows a brace-less single-line body; a block reads the same everywhere.
+      curly: ['error', 'all'],
+      'no-warning-comments': [
+        'error',
+        { terms: ['todo', 'fixme', 'xxx'], location: 'start' },
+      ],
     },
+  },
+  {
+    // Test profile; reasons in docs/TESTING.md.
+    files: ['test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/await-thenable': 'off',
+      '@typescript-eslint/no-confusing-void-expression': 'off',
+      '@typescript-eslint/no-empty-function': 'off',
+      '@typescript-eslint/no-magic-numbers': 'off',
+      '@typescript-eslint/no-unsafe-type-assertion': 'off',
+      '@typescript-eslint/require-await': 'off',
+      '@typescript-eslint/unbound-method': 'off',
+      'max-lines': 'off',
+      'no-await-in-loop': 'off',
+      'require-atomic-updates': 'off',
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'CallExpression[callee.object.name=/^(describe|it|test)$/][callee.property.name=/^(only|skip)$/]',
+          message: 'Never commit .only or .skip.',
+        },
+      ],
+    },
+  },
+  {
+    ignores: ['commitlint.config.js', 'prettier.config.js'],
   },
   {
     files: ['src/**/*.{js,ts}', 'gcm.ts', 'gcm.config.ts'],
@@ -43,7 +68,14 @@ export default [
         {
           patterns: [
             {
-              group: ['fs', 'fs/*', 'node:fs', 'node:fs/*', 'child_process', 'node:child_process'],
+              group: [
+                'fs',
+                'fs/*',
+                'node:fs',
+                'node:fs/*',
+                'child_process',
+                'node:child_process',
+              ],
               message: 'Use Bun.file, Bun.write, or Bun.spawn instead.',
             },
           ],
@@ -82,7 +114,14 @@ export default [
         {
           patterns: [
             {
-              group: ['fs', 'fs/*', 'node:fs', 'node:fs/*', 'child_process', 'node:child_process'],
+              group: [
+                'fs',
+                'fs/*',
+                'node:fs',
+                'node:fs/*',
+                'child_process',
+                'node:child_process',
+              ],
               message: 'Use Bun.file, Bun.write, or Bun.spawn instead.',
             },
             {
@@ -104,7 +143,8 @@ export default [
                 '@clack/prompts',
                 'bun:*',
               ],
-              message: 'Pure core modules cannot import I/O or adapter modules.',
+              message:
+                'Pure core modules cannot import I/O or adapter modules.',
             },
           ],
         },

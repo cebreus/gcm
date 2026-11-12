@@ -1,68 +1,94 @@
 import { afterAll, expect, mock, test } from 'bun:test';
+
 import { mkdtemp, rm } from 'fs/promises';
 
 const originalCwd = process.cwd();
-const originalHome = process.env.HOME;
-const originalProvider = process.env.GCM_PROVIDER;
-const originalUrl = process.env.GCM_LM_STUDIO_URL;
-const originalModel = process.env.GCM_LM_STUDIO_MODEL;
-const originalGeminiKey = process.env.GOOGLE_GEMINI_API_KEY;
+const {
+  env: {
+    HOME: originalHome,
+    GCM_PROVIDER: originalProvider,
+    GCM_LM_STUDIO_URL: originalUrl,
+    GCM_LM_STUDIO_MODEL: originalModel,
+    GOOGLE_GEMINI_API_KEY: originalGeminiKey,
+  },
+} = process;
 const repository = await mkdtemp(`${Bun.env.TMPDIR ?? '/tmp'}/gcm-lm-studio-`);
-const originalExitCode = process.exitCode;
-const note = mock(function () {});
+const { exitCode: originalExitCode } = process;
+const note = mock(() => {});
 
-await mock.module('@clack/prompts', function () {
-  return {
-    intro: function () {},
-    outro: function () {},
-    spinner: function () {
-      return { start: function () {}, stop: function () {} };
-    },
-    note,
-    select: async function (options: { message: string }) {
-      if (options.message === 'What would you like to do?') return 'cancel';
-      throw new Error(`Unexpected prompt: ${options.message}`);
-    },
-    text: async function () {
-      throw new Error('Unexpected text prompt');
-    },
-    confirm: async function () {
-      throw new Error('Unexpected confirm prompt');
-    },
-    isCancel: function (value: unknown) {
-      return value === 'cancel';
-    },
-    cancel: function () {},
-  };
-});
+await mock.module('@clack/prompts', () => ({
+  intro: function () {},
+  outro: function () {},
+  spinner: function () {
+    return { start: function () {}, stop: function () {} };
+  },
+  note,
+  select: async function (options: { message: string }) {
+    if (options.message === 'What would you like to do?') {
+      return 'cancel';
+    }
+    throw new Error(`Unexpected prompt: ${options.message}`);
+  },
+  text: async function () {
+    throw new Error('Unexpected text prompt');
+  },
+  confirm: async function () {
+    throw new Error('Unexpected confirm prompt');
+  },
+  isCancel: function (value: unknown) {
+    return value === 'cancel';
+  },
+  cancel: function () {},
+}));
 
 process.env.HOME = repository;
 delete process.env.GOOGLE_GEMINI_API_KEY;
 const { executeCommitMessageGeneration } = await import('../src/runner.js');
 
 async function runGit(...args: string[]): Promise<void> {
-  const child = Bun.spawn({ cmd: ['git', ...args], cwd: repository, stderr: 'pipe' });
+  const child = Bun.spawn({
+    cmd: ['git', ...args],
+    cwd: repository,
+    stderr: 'pipe',
+  });
   const stderr = await new Response(child.stderr).text();
-  if ((await child.exited) !== 0) throw new Error(stderr);
+  if ((await child.exited) !== 0) {
+    throw new Error(stderr);
+  }
 }
 
-afterAll(async function () {
+afterAll(async () => {
   process.chdir(originalCwd);
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
-  if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
-  else process.env.GCM_PROVIDER = originalProvider;
-  if (originalUrl === undefined) delete process.env.GCM_LM_STUDIO_URL;
-  else process.env.GCM_LM_STUDIO_URL = originalUrl;
-  if (originalModel === undefined) delete process.env.GCM_LM_STUDIO_MODEL;
-  else process.env.GCM_LM_STUDIO_MODEL = originalModel;
-  if (originalGeminiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-  else process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
+  if (originalHome === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = originalHome;
+  }
+  if (originalProvider === undefined) {
+    delete process.env.GCM_PROVIDER;
+  } else {
+    process.env.GCM_PROVIDER = originalProvider;
+  }
+  if (originalUrl === undefined) {
+    delete process.env.GCM_LM_STUDIO_URL;
+  } else {
+    process.env.GCM_LM_STUDIO_URL = originalUrl;
+  }
+  if (originalModel === undefined) {
+    delete process.env.GCM_LM_STUDIO_MODEL;
+  } else {
+    process.env.GCM_LM_STUDIO_MODEL = originalModel;
+  }
+  if (originalGeminiKey === undefined) {
+    delete process.env.GOOGLE_GEMINI_API_KEY;
+  } else {
+    process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
+  }
   await rm(repository, { recursive: true, force: true });
   process.exitCode = originalExitCode ?? 0;
 });
 
-test('LM Studio runs end to end without a Gemini API key and cancellation creates no commit', async function () {
+test('LM Studio runs end to end without a Gemini API key and cancellation creates no commit', async () => {
   let generatedPrompt = '';
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -80,10 +106,13 @@ test('LM Studio runs end to end without a Gemini API key and cancellation create
           ],
         });
       }
-      const body = (await request.json()) as { messages: Array<{ content: string }> };
-      const userMessage = body.messages[1];
-      if (!userMessage) throw new Error('Missing user message');
-      generatedPrompt = userMessage.content;
+      const body = (await request.json()) as {
+        messages: Array<{ content: string }>;
+      };
+      const {
+        messages: [, userMessage],
+      } = body;
+      ({ content: generatedPrompt } = userMessage);
       return Response.json({
         choices: [
           {
@@ -101,7 +130,10 @@ test('LM Studio runs end to end without a Gemini API key and cancellation create
     await runGit('add', '--', 'change.ts');
     process.chdir(repository);
     process.env.GCM_PROVIDER = 'lm-studio';
-    process.env.GCM_LM_STUDIO_URL = server.url.origin;
+    const {
+      url: { origin },
+    } = server;
+    process.env.GCM_LM_STUDIO_URL = origin;
     process.env.GCM_LM_STUDIO_MODEL = 'local-model';
 
     await executeCommitMessageGeneration(['--model', 'local-model'], {
@@ -115,7 +147,10 @@ test('LM Studio runs end to end without a Gemini API key and cancellation create
       expect.stringContaining('test: use local model'),
       'Generated Commit Message',
     );
-    const head = Bun.spawnSync({ cmd: ['git', 'rev-parse', '--verify', 'HEAD'], cwd: repository });
+    const head = Bun.spawnSync({
+      cmd: ['git', 'rev-parse', '--verify', 'HEAD'],
+      cwd: repository,
+    });
     expect(head.exitCode).not.toBe(0);
   } finally {
     await server.stop(true);

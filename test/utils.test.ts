@@ -1,13 +1,14 @@
-import { test, expect } from 'bun:test';
+import { expect, test } from 'bun:test';
+
 import {
   estimateTokenCount,
-  pushHunkToTop,
   formatCommitMessage,
-  shouldExcludeFile,
-  sanitizeForDisplay,
-  stripTerminalControlSequences,
+  pushHunkToTop,
   redactSensitiveText,
   redactSensitiveTextForPrompt,
+  sanitizeForDisplay,
+  shouldExcludeFile,
+  stripTerminalControlSequences,
 } from '../src/utils';
 import type { Hunk } from '../src/utils';
 
@@ -32,15 +33,15 @@ test('utils: pushHunkToTop - should not add hunk if score is too low and array i
   const array = [createHunk('f1', 10), createHunk('f2', 20)];
   pushHunkToTop(array, createHunk('f3', 5), 2);
   expect(array.length).toBe(2);
-  expect(array.find(h => h.file === 'f3')).toBeUndefined();
+  expect(array.find((h) => h.file === 'f3')).toBeUndefined();
 });
 
 test('utils: pushHunkToTop - should replace lowest score hunk if array is full', () => {
   const array = [createHunk('f1', 10), createHunk('f2', 20)];
   pushHunkToTop(array, createHunk('f3', 15), 2);
   expect(array.length).toBe(2);
-  expect(array.find(h => h.file === 'f1')).toBeUndefined();
-  expect(array.find(h => h.file === 'f3')).toBeDefined();
+  expect(array.find((h) => h.file === 'f1')).toBeUndefined();
+  expect(array.find((h) => h.file === 'f3')).toBeDefined();
 });
 
 test('utils: pushHunkToTop - should handle empty array', () => {
@@ -90,7 +91,9 @@ test('utils: formatCommitMessage - should preserve backticks', () => {
 test('utils: formatCommitMessage - should ensure double newline separating subject and body', () => {
   const msg = `feat: add feature\n\nBody paragraph one\nBody paragraph two`;
   const result = formatCommitMessage(msg);
-  expect(result).toBe('feat: add feature\n\nBody paragraph one\nBody paragraph two');
+  expect(result).toBe(
+    'feat: add feature\n\nBody paragraph one\nBody paragraph two',
+  );
 });
 
 test('utils: formatCommitMessage - should handle multiple short bullet points', () => {
@@ -150,8 +153,12 @@ test('utils: shouldExcludeFile - a question mark filename character matches ques
 });
 
 test('utils: shouldExcludeFile - should match multiple patterns', () => {
-  expect(shouldExcludeFile('manifest.json', ['*manifest*', '*lock*'])).toBe(true);
-  expect(shouldExcludeFile('package-lock.json', ['*manifest*', '*lock*'])).toBe(true);
+  expect(shouldExcludeFile('manifest.json', ['*manifest*', '*lock*'])).toBe(
+    true,
+  );
+  expect(shouldExcludeFile('package-lock.json', ['*manifest*', '*lock*'])).toBe(
+    true,
+  );
   expect(shouldExcludeFile('src/app.ts', ['*manifest*', '*lock*'])).toBe(false);
 });
 
@@ -183,7 +190,8 @@ test('utils: sanitizeForDisplay - should pass marker-like literals through uncha
 });
 
 test('utils: sanitizeForDisplay - should preserve regular content', () => {
-  const input = 'feat(api): add new endpoint\n\n- Add authentication\n- Update tests';
+  const input =
+    'feat(api): add new endpoint\n\n- Add authentication\n- Update tests';
   const result = sanitizeForDisplay(input);
   expect(result).toBe(input);
 });
@@ -219,7 +227,9 @@ test('utils: stripTerminalControlSequences removes ANSI and controls but keeps n
 
 test('utils: redactSensitiveText keeps broad log redaction', () => {
   expect(
-    redactSensitiveText('const opt = "sk-optional-flag"; docs mention AIzaSyExample1234'),
+    redactSensitiveText(
+      'const opt = "sk-optional-flag"; docs mention AIzaSyExample1234',
+    ),
   ).toBe('const opt = "[REDACTED-KEY]"; docs mention [REDACTED-KEY]');
 });
 
@@ -240,9 +250,10 @@ test('utils: secret redaction removes Authorization credentials', () => {
 });
 
 test('utils: prompt redaction removes URL credentials, vendor tokens and secret assignments', () => {
+  /* eslint-disable no-useless-concat -- fake vendor tokens stay split so secret scanners skip these fixtures */
   const glpat = 'glpat-' + 'aB3dE5gH7jK9mN1pQ3rS5';
   const stripe = 'sk_live_' + 'aB3dE5gH7jK9mN1p';
-  const cases: [string, string][] = [
+  const cases: Array<[string, string]> = [
     ['postgres://user:p4ssw0rd@host/db', 'postgres://user:[REDACTED]@host/db'],
     ['redis://:x@h', 'redis://:[REDACTED]@h'],
     [glpat, '[REDACTED-KEY]'],
@@ -251,20 +262,28 @@ test('utils: prompt redaction removes URL credentials, vendor tokens and secret 
     ['gho_' + 'aB3dE5gH7jK9mN1pQ3rS5tU7vW9xY1zA3bC5', '[REDACTED-KEY]'],
     ['ghs_' + 'aB3dE5gH7jK9mN1pQ3rS5tU7vW9xY1zA3bC5', '[REDACTED-KEY]'],
     ['npm_' + 'aB3dE5gH7jK9mN1pQ3rS5tU7vW9xY1zA3bC5', '[REDACTED-KEY]'],
-    ['AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG', 'AWS_SECRET_ACCESS_KEY=[REDACTED]'],
+    [
+      'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG',
+      'AWS_SECRET_ACCESS_KEY=[REDACTED]',
+    ],
     ['+export DB_PASSWORD="hunter2Pass!"', '+export DB_PASSWORD="[REDACTED]"'],
     ['-API_KEY=abcdefgh1234', '-API_KEY=[REDACTED]'],
     [' STRIPE_TOKEN=abcdefgh1234', ' STRIPE_TOKEN=[REDACTED]'],
     ['+  API_KEY=abcdefgh1234', '+  API_KEY=[REDACTED]'],
     ['+token=opaque-value-123', '+token=[REDACTED]'],
-    ['spring.datasource.password=opaque-value-123', 'spring.datasource.password=[REDACTED]'],
+    [
+      'spring.datasource.password=opaque-value-123',
+      'spring.datasource.password=[REDACTED]',
+    ],
     ['+PASSWORD="abcdefgh1234 restsecret5678"', '+PASSWORD="[REDACTED]"'],
     ["export  DB_PASSWD='abcdefgh1234'\r", "export  DB_PASSWD='[REDACTED]'\r"],
     ['const apiKey = "abcdefgh12345";', 'const apiKey = "[REDACTED]";'],
     ['{"client_secret": "abcdefgh12345"}', '{"client_secret": "[REDACTED]"}'],
     ["password: 'abcdefgh12345'", "password: '[REDACTED]'"],
   ];
-  for (const [input, expected] of cases) expect(redactSensitiveTextForPrompt(input)).toBe(expected);
+  for (const [input, expected] of cases) {
+    expect(redactSensitiveTextForPrompt(input)).toBe(expected);
+  }
 });
 
 test('utils: prompt redaction replaces PEM private key blocks', () => {
@@ -289,11 +308,13 @@ test('utils: prompt redaction leaves ordinary code and placeholders untouched', 
     'password: "Password must be at least 8 characters"',
     '@@ -1,3 +1,4 @@\n function add(a: number, b: number) {\n-  return a + b;\n+  const sum = a + b;\n+  return sum;\n }',
   ];
-  for (const input of inputs) expect(redactSensitiveTextForPrompt(input)).toBe(input);
+  for (const input of inputs) {
+    expect(redactSensitiveTextForPrompt(input)).toBe(input);
+  }
 });
 
 test('utils: prompt redaction covers unquoted, spaced and vendor secrets', () => {
-  const cases: [string, string][] = [
+  const cases: Array<[string, string]> = [
     ['+password: hunter2correct', '+password: [REDACTED]'],
     ['+  token: abcdefghij12345', '+  token: [REDACTED]'],
     ['MY_PASSWORD = abcdefgh1234', 'MY_PASSWORD = [REDACTED]'],
@@ -301,20 +322,29 @@ test('utils: prompt redaction covers unquoted, spaced and vendor secrets', () =>
     ['pass=abcdefgh1234', 'pass=[REDACTED]'],
     ['token=abcdefgh1234', 'token=[REDACTED]'],
     ['DB_PWD: abcdefgh1234', 'DB_PWD: [REDACTED]'],
-    ['curl -H "x: Bearer abcdefghijklmnop1234"', 'curl -H "x: Bearer [REDACTED]"'],
-    ['xoxb-' + '123456789012-123456789012-aB3dE5gH7jK9mN1pQ3rS5tU7', '[REDACTED-KEY]'],
+    [
+      'curl -H "x: Bearer abcdefghijklmnop1234"',
+      'curl -H "x: Bearer [REDACTED]"',
+    ],
+    [
+      'xoxb-' + '123456789012-123456789012-aB3dE5gH7jK9mN1pQ3rS5tU7',
+      '[REDACTED-KEY]',
+    ],
     ['xoxp-' + '123456789012-aB3dE5gH7jK9mN1pQ3rS5tU7', '[REDACTED-KEY]'],
     ['xoxa-2-' + 'aB3dE5gH7jK9mN1pQ3rS5tU7', '[REDACTED-KEY]'],
     ['sk_test_' + 'aB3dE5gH7jK9mN1p', '[REDACTED-KEY]'],
     ['rk_test_' + 'aB3dE5gH7jK9mN1p', '[REDACTED-KEY]'],
     ['ya29.' + 'aB3dE5gH7jK9mN1pQ3rS5tU7', '[REDACTED-KEY]'],
+    /* eslint-enable no-useless-concat */
     ['a\n-----BEGIN RSA PRIVATE KEY-----\nMIIabc\ndef', 'a\n[REDACTED-PEM]'],
     [
       '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n-----BEGIN PRIVATE KEY-----\nxyz',
       '[REDACTED-PEM]\n[REDACTED-PEM]',
     ],
   ];
-  for (const [input, expected] of cases) expect(redactSensitiveTextForPrompt(input)).toBe(expected);
+  for (const [input, expected] of cases) {
+    expect(redactSensitiveTextForPrompt(input)).toBe(expected);
+  }
 });
 
 test('utils: prompt redaction leaves non-secret values untouched', () => {
@@ -324,7 +354,7 @@ test('utils: prompt redaction leaves non-secret values untouched', () => {
     'password: string',
     'passwordField = input.value',
     'password = req.body.password',
-    'password: ${DB_PASSWORD}',
+    `password: \${DB_PASSWORD}`,
     'token: process.env.TOKEN_VALUE2',
     'DB_PASS=short1',
     'password: [REDACTED]',
@@ -335,11 +365,17 @@ test('utils: prompt redaction leaves non-secret values untouched', () => {
     'ya29.short',
     '-----BEGIN CERTIFICATE-----\nabc',
   ];
-  for (const input of inputs) expect(redactSensitiveTextForPrompt(input)).toBe(input);
+  for (const input of inputs) {
+    expect(redactSensitiveTextForPrompt(input)).toBe(input);
+  }
 });
 
 test('utils: prompt redaction runs in linear time on abusive input', () => {
-  const inputs = ['A_'.repeat(100_000) + '=', '://a:'.repeat(40_000), '"'.repeat(200_000)];
+  const inputs = [
+    `${'A_'.repeat(100_000)}=`,
+    '://a:'.repeat(40_000),
+    '"'.repeat(200_000),
+  ];
   for (const input of inputs) {
     const start = performance.now();
     redactSensitiveTextForPrompt(input);
@@ -348,7 +384,7 @@ test('utils: prompt redaction runs in linear time on abusive input', () => {
 });
 
 test('utils: prompt redaction truncated PEM keeps surrounding text', () => {
-  const cases: [string, string][] = [
+  const cases: Array<[string, string]> = [
     [
       'see -----BEGIN RSA PRIVATE KEY----- mention and more code after',
       'see [REDACTED-PEM] mention and more code after',
@@ -366,23 +402,28 @@ test('utils: prompt redaction truncated PEM keeps surrounding text', () => {
       '[REDACTED-PEM]\nafter code here',
     ],
   ];
-  for (const [input, expected] of cases) expect(redactSensitiveTextForPrompt(input)).toBe(expected);
-  const long =
-    '-----BEGIN PRIVATE KEY-----\n' + 'A'.repeat(64).concat('\n').repeat(500) + 'tail code';
+  for (const [input, expected] of cases) {
+    expect(redactSensitiveTextForPrompt(input)).toBe(expected);
+  }
+  const long = `-----BEGIN PRIVATE KEY-----\n${'A'
+    .repeat(64)
+    .concat('\n')
+    .repeat(500)}tail code`;
   const out = redactSensitiveTextForPrompt(long);
   expect(out.startsWith('[REDACTED-PEM]')).toBe(true);
   expect(out.endsWith('tail code')).toBe(true);
 });
 
 test('utils: prompt redaction handles key-name suffixes and skips code-like values', () => {
-  const redacted: [string, string][] = [
+  const redacted: Array<[string, string]> = [
     ['SECRET_KEY = "django-insecure-abc123xyz"', 'SECRET_KEY = "[REDACTED]"'],
     ['SECRET_KEY: abc123xyz456', 'SECRET_KEY: [REDACTED]'],
     ['secret_key: "abcd1234efgh"', 'secret_key: "[REDACTED]"'],
     ['DB_PASSWORD_HASH: abc123xyz456', 'DB_PASSWORD_HASH: [REDACTED]'],
   ];
-  for (const [input, expected] of redacted)
+  for (const [input, expected] of redacted) {
     expect(redactSensitiveTextForPrompt(input)).toBe(expected);
+  }
   const untouched = [
     'password = getPass1()',
     'passwd: /etc/passwd2',
@@ -393,7 +434,9 @@ test('utils: prompt redaction handles key-name suffixes and skips code-like valu
     'token: {a1b2c3d4e5}',
     'token: foo.bar1.baz()',
   ];
-  for (const input of untouched) expect(redactSensitiveTextForPrompt(input)).toBe(input);
+  for (const input of untouched) {
+    expect(redactSensitiveTextForPrompt(input)).toBe(input);
+  }
 });
 
 test('utils: prompt redaction is fast on 100k-character lines', () => {
@@ -421,17 +464,23 @@ test('utils: estimateTokenCount - should handle unicode characters', () => {
 });
 
 test('utils: sanitizeForDisplay - trims in linear time on long whitespace runs', () => {
-  const single = 'a' + ' '.repeat(200_000) + 'x';
-  const multi = ('a' + ' '.repeat(50_000) + '\n').repeat(4) + 'b' + ' \t'.repeat(100_000) + 'x';
+  const single = `a${' '.repeat(200_000)}x`;
+  const multi = `${`a${' '.repeat(50_000)}\n`.repeat(4)}b${' \t'.repeat(
+    100_000,
+  )}x`;
   const start = performance.now();
   expect(sanitizeForDisplay(single)).toBe(single);
   expect(sanitizeForDisplay(multi)).toBe(multi);
   expect(sanitizeForDisplay('  a \t b \t \n ')).toBe('a \t b \t \n');
-  expect(sanitizeForDisplay('x' + ' \t'.repeat(100_000))).toBe('x');
+  expect(sanitizeForDisplay(`x${' \t'.repeat(100_000)}`)).toBe('x');
   expect(performance.now() - start).toBeLessThan(200);
 });
 
 test('utils: secret literal entropy boundary is 8 distinct characters', () => {
-  expect(redactSensitiveTextForPrompt('password = "abcdefgh"')).toBe('password = "[REDACTED]"');
-  expect(redactSensitiveTextForPrompt('password = "abcdefgg"')).toBe('password = "abcdefgg"');
+  expect(redactSensitiveTextForPrompt('password = "abcdefgh"')).toBe(
+    'password = "[REDACTED]"',
+  );
+  expect(redactSensitiveTextForPrompt('password = "abcdefgg"')).toBe(
+    'password = "abcdefgg"',
+  );
 });

@@ -1,8 +1,14 @@
-import { test, expect } from 'bun:test';
-import { summarizeDiff } from '../src/diff-summary.ts';
+import { expect, test } from 'bun:test';
+
+import { type DiffFileFacts, summarizeDiff } from '../src/diff-summary.ts';
+
 const policy = { maxHunks: 40, maxOutputBytes: 1_000_000 };
 
-function facts(file: string, lines: string[], truncated = false) {
+function facts(
+  file: string,
+  lines: string[],
+  truncated = false,
+): DiffFileFacts {
   return { file, lines, truncated, skipped: false };
 }
 
@@ -10,7 +16,11 @@ async function summarizerBasicTest(): Promise<void> {
   const res = summarizeDiff(
     ' 2 files changed\n',
     [
-      facts('src/foo.js', ['@@ -1,2 +1,2 @@\n', '+console.log("hi")\n', '-console.log("ho")\n']),
+      facts('src/foo.js', [
+        '@@ -1,2 +1,2 @@\n',
+        '+console.log("hi")\n',
+        '-console.log("ho")\n',
+      ]),
       facts('styles/main.css', ['@@ -1 +1 @@\n', '+.foo{color: red}\n']),
     ],
     policy,
@@ -35,29 +45,42 @@ async function summarizerBinarySkipTest(): Promise<void> {
   expect(res.text).toContain('images/photo.heic');
   expect(res.text).toContain('File: src/foo.js');
 }
-test('summarizer: binary files are skipped and summarised concisely', summarizerBinarySkipTest);
+test(
+  'summarizer: binary files are skipped and summarised concisely',
+  summarizerBinarySkipTest,
+);
 
 async function summarizerLargeSkipGroupTest(): Promise<void> {
   const many = [] as Array<ReturnType<typeof facts>>;
-  for (let i = 0; i < 20; i++)
+  for (let i = 0; i < 20; i += 1) {
     many.push({
       file: `assets/photos/event/image_${i}.jpg`,
       lines: [],
       truncated: false,
       skipped: true,
     });
-  for (let i = 0; i < 3; i++)
-    many.push({ file: `assets/icons/icon_${i}.png`, lines: [], truncated: false, skipped: true });
+  }
+  for (let i = 0; i < 3; i += 1) {
+    many.push({
+      file: `assets/icons/icon_${i}.png`,
+      lines: [],
+      truncated: false,
+      skipped: true,
+    });
+  }
   many.push(facts('src/foo.js', ['@@ -1 +1 @@\n', '+code\n']));
   const res = summarizeDiff(' 25 files changed\n', many, policy);
 
   // We expect the large folder to be shown with a cap of 15 and a "... and X more" line
   expect(res.text).toContain('assets/photos/event/ (showing 15 of 20)');
-  expect(res.text).toMatch(/\.\.\. and 5 more/);
+  expect(res.text).toMatch(/\.\.\. and 5 more/v);
   // small folder should list all
   expect(res.text).toContain('assets/icons/');
 }
-test('summarizer: large skip groups are limited per-folder', summarizerLargeSkipGroupTest);
+test(
+  'summarizer: large skip groups are limited per-folder',
+  summarizerLargeSkipGroupTest,
+);
 
 test('summarizer: a skip group of exactly 15 files is listed in full', () => {
   const files = Array.from({ length: 15 }, (_, i) => ({
@@ -72,13 +95,19 @@ test('summarizer: a skip group of exactly 15 files is listed in full', () => {
 });
 
 test('summarizer: caps Unicode output by UTF-8 bytes', async () => {
-  const result = summarizeDiff('', [facts('a.ts', ['@@ -1 +1 @@\n', `+${'ě'.repeat(40)}\n`])], {
-    ...policy,
-    maxOutputBytes: 90,
-  });
+  const result = summarizeDiff(
+    '',
+    [facts('a.ts', ['@@ -1 +1 @@\n', `+${'ě'.repeat(40)}\n`])],
+    {
+      ...policy,
+      maxOutputBytes: 90,
+    },
+  );
   expect(result.text).not.toContain('ě');
   expect(result.text).toContain('files truncated by per-file buffer');
-  expect(new TextEncoder().encode(result.text).byteLength).toBeLessThanOrEqual(90);
+  expect(new TextEncoder().encode(result.text).byteLength).toBeLessThanOrEqual(
+    90,
+  );
 });
 
 test('summarizer: reports per-file truncation when every selected hunk fits', () => {
@@ -95,15 +124,19 @@ test('summarizer: reports per-file truncation when every selected hunk fits', ()
 // summary emits. Without them a change to the scoring or to the replacement
 // comparison would reorder the prompt unseen.
 
-const hunkOf = (file: string, changedLines: number) =>
-  facts(file, ['@@ -1 +1 @@\n', ...Array.from({ length: changedLines }, () => '+line\n')]);
+const hunkOf = (file: string, changedLines: number): DiffFileFacts =>
+  facts(file, [
+    '@@ -1 +1 @@\n',
+    ...Array.from({ length: changedLines }, () => '+line\n'),
+  ]);
 
-const emittedOrder = (text: string, files: string[]) =>
+const emittedOrder = (text: string, files: string[]): string[] =>
   files
-    .filter(file => text.includes(`File: ${file}`))
-    .sort((left, right) => {
-      return text.indexOf(`File: ${left}`) - text.indexOf(`File: ${right}`);
-    });
+    .filter((file) => text.includes(`File: ${file}`))
+    .sort(
+      (left, right) =>
+        text.indexOf(`File: ${left}`) - text.indexOf(`File: ${right}`),
+    );
 
 test('summarizer: ranks hunks by changed-line count, highest first', () => {
   const result = summarizeDiff(
@@ -111,11 +144,9 @@ test('summarizer: ranks hunks by changed-line count, highest first', () => {
     [hunkOf('small.ts', 1), hunkOf('large.ts', 9), hunkOf('medium.ts', 4)],
     policy,
   );
-  expect(emittedOrder(result.text, ['small.ts', 'large.ts', 'medium.ts'])).toEqual([
-    'large.ts',
-    'medium.ts',
-    'small.ts',
-  ]);
+  expect(
+    emittedOrder(result.text, ['small.ts', 'large.ts', 'medium.ts']),
+  ).toEqual(['large.ts', 'medium.ts', 'small.ts']);
 });
 
 test('summarizer: equal counts keep the order the files arrived in', () => {
@@ -124,11 +155,9 @@ test('summarizer: equal counts keep the order the files arrived in', () => {
     [hunkOf('first.ts', 3), hunkOf('second.ts', 3), hunkOf('third.ts', 3)],
     policy,
   );
-  expect(emittedOrder(result.text, ['first.ts', 'second.ts', 'third.ts'])).toEqual([
-    'first.ts',
-    'second.ts',
-    'third.ts',
-  ]);
+  expect(
+    emittedOrder(result.text, ['first.ts', 'second.ts', 'third.ts']),
+  ).toEqual(['first.ts', 'second.ts', 'third.ts']);
 });
 
 test('summarizer: a tie does not evict an already selected hunk', () => {

@@ -1,28 +1,39 @@
 import { expect, test } from 'bun:test';
+
 import { mkdir, mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { summarizeRepositoryDiff } from '../src/services/repository-summary.js';
 import { loadConfig } from '../gcm.config.js';
+import { summarizeRepositoryDiff } from '../src/services/repository-summary.js';
+
 const CONFIG = loadConfig({});
 
-function summarizeLargeDiff(
+async function summarizeLargeDiff(
   files: string[],
   options?: Parameters<typeof summarizeRepositoryDiff>[1],
-) {
-  return summarizeRepositoryDiff(files, options, CONFIG);
+): Promise<Awaited<ReturnType<typeof summarizeRepositoryDiff>>> {
+  return await summarizeRepositoryDiff(files, options, CONFIG);
 }
 
 async function runGit(repository: string, args: string[]): Promise<void> {
-  const process = Bun.spawn(['git', '-C', repository, ...args], { stderr: 'pipe' });
-  if ((await process.exited) !== 0) throw new Error(await new Response(process.stderr).text());
+  const process = Bun.spawn(['git', '-C', repository, ...args], {
+    stderr: 'pipe',
+  });
+  if ((await process.exited) !== 0) {
+    throw new Error(await new Response(process.stderr).text());
+  }
 }
 
 async function readGit(repository: string, args: string[]): Promise<string> {
-  const process = Bun.spawn(['git', '-C', repository, ...args], { stdout: 'pipe', stderr: 'pipe' });
+  const process = Bun.spawn(['git', '-C', repository, ...args], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   const stdout = await new Response(process.stdout).text();
-  if ((await process.exited) !== 0) throw new Error(await new Response(process.stderr).text());
+  if ((await process.exited) !== 0) {
+    throw new Error(await new Response(process.stderr).text());
+  }
   return stdout;
 }
 
@@ -33,10 +44,16 @@ test('repository summary keeps the default summarizeLargeDiff(files) contract', 
     await runGit(repository, ['init', '-q']);
     await runGit(repository, ['config', 'user.email', 'test@gcm.local']);
     await runGit(repository, ['config', 'user.name', 'GCM Test']);
-    await Bun.write(join(repository, 'example.ts'), 'export const value = 1;\n');
+    await Bun.write(
+      join(repository, 'example.ts'),
+      'export const value = 1;\n',
+    );
     await runGit(repository, ['add', 'example.ts']);
     await runGit(repository, ['commit', '-qm', 'chore: base']);
-    await Bun.write(join(repository, 'example.ts'), 'export const value = 2;\n');
+    await Bun.write(
+      join(repository, 'example.ts'),
+      'export const value = 2;\n',
+    );
     await runGit(repository, ['add', 'example.ts']);
     process.chdir(repository);
 
@@ -51,7 +68,8 @@ test('repository summary keeps the default summarizeLargeDiff(files) contract', 
 });
 
 test('repository summary keeps the injected summarizeLargeDiff(files, options) contract', async () => {
-  const calls: Array<{ args: string[]; options?: Record<string, unknown> }> = [];
+  const calls: Array<{ args: string[]; options?: Record<string, unknown> }> =
+    [];
   const result = await summarizeLargeDiff(['example.ts'], {
     spawnStreamImpl: async function (args, options) {
       calls.push({ args, options });
@@ -141,9 +159,10 @@ test('repository summary owns config context and binary skip Git reads', async (
 test('repository summary bounds concurrent per-file Git reads', async () => {
   let active = 0;
   let peak = 0;
-  const files = Array.from({ length: 12 }, function (_, index) {
-    return `src/file-${index}.ts`;
-  });
+  const files = Array.from(
+    { length: 12 },
+    (_, index) => `src/file-${index}.ts`,
+  );
 
   await summarizeLargeDiff(files, {
     spawnStreamImpl: async function () {
@@ -164,9 +183,10 @@ test('repository summary bounds concurrent per-file Git reads', async () => {
 
 test('repository summary stops scheduling file reads after the first failure', async () => {
   let calls = 0;
-  const files = Array.from({ length: 20 }, function (_, index) {
-    return `src/file-${index}.ts`;
-  });
+  const files = Array.from(
+    { length: 20 },
+    (_, index) => `src/file-${index}.ts`,
+  );
 
   await expect(
     summarizeLargeDiff(files, {
@@ -175,7 +195,9 @@ test('repository summary stops scheduling file reads after the first failure', a
       },
       spawnLinesImpl: async function (args) {
         calls += 1;
-        if (args.at(-1) === `:(top,literal)${files[0]}`) throw new Error('read failed');
+        if (args.at(-1) === `:(top,literal)${files[0]}`) {
+          throw new Error('read failed');
+        }
         await Bun.sleep(1);
         return { lines: [], truncated: false };
       },
@@ -193,7 +215,7 @@ test('repository summary preserves staged-file error order', async () => {
         return { text: '', truncated: false };
       },
       spawnLinesImpl: async function (args) {
-        const file = args.at(-1)?.replace(/^:\(literal\)/, '');
+        const file = args.at(-1)?.replace(/^:\(literal\)/v, '');
         await Bun.sleep(file === 'a.ts' ? 20 : 1);
         throw new Error(String(file));
       },
@@ -246,7 +268,7 @@ test('repository summary reads the target commit instead of the staged index', a
   ]);
 });
 
-test('repository summary excludes dist from target stats and diff', async function () {
+test('repository summary excludes dist from target stats and diff', async () => {
   const repository = await mkdtemp(join(tmpdir(), 'gcm-summary-target-'));
   const previousDirectory = process.cwd();
   try {
@@ -255,15 +277,23 @@ test('repository summary excludes dist from target stats and diff', async functi
     await runGit(repository, ['config', 'user.name', 'GCM Test']);
     await mkdir(join(repository, 'src'));
     await mkdir(join(repository, 'dist'));
-    await Bun.write(join(repository, 'src/app.ts'), 'export const value = 1;\n');
+    await Bun.write(
+      join(repository, 'src/app.ts'),
+      'export const value = 1;\n',
+    );
     await Bun.write(join(repository, 'dist/gcm'), 'old build\n');
     await runGit(repository, ['add', '.']);
     await runGit(repository, ['commit', '-qm', 'chore: base']);
-    await Bun.write(join(repository, 'src/app.ts'), 'export const value = 2;\n');
+    await Bun.write(
+      join(repository, 'src/app.ts'),
+      'export const value = 2;\n',
+    );
     await Bun.write(join(repository, 'dist/gcm'), 'DIST_MARKER\n');
     await runGit(repository, ['add', '.']);
     await runGit(repository, ['commit', '-qm', 'feat: change app']);
-    const targetCommit = (await readGit(repository, ['rev-parse', 'HEAD'])).trim();
+    const targetCommit = (
+      await readGit(repository, ['rev-parse', 'HEAD'])
+    ).trim();
     process.chdir(repository);
 
     const result = await summarizeLargeDiff(['src/app.ts'], { targetCommit });
@@ -283,7 +313,10 @@ test('repository summary recognises Git binary markers without relying on extens
       return { text: ' asset | Bin 0 -> 10 bytes', truncated: false };
     },
     spawnLinesImpl: async function () {
-      return { lines: ['Binary files /dev/null and b/asset differ\n'], truncated: false };
+      return {
+        lines: ['Binary files /dev/null and b/asset differ\n'],
+        truncated: false,
+      };
     },
   });
 

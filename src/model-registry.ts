@@ -9,12 +9,13 @@ export interface ModelSpec {
 }
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
-
 export function canUseFallbackModel(
   primary: ModelTokenLimits,
   fallback: ModelTokenLimits,
 ): boolean {
-  if (primary.kind !== fallback.kind) return false;
+  if (primary.kind !== fallback.kind) {
+    return false;
+  }
   if (primary.kind === 'shared-context' && fallback.kind === 'shared-context') {
     return fallback.contextWindowTokens >= primary.contextWindowTokens;
   }
@@ -34,7 +35,9 @@ export function collectSortedModels(
   return rawEntries
     .map(parseModel)
     .filter((model): model is ModelSpec => model !== null)
-    .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+    .sort((left, right) =>
+      left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+    );
 }
 
 /**
@@ -48,17 +51,24 @@ export function requireDistinctModels(
 ): ModelSpec[] {
   const names = new Set<string>();
   for (const model of models) {
-    if (names.has(model.name)) throw fail(`Duplicate ${label} model identifier`);
+    if (names.has(model.name)) {
+      throw fail(`Duplicate ${label} model identifier`);
+    }
     names.add(model.name);
   }
-  if (models.length === 0)
-    throw fail(`${label} returned no compatible text models`, { kind: 'no-models' });
+  if (models.length === 0) {
+    throw fail(`${label} returned no compatible text models`, {
+      kind: 'no-models',
+    });
+  }
   return models;
 }
 
 /** Reads a provider-published token count, rejecting anything that is not a positive safe integer. */
 export function readPositiveTokenCount(value: unknown): number | null {
-  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
+  return Number.isSafeInteger(value) && Number(value) > 0
+    ? Number(value)
+    : null;
 }
 
 interface TokenBudget {
@@ -78,12 +88,19 @@ export function resolveTokenBudget(
 ): TokenBudget {
   if (limits.kind === 'separate') {
     return {
-      maxOutputTokens: Math.min(configuredMaxOutputTokens, limits.maxOutputTokens),
-      maxAvailableTokens: Math.max(0, limits.maxInputTokens - systemPromptTokens),
+      maxOutputTokens: Math.min(
+        configuredMaxOutputTokens,
+        limits.maxOutputTokens,
+      ),
+      maxAvailableTokens: Math.max(
+        0,
+        limits.maxInputTokens - systemPromptTokens,
+      ),
     };
   }
   const maxOutputTokens = Math.min(
     configuredMaxOutputTokens,
+    // Output may use at most half the shared window.
     Math.floor(limits.contextWindowTokens / 2),
   );
   return {

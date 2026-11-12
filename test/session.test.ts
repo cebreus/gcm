@@ -1,14 +1,18 @@
 import { afterAll, expect, test } from 'bun:test';
+
 import { mkdtemp, rm } from 'fs/promises';
 
 const directory = await mkdtemp(`${Bun.env.TMPDIR ?? '/tmp'}/gcm-session-`);
 
-afterAll(async function (): Promise<void> {
+afterAll(async (): Promise<void> => {
   await rm(directory, { recursive: true, force: true });
 });
 
-test('session: rejects persisted values outside its provider-scoped schema', async function () {
-  await Bun.write(`${directory}/.gcm-session.json`, JSON.stringify({ modelName: 'gemini-old' }));
+test('session: rejects persisted values outside its provider-scoped schema', async () => {
+  await Bun.write(
+    `${directory}/.gcm-session.json`,
+    JSON.stringify({ modelName: 'gemini-old' }),
+  );
   const child = Bun.spawn({
     cmd: [
       'bun',
@@ -31,7 +35,7 @@ test('session: rejects persisted values outside its provider-scoped schema', asy
   expect(JSON.parse(stdout)).toEqual({ providerId: null, modelName: null });
 });
 
-test('session: restores a validated non-Gemini provider model', async function () {
+test('session: restores a validated non-Gemini provider model', async () => {
   await Bun.write(
     `${directory}/.gcm-session.json`,
     JSON.stringify({ providerId: 'lm-studio', modelName: 'qwen/qwen3-8b' }),

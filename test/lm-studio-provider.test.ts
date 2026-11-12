@@ -1,16 +1,23 @@
 import { expect, test } from 'bun:test';
-import { loadConfig } from '../gcm.config.js';
-const CONFIG = loadConfig({});
-import { createLmStudioProvider as createLmStudioProviderWithConfig } from '../src/lm-studio-provider.js';
-import { isLanguageModelApiError } from '../src/language-model-service.js';
 
-function createLmStudioProvider(
-  options: Omit<Parameters<typeof createLmStudioProviderWithConfig>[0], 'config'>,
-) {
-  return createLmStudioProviderWithConfig({ ...options, config: CONFIG });
+import { loadConfig } from '../gcm.config.js';
+import { isLanguageModelApiError } from '../src/language-model-service.js';
+import { createLmStudioProvider as createLmStudioProviderWithConfig } from '../src/lm-studio-provider.js';
+
+const CONFIG = loadConfig({});
+
+async function createLmStudioProvider(
+  options: Omit<
+    Parameters<typeof createLmStudioProviderWithConfig>[0],
+    'config'
+  >,
+): Promise<Awaited<ReturnType<typeof createLmStudioProviderWithConfig>>> {
+  return await createLmStudioProviderWithConfig({ ...options, config: CONFIG });
 }
 
-function createGenerateParams() {
+function createGenerateParams(): Parameters<
+  Awaited<ReturnType<typeof createLmStudioProvider>>['service']['generate']
+>[0] {
   return {
     promptContext: 'diff content',
     systemPrompt: 'system rules',
@@ -20,10 +27,10 @@ function createGenerateParams() {
   };
 }
 
-test('LM Studio rejects a non-loopback server URL', async function () {
-  await expect(createLmStudioProvider({ baseUrl: 'http://example.com:1234' })).rejects.toThrow(
-    'LM Studio URL must use a loopback hostname',
-  );
+test('LM Studio rejects a non-loopback server URL', async () => {
+  await expect(
+    createLmStudioProvider({ baseUrl: 'http://example.com:1234' }),
+  ).rejects.toThrow('LM Studio URL must use a loopback hostname');
 });
 
 test.each([
@@ -35,11 +42,13 @@ test.each([
   'http://127.0.0.1:1234#',
   'http://2130706433:1234',
   'http://0177.0.0.1:1234',
-])('LM Studio rejects unsafe server URL %s', async function (baseUrl) {
-  await expect(createLmStudioProvider({ baseUrl })).rejects.toThrow('Invalid LM Studio URL');
+])('LM Studio rejects unsafe server URL %s', async (baseUrl) => {
+  await expect(createLmStudioProvider({ baseUrl })).rejects.toThrow(
+    'Invalid LM Studio URL',
+  );
 });
 
-test('LM Studio discovers sorted text models and uses the active context length', async function () {
+test('LM Studio discovers sorted text models and uses the active context length', async () => {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -63,27 +72,24 @@ test('LM Studio discovers sorted text models and uses the active context length'
     },
   });
   try {
-    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
+    const provider = await createLmStudioProvider({
+      baseUrl: server.url.origin,
+    });
 
     expect(provider.defaultModel).toBe('zeta');
+    expect((await provider.models()).map((model) => model.name)).toEqual([
+      'alpha',
+      'zeta',
+    ]);
     expect(
-      (await provider.models()).map(function (model) {
-        return model.name;
-      }),
-    ).toEqual(['alpha', 'zeta']);
-    expect(
-      (await provider.models()).find(function (model) {
-        return model.name === 'zeta';
-      }),
+      (await provider.models()).find((model) => model.name === 'zeta'),
     ).toEqual({
       name: 'zeta',
       label: 'Zeta',
       limits: { kind: 'shared-context' as const, contextWindowTokens: 8_192 },
     });
     expect(
-      (await provider.models()).find(function (model) {
-        return model.name === 'alpha';
-      }),
+      (await provider.models()).find((model) => model.name === 'alpha'),
     ).toEqual({
       name: 'alpha',
       label: 'alpha',
@@ -94,8 +100,12 @@ test('LM Studio discovers sorted text models and uses the active context length'
   }
 });
 
-test('LM Studio loads an explicit unloaded model, waits, and refreshes its context', async function () {
-  const requests: Array<{ method: string; path: string; authorization: string | null }> = [];
+test('LM Studio loads an explicit unloaded model, waits, and refreshes its context', async () => {
+  const requests: Array<{
+    method: string;
+    path: string;
+    authorization: string | null;
+  }> = [];
   let loaded = false;
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -123,7 +133,9 @@ test('LM Studio loads an explicit unloaded model, waits, and refreshes its conte
             key: 'preferred-model',
             type: 'llm',
             max_context_length: 32_768,
-            loaded_instances: loaded ? [{ config: { context_length: 32_768 } }] : [],
+            loaded_instances: loaded
+              ? [{ config: { context_length: 32_768 } }]
+              : [],
           },
         ],
       });
@@ -137,7 +149,11 @@ test('LM Studio loads an explicit unloaded model, waits, and refreshes its conte
       probeOnly: true,
     });
     expect(requests).toEqual([
-      { method: 'GET', path: '/api/v1/models', authorization: 'Bearer local-token' },
+      {
+        method: 'GET',
+        path: '/api/v1/models',
+        authorization: 'Bearer local-token',
+      },
     ]);
     expect(probe.defaultModel).toBe('preferred-model');
 
@@ -149,15 +165,27 @@ test('LM Studio loads an explicit unloaded model, waits, and refreshes its conte
     });
 
     expect(requests).toEqual([
-      { method: 'GET', path: '/api/v1/models', authorization: 'Bearer local-token' },
-      { method: 'POST', path: '/api/v1/models/load', authorization: 'Bearer local-token' },
-      { method: 'GET', path: '/api/v1/models', authorization: 'Bearer local-token' },
+      {
+        method: 'GET',
+        path: '/api/v1/models',
+        authorization: 'Bearer local-token',
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/models/load',
+        authorization: 'Bearer local-token',
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/models',
+        authorization: 'Bearer local-token',
+      },
     ]);
     expect(provider.defaultModel).toBe('preferred-model');
     expect(
-      (await provider.models()).find(function (model) {
-        return model.name === 'preferred-model';
-      })?.limits,
+      (await provider.models()).find(
+        (model) => model.name === 'preferred-model',
+      )?.limits,
     ).toEqual({ kind: 'shared-context', contextWindowTokens: 32_768 });
 
     requests.length = 0;
@@ -167,16 +195,23 @@ test('LM Studio loads an explicit unloaded model, waits, and refreshes its conte
       token: 'local-token',
     });
     expect(requests).toEqual([
-      { method: 'GET', path: '/api/v1/models', authorization: 'Bearer local-token' },
+      {
+        method: 'GET',
+        path: '/api/v1/models',
+        authorization: 'Bearer local-token',
+      },
     ]);
   } finally {
     await server.stop(true);
   }
 });
 
-function catalogueServer(models: Array<{ key: string; loaded: boolean }>, loadStatus = 200) {
+function catalogueServer(
+  models: Array<{ key: string; loaded: boolean }>,
+  loadStatus = 200,
+): { server: ReturnType<typeof Bun.serve>; posts: unknown[] } {
   const posts: unknown[] = [];
-  const loadedKeys = new Set(models.filter(m => m.loaded).map(m => m.key));
+  const loadedKeys = new Set(models.filter((m) => m.loaded).map((m) => m.key));
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -184,17 +219,23 @@ function catalogueServer(models: Array<{ key: string; loaded: boolean }>, loadSt
       if (request.method === 'POST') {
         const body = (await request.json()) as { model: string };
         posts.push(body);
-        if (loadStatus !== 200)
-          return Response.json({ error: 'load failed' }, { status: loadStatus });
+        if (loadStatus !== 200) {
+          return Response.json(
+            { error: 'load failed' },
+            { status: loadStatus },
+          );
+        }
         loadedKeys.add(body.model);
         return Response.json({ type: 'llm', status: 'loaded' });
       }
       return Response.json({
-        models: models.map(m => ({
+        models: models.map((m) => ({
           key: m.key,
           type: 'llm',
           max_context_length: 8_192,
-          loaded_instances: loadedKeys.has(m.key) ? [{ config: { context_length: 8_192 } }] : [],
+          loaded_instances: loadedKeys.has(m.key)
+            ? [{ config: { context_length: 8_192 } }]
+            : [],
         })),
       });
     },
@@ -202,13 +243,15 @@ function catalogueServer(models: Array<{ key: string; loaded: boolean }>, loadSt
   return { server, posts };
 }
 
-test('LM Studio defaults to the already loaded model without a load request', async function () {
+test('LM Studio defaults to the already loaded model without a load request', async () => {
   const { server, posts } = catalogueServer([
     { key: 'alpha', loaded: false },
     { key: 'beta', loaded: true },
   ]);
   try {
-    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
+    const provider = await createLmStudioProvider({
+      baseUrl: server.url.origin,
+    });
     expect(provider.defaultModel).toBe('beta');
     expect(posts).toEqual([]);
   } finally {
@@ -216,13 +259,15 @@ test('LM Studio defaults to the already loaded model without a load request', as
   }
 });
 
-test('LM Studio loads the first catalogue model when none is loaded', async function () {
+test('LM Studio loads the first catalogue model when none is loaded', async () => {
   const { server, posts } = catalogueServer([
     { key: 'beta', loaded: false },
     { key: 'alpha', loaded: false },
   ]);
   try {
-    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
+    const provider = await createLmStudioProvider({
+      baseUrl: server.url.origin,
+    });
     expect(provider.defaultModel).toBe('alpha');
     expect(posts).toEqual([{ model: 'alpha' }]);
   } finally {
@@ -230,22 +275,26 @@ test('LM Studio loads the first catalogue model when none is loaded', async func
   }
 });
 
-test('LM Studio surfaces the load error of the first catalogue model', async function () {
+test('LM Studio surfaces the load error of the first catalogue model', async () => {
   const { server } = catalogueServer([{ key: 'alpha', loaded: false }], 500);
   try {
-    await expect(createLmStudioProvider({ baseUrl: server.url.origin })).rejects.toThrow();
+    await expect(
+      createLmStudioProvider({ baseUrl: server.url.origin }),
+    ).rejects.toThrow();
   } finally {
     await server.stop(true);
   }
 });
 
-test('LM Studio gives no preference to Gemma over a loaded model', async function () {
+test('LM Studio gives no preference to Gemma over a loaded model', async () => {
   const { server, posts } = catalogueServer([
     { key: 'gemma-4-e4b-it-mlx', loaded: false },
     { key: 'qwen', loaded: true },
   ]);
   try {
-    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
+    const provider = await createLmStudioProvider({
+      baseUrl: server.url.origin,
+    });
     expect(provider.defaultModel).toBe('qwen');
     expect(posts).toEqual([]);
   } finally {
@@ -253,7 +302,7 @@ test('LM Studio gives no preference to Gemma over a loaded model', async functio
   }
 });
 
-test('LM Studio rejects an unavailable explicitly configured model', async function () {
+test('LM Studio rejects an unavailable explicitly configured model', async () => {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -272,8 +321,12 @@ test('LM Studio rejects an unavailable explicitly configured model', async funct
   }
 });
 
-test('LM Studio maps chat requests and responses without putting its token in the URL', async function () {
-  const requests: Array<{ url: string; authorization: string | null; body?: unknown }> = [];
+test('LM Studio maps chat requests and responses without putting its token in the URL', async () => {
+  const requests: Array<{
+    url: string;
+    authorization: string | null;
+    body?: unknown;
+  }> = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -320,7 +373,9 @@ test('LM Studio maps chat requests and responses without putting its token in th
       systemPrompt: 'rules local-secret-token',
     });
 
-    expect(requests.every(request => !request.url.includes('local-secret-token'))).toBe(true);
+    expect(
+      requests.every((request) => !request.url.includes('local-secret-token')),
+    ).toBe(true);
     expect(requests[1]).toEqual({
       url: `${server.url.origin}/v1/chat/completions`,
       authorization: 'Bearer local-secret-token',
@@ -345,7 +400,7 @@ test('LM Studio maps chat requests and responses without putting its token in th
   }
 });
 
-test('LM Studio rejects malformed and duplicate discovery catalogues', async function () {
+test('LM Studio rejects malformed and duplicate discovery catalogues', async () => {
   let response: unknown = { invalid: [] };
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -355,7 +410,9 @@ test('LM Studio rejects malformed and duplicate discovery catalogues', async fun
     },
   });
   try {
-    await expect(createLmStudioProvider({ baseUrl: server.url.origin })).rejects.toMatchObject({
+    await expect(
+      createLmStudioProvider({ baseUrl: server.url.origin }),
+    ).rejects.toMatchObject({
       name: 'LanguageModelApiError',
       message: 'Invalid LM Studio model catalogue',
     });
@@ -365,15 +422,15 @@ test('LM Studio rejects malformed and duplicate discovery catalogues', async fun
         { key: 'duplicate', type: 'llm', max_context_length: 16_384 },
       ],
     };
-    await expect(createLmStudioProvider({ baseUrl: server.url.origin })).rejects.toThrow(
-      'Duplicate LM Studio model identifier',
-    );
+    await expect(
+      createLmStudioProvider({ baseUrl: server.url.origin }),
+    ).rejects.toThrow('Duplicate LM Studio model identifier');
   } finally {
     await server.stop(true);
   }
 });
 
-test('LM Studio rejects secret-bearing catalogue metadata before it reaches provider state', async function () {
+test('LM Studio rejects secret-bearing catalogue metadata before it reaches provider state', async () => {
   const token = 'private-local-token-value';
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -403,7 +460,7 @@ test('LM Studio rejects secret-bearing catalogue metadata before it reaches prov
   }
 });
 
-test('LM Studio refuses generation redirects before reaching their target', async function () {
+test('LM Studio refuses generation redirects before reaching their target', async () => {
   let redirectedRequests = 0;
   const target = Bun.serve({
     hostname: '127.0.0.1',
@@ -433,8 +490,12 @@ test('LM Studio refuses generation redirects before reaching their target', asyn
     },
   });
   try {
-    const provider = await createLmStudioProvider({ baseUrl: source.url.origin });
-    await expect(provider.service.generate(createGenerateParams())).rejects.toMatchObject({
+    const provider = await createLmStudioProvider({
+      baseUrl: source.url.origin,
+    });
+    await expect(
+      provider.service.generate(createGenerateParams()),
+    ).rejects.toMatchObject({
       name: 'LanguageModelApiError',
     });
     expect(redirectedRequests).toBe(0);
@@ -444,7 +505,7 @@ test('LM Studio refuses generation redirects before reaching their target', asyn
   }
 });
 
-test('LM Studio rejects oversized response bodies', async function () {
+test('LM Studio rejects oversized response bodies', async () => {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -465,8 +526,12 @@ test('LM Studio rejects oversized response bodies', async function () {
     },
   });
   try {
-    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
-    await expect(provider.service.generate(createGenerateParams())).rejects.toMatchObject({
+    const provider = await createLmStudioProvider({
+      baseUrl: server.url.origin,
+    });
+    await expect(
+      provider.service.generate(createGenerateParams()),
+    ).rejects.toMatchObject({
       name: 'LanguageModelApiError',
       message: 'LM Studio response body is too large',
     });
@@ -475,7 +540,7 @@ test('LM Studio rejects oversized response bodies', async function () {
   }
 });
 
-test('LM Studio normalizes HTTP errors without leaking configured or response secrets', async function () {
+test('LM Studio normalizes HTTP errors without leaking configured or response secrets', async () => {
   const token = 'private-local-token-value';
   const responseSecret = 'sk-abcdefghijklmnopqrstuvwxyz1234567890';
   const assignedSecret = 'password=hunter2';
@@ -496,25 +561,26 @@ test('LM Studio normalizes HTTP errors without leaking configured or response se
         });
       }
       return new Response(
-        JSON.stringify({
+        `${JSON.stringify({
           error: {
             message: `failure ${token} ${responseSecret}`,
             password: 'hunter2',
             api_key: 'quoted-secret',
           },
-        }) + '\u001b[2J',
+        })}\u001b[2J`,
         { status: 500 },
       );
     },
   });
   try {
-    const provider = await createLmStudioProvider({ baseUrl: server.url.origin, token });
-    let caught: unknown;
-    try {
-      await provider.service.generate(createGenerateParams());
-    } catch (error) {
-      caught = error;
-    }
+    const provider = await createLmStudioProvider({
+      baseUrl: server.url.origin,
+      token,
+    });
+    const caught: unknown = await provider.service
+      .generate(createGenerateParams())
+      .then(() => undefined)
+      .catch((error: unknown) => error);
 
     expect(isLanguageModelApiError(caught)).toBe(true);
     const visible = JSON.stringify(caught);
@@ -528,7 +594,7 @@ test('LM Studio normalizes HTTP errors without leaking configured or response se
   }
 });
 
-test('LM Studio rejects malformed API tokens before making a request', async function () {
+test('LM Studio rejects malformed API tokens before making a request', async () => {
   const token = 'secret\r\nforged: header';
   await expect(
     createLmStudioProvider({ baseUrl: 'http://127.0.0.1:1', token }),
@@ -541,7 +607,7 @@ test('LM Studio rejects malformed API tokens before making a request', async fun
 test.each([
   ['malformed JSON', new Response('{broken', { status: 200 })],
   ['malformed response', Response.json({ choices: [] })],
-])('LM Studio normalizes %s', async function (_, generatedResponse) {
+])('LM Studio normalizes %s', async (_, generatedResponse) => {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -562,8 +628,12 @@ test.each([
     },
   });
   try {
-    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
-    await expect(provider.service.generate(createGenerateParams())).rejects.toMatchObject({
+    const provider = await createLmStudioProvider({
+      baseUrl: server.url.origin,
+    });
+    await expect(
+      provider.service.generate(createGenerateParams()),
+    ).rejects.toMatchObject({
       name: 'LanguageModelApiError',
     });
   } finally {
@@ -571,7 +641,7 @@ test.each([
   }
 });
 
-test('LM Studio returns truncated output without speculative retry', async function () {
+test('LM Studio returns truncated output without speculative retry', async () => {
   const userPrompts: string[] = [];
   const outputLimits: number[] = [];
   const server = Bun.serve({
@@ -594,14 +664,17 @@ test('LM Studio returns truncated output without speculative retry', async funct
         messages: Array<{ content: string }>;
         max_tokens: number;
       };
-      const userMessage = body.messages[1];
-      if (!userMessage) throw new Error('Missing user message');
+      const {
+        messages: [, userMessage],
+      } = body;
       userPrompts.push(userMessage.content);
       outputLimits.push(body.max_tokens);
       return Response.json({
         choices: [
           {
-            message: { content: userPrompts.length === 1 ? 'partial' : 'complete' },
+            message: {
+              content: userPrompts.length === 1 ? 'partial' : 'complete',
+            },
             finish_reason: userPrompts.length === 1 ? 'length' : 'stop',
           },
         ],
@@ -610,7 +683,9 @@ test('LM Studio returns truncated output without speculative retry', async funct
     },
   });
   try {
-    const provider = await createLmStudioProvider({ baseUrl: server.url.origin });
+    const provider = await createLmStudioProvider({
+      baseUrl: server.url.origin,
+    });
     const response = await provider.service.generate({
       promptContext: 'large diff',
       systemPrompt: 'rules',
@@ -633,8 +708,9 @@ const TRACE_SECRET = `ghp_${'a1B2'.repeat(9)}`;
 async function collectLmStudioTrace(options: {
   debugApi?: boolean;
   configDebug?: boolean;
-}): Promise<{ message: string; meta?: Record<string, unknown> }[]> {
-  const entries: { message: string; meta?: Record<string, unknown> }[] = [];
+}): Promise<Array<{ message: string; meta?: Record<string, unknown> }>> {
+  const entries: Array<{ message: string; meta?: Record<string, unknown> }> =
+    [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -652,7 +728,12 @@ async function collectLmStudioTrace(options: {
         });
       }
       return Response.json({
-        choices: [{ message: { content: `feat: ${TRACE_SECRET}` }, finish_reason: 'stop' }],
+        choices: [
+          {
+            message: { content: `feat: ${TRACE_SECRET}` },
+            finish_reason: 'stop',
+          },
+        ],
         usage: {},
       });
     },
@@ -663,7 +744,11 @@ async function collectLmStudioTrace(options: {
       config: { ...CONFIG, DEBUG_API: options.configDebug === true },
       debugApi: options.debugApi,
       logger: {
-        log: function (_level: string, message: string, meta?: Record<string, unknown>) {
+        log: function (
+          _level: string,
+          message: string,
+          meta?: Record<string, unknown>,
+        ) {
           entries.push({ message, meta });
         },
       },
@@ -681,18 +766,21 @@ async function collectLmStudioTrace(options: {
 test.each([
   ['debugApi flag', { debugApi: true }],
   ['config.DEBUG_API', { configDebug: true }],
-])('LM Studio traces redacted request and response with %s', async function (_name, options) {
-  const entries = await collectLmStudioTrace(options);
+])(
+  'LM Studio traces redacted request and response with %s',
+  async (_name, options) => {
+    const entries = await collectLmStudioTrace(options);
 
-  expect(entries.map(entry => entry.message)).toEqual([
-    'LM Studio API request',
-    'LM Studio API response',
-  ]);
-  expect(String(entries[0]?.meta?.body)).toContain('diff ');
-  expect(entries[1]?.meta?.status).toBe(200);
-  expect(JSON.stringify(entries)).not.toContain(TRACE_SECRET);
-});
+    expect(entries.map((entry) => entry.message)).toEqual([
+      'LM Studio API request',
+      'LM Studio API response',
+    ]);
+    expect(String(entries[0]?.meta?.body)).toContain('diff ');
+    expect(entries[1]?.meta?.status).toBe(200);
+    expect(JSON.stringify(entries)).not.toContain(TRACE_SECRET);
+  },
+);
 
-test('LM Studio logs no trace when debug is off', async function () {
+test('LM Studio logs no trace when debug is off', async () => {
   expect(await collectLmStudioTrace({})).toEqual([]);
 });

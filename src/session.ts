@@ -1,6 +1,11 @@
 import { homedir } from 'os';
 import { join } from 'path';
-import { isLanguageModelName, isLanguageModelProviderId } from './language-model-service.js';
+
+import {
+  isLanguageModelName,
+  isLanguageModelProviderId,
+} from './language-model-service.js';
+import { isRecord } from './utils.js';
 
 export interface GCMSession {
   providerId: string | null;
@@ -19,10 +24,13 @@ function isModelName(value: unknown): value is string | null {
 }
 
 function isSession(value: unknown): value is GCMSession {
-  if (typeof value !== 'object' || value === null) return false;
-  const session = value as Record<string, unknown>;
-  if (!isLanguageModelProviderId(session.providerId)) return false;
-  return isModelName(session.modelName);
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (!isLanguageModelProviderId(value.providerId)) {
+    return false;
+  }
+  return isModelName(value.modelName);
 }
 
 export async function loadSession(): Promise<GCMSession> {
@@ -30,7 +38,9 @@ export async function loadSession(): Promise<GCMSession> {
     const file = Bun.file(sessionFile());
     if (await file.exists()) {
       const session: unknown = await file.json();
-      if (isSession(session)) return session;
+      if (isSession(session)) {
+        return session;
+      }
     }
   } catch {
     // Ignore errors

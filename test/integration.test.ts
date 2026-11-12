@@ -1,7 +1,8 @@
-import { afterAll, afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { afterAll, afterEach, beforeEach, expect, mock, test } from 'bun:test';
 
 await mock.module('@clack/prompts', () => ({
   intro: () => {},
@@ -28,20 +29,29 @@ const RAW =
 const PARSED = 'feat(app): add answer\n\nExplain the change.';
 
 const originalCwd = process.cwd();
-const originalExitCode = process.exitCode;
-const originalStdout = process.stdout.write;
-const originalStderr = process.stderr.write;
+const {
+  exitCode: originalExitCode,
+  stdout: { write: originalStdout },
+  stderr: { write: originalStderr },
+} = process;
 let repo = '';
 let prompts: string[] = [];
 let providerError: Error | null = null;
 
 async function git(...args: string[]): Promise<string> {
-  const child = Bun.spawn({ cmd: ['git', ...args], cwd: repo, stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn({
+    cmd: ['git', ...args],
+    cwd: repo,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   const [out, err] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
   ]);
-  if ((await child.exited) !== 0) throw new Error(err);
+  if ((await child.exited) !== 0) {
+    throw new Error(err);
+  }
   return out;
 }
 
@@ -75,11 +85,11 @@ afterAll(() => {
 // Runs the real entry point; only the language model is fake. Returns captured stdout.
 async function run(...argv: string[]): Promise<string> {
   let stdout = '';
-  process.stdout.write = ((chunk: string | Uint8Array) => {
+  process.stdout.write = (chunk: string | Uint8Array) => {
     stdout += String(chunk);
     return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = (() => true) as typeof process.stderr.write;
+  };
+  process.stderr.write = () => true;
   try {
     await executeCommitMessageGeneration(argv, {
       isInteractive: false,
@@ -92,13 +102,19 @@ async function run(...argv: string[]): Promise<string> {
           {
             name: 'fake-model',
             label: 'Fake model',
-            limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+            limits: {
+              kind: 'separate' as const,
+              maxInputTokens: 8_192,
+              maxOutputTokens: 1_024,
+            },
           },
         ],
         service: {
-          generate: async params => {
+          generate: async (params) => {
             prompts.push(params.promptContext);
-            if (providerError) throw providerError;
+            if (providerError !== null) {
+              throw providerError;
+            }
             return { text: RAW, usage: {} };
           },
         },

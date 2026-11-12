@@ -8,10 +8,10 @@ import type {
 } from './language-model-service.js';
 import { createLmStudioProvider } from './lm-studio-provider.js';
 import {
+  type LocalCliRun,
   checkLocalCliAuthentication,
   createClaudeCliProvider,
   createCodexCliProvider,
-  type LocalCliRun,
 } from './local-cli-provider.js';
 import type { Logger } from './logger.js';
 import type { ModelSpec } from './model-registry.js';
@@ -31,35 +31,39 @@ export function createProviderFactories(
   debugApi = false,
   config: Config,
 ): LanguageModelProviderFactory[] {
-  if (options.languageModelProvider) {
-    const provider = options.languageModelProvider;
+  if (options.languageModelProvider !== undefined) {
+    const { languageModelProvider: provider } = options;
     return [
       {
         id: provider.id,
         label: provider.label,
-        create: async () => provider,
+        create: async () => await Promise.resolve(provider),
       },
     ];
   }
-  if (options.languageModelProviderFactories) return options.languageModelProviderFactories;
+  if (options.languageModelProviderFactories !== undefined) {
+    return options.languageModelProviderFactories;
+  }
   const factories: LanguageModelProviderFactory[] = [
     {
       id: 'gemini',
       label: 'Gemini',
       create: async () =>
-        createGeminiProvider({
-          logger,
-          debugApi,
-          service: options.geminiService,
-          listModels: options.geminiModelLister,
-          config,
-        }),
+        await Promise.resolve(
+          createGeminiProvider({
+            logger,
+            debugApi,
+            service: options.geminiService,
+            listModels: options.geminiModelLister,
+            config,
+          }),
+        ),
     },
     {
       id: 'freellmapi',
       label: 'FreeLLMAPI',
       create: async () =>
-        createFreeLlmApiProvider({
+        await createFreeLlmApiProvider({
           baseUrl: config.FREELLMAPI_URL,
           model: config.FREELLMAPI_MODEL,
           token: config.FREELLMAPI_TOKEN,
@@ -71,8 +75,8 @@ export function createProviderFactories(
     {
       id: 'lm-studio',
       label: 'LM Studio',
-      create: async factoryOptions =>
-        createLmStudioProvider({
+      create: async (factoryOptions) =>
+        await createLmStudioProvider({
           baseUrl: config.LM_STUDIO_URL,
           model: config.LM_STUDIO_MODEL,
           token: config.LM_STUDIO_TOKEN,
@@ -89,12 +93,18 @@ export function createProviderFactories(
     ['claude', 'claude-cli', 'Claude CLI', createClaudeCliProvider],
   ] as const) {
     const executable = which(command);
-    if (!executable) continue;
+    if (executable === null) {
+      continue;
+    }
     factories.push({
       id,
       label,
       create: async function () {
-        await checkLocalCliAuthentication(command, executable, options.localCliRun);
+        await checkLocalCliAuthentication(
+          command,
+          executable,
+          options.localCliRun,
+        );
         return create({
           executable,
           run: options.localCliRun,

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+
 import { loadConfig } from '../gcm.config.js';
 
 const DEFAULT_CONFIG = {
@@ -38,7 +39,10 @@ async function readConfig(env: Record<string, string>): Promise<unknown> {
   };
 }
 
-async function runCli(env: Record<string, string>, args: string[] = ['--version']) {
+async function runCli(
+  env: Record<string, string>,
+  args: string[] = ['--version'],
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const child = Bun.spawn({
     cmd: ['bun', 'run', './gcm.ts', ...args],
     cwd: process.cwd(),
@@ -55,14 +59,16 @@ async function runCli(env: Record<string, string>, args: string[] = ['--version'
 }
 
 test('config: reads the short GCM names', async () => {
-  await expect(readConfig({ GCM_MODEL: 'test-model', GCM_TEMP: '0.25' })).resolves.toEqual({
+  await expect(
+    readConfig({ GCM_MODEL: 'test-model', GCM_TEMP: '0.25' }),
+  ).resolves.toEqual({
     ...DEFAULT_CONFIG,
     model: 'test-model',
     temp: 0.25,
   });
 });
 
-test('config: resolves provider credentials and LM Studio settings from supplied environment', function () {
+test('config: resolves provider credentials and LM Studio settings from supplied environment', () => {
   expect(
     loadConfig({
       GCM_PROVIDER: 'lm-studio',
@@ -80,13 +86,15 @@ test('config: resolves provider credentials and LM Studio settings from supplied
   });
 });
 
-test('config: automatic changesets require the literal true opt-in', async function () {
+test('config: automatic changesets require the literal true opt-in', async () => {
   await expect(readConfig({})).resolves.toEqual(DEFAULT_CONFIG);
   await expect(readConfig({ GCM_AUTO_CHANGESET: 'true' })).resolves.toEqual({
     ...DEFAULT_CONFIG,
     autoChangeset: true,
   });
-  await expect(readConfig({ GCM_AUTO_CHANGESET: '1' })).resolves.toEqual(DEFAULT_CONFIG);
+  await expect(readConfig({ GCM_AUTO_CHANGESET: '1' })).resolves.toEqual(
+    DEFAULT_CONFIG,
+  );
 });
 
 test('config: reads retry settings', async () => {
@@ -152,56 +160,60 @@ test('CLI names an invalid GCM_MAX_RETRIES setting', async () => {
 
 const UNSAFE_MODEL = { GCM_MODEL: 'bad\u001b[2Jmodel' };
 
-test('an unsafe GCM_MODEL still lets the CLI answer --version', async function () {
+test('an unsafe GCM_MODEL still lets the CLI answer --version', async () => {
   const result = await runCli(UNSAFE_MODEL, ['--version']);
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain('gcm ');
 });
 
-test('an unsafe GCM_MODEL stops --providers-list with the real reason', async function () {
+test('an unsafe GCM_MODEL stops --providers-list with the real reason', async () => {
   const result = await runCli(UNSAFE_MODEL, ['--providers-list']);
   expect(result.exitCode).not.toBe(0);
   expect(result.stdout + result.stderr).toContain('Invalid GCM_MODEL');
 });
 
-test('--help to a non-terminal stdout has no escape sequences', async function () {
+test('--help to a non-terminal stdout has no escape sequences', async () => {
   const result = await runCli({}, ['--help']);
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain('Usage');
   expect(result.stdout).not.toContain('\u001b[');
 });
 
-test('an unsafe GCM_MODEL still lets the CLI answer --help', async function () {
+test('an unsafe GCM_MODEL still lets the CLI answer --help', async () => {
   const result = await runCli(UNSAFE_MODEL, ['--help']);
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain('Usage');
   expect(result.stdout + result.stderr).not.toContain('Invalid GCM_MODEL');
 });
 
-test('--help wins over --models-list', async function () {
+test('--help wins over --models-list', async () => {
   const result = await runCli({}, ['--help', '--models-list']);
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain('Usage');
 });
 
-test('--version wins over --providers-list', async function () {
+test('--version wins over --providers-list', async () => {
   const result = await runCli({}, ['--version', '--providers-list']);
   expect(result.exitCode).toBe(0);
-  expect(result.stdout.trim()).toMatch(/^gcm \S+$/);
+  expect(result.stdout.trim()).toMatch(/^gcm \S+$/v);
 });
 
-test('--version wins over --models-list', async function () {
+test('--version wins over --models-list', async () => {
   const result = await runCli({}, ['--version', '--models-list']);
   expect(result.exitCode).toBe(0);
-  expect(result.stdout.trim()).toMatch(/^gcm \S+$/);
+  expect(result.stdout.trim()).toMatch(/^gcm \S+$/v);
 });
 
 test('config: an empty GCM_FREELLMAPI_MODEL uses the default', async () => {
-  await expect(readConfig({ GCM_FREELLMAPI_MODEL: '' })).resolves.toEqual(DEFAULT_CONFIG);
+  await expect(readConfig({ GCM_FREELLMAPI_MODEL: '' })).resolves.toEqual(
+    DEFAULT_CONFIG,
+  );
 });
 
 test('CLI names an invalid GCM_LOG_LEVEL setting', async () => {
-  const result = await runCli({ GCM_LOG_LEVEL: 'nonsense' }, ['--providers-list']);
+  const result = await runCli({ GCM_LOG_LEVEL: 'nonsense' }, [
+    '--providers-list',
+  ]);
   expect(result.exitCode).not.toBe(0);
   expect(result.stderr).toContain('Invalid GCM_LOG_LEVEL');
 });

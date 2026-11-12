@@ -1,4 +1,5 @@
-import { test, expect, mock, afterEach, afterAll } from 'bun:test';
+import { afterAll, afterEach, expect, mock, test } from 'bun:test';
+
 import { spawnGitLines, spawnGitStream } from '../src/git-utils';
 
 const mockSpawn = mock(() => ({
@@ -8,7 +9,7 @@ const mockSpawn = mock(() => ({
   kill: mock(() => {}),
 }));
 
-const originalSpawn = Bun.spawn;
+const { spawn: originalSpawn } = Bun;
 
 Bun.spawn = mockSpawn as unknown as typeof Bun.spawn;
 
@@ -36,36 +37,56 @@ test('git-utils: spawnGitLines - should spawn a git command and return lines', a
   const result = await spawnGitLines(['log']);
   expect(result.lines).toEqual(['line1\n', 'line2\n']);
   expect(result.truncated).toBe(false);
-  expect(mockSpawn).toHaveBeenCalledWith(expect.objectContaining({ cmd: ['git', 'log'] }));
+  expect(mockSpawn).toHaveBeenCalledWith(
+    expect.objectContaining({ cmd: ['git', 'log'] }),
+  );
 });
 
 test('git-utils: removes provider credentials from Git subprocess environments', async () => {
-  const originalGeminiKey = process.env.GOOGLE_GEMINI_API_KEY;
-  const originalFreeLlmToken = process.env.GCM_FREELLMAPI_TOKEN;
-  const originalLmToken = process.env.LM_API_TOKEN;
-  const originalSigningToken = process.env.COMMIT_SIGNING_TOKEN;
+  const {
+    env: {
+      GOOGLE_GEMINI_API_KEY: originalGeminiKey,
+      GCM_FREELLMAPI_TOKEN: originalFreeLlmToken,
+      LM_API_TOKEN: originalLmToken,
+      COMMIT_SIGNING_TOKEN: originalSigningToken,
+    },
+  } = process;
   process.env.GOOGLE_GEMINI_API_KEY = 'gemini-secret';
   process.env.GCM_FREELLMAPI_TOKEN = 'freellm-secret';
   process.env.LM_API_TOKEN = 'lm-secret';
   process.env.COMMIT_SIGNING_TOKEN = 'hook-secret';
   try {
     await spawnGitStream(['status']);
-    const call = mockSpawn.mock.calls.at(-1) as unknown as [{ env?: Record<string, string> }];
-    const options = call[0];
+    const call = mockSpawn.mock.calls.at(-1) as unknown as [
+      { env?: Record<string, string> },
+    ];
+    const [options] = call;
     expect(options.env).toBeDefined();
     expect(options.env?.GOOGLE_GEMINI_API_KEY).toBeUndefined();
     expect(options.env?.GCM_FREELLMAPI_TOKEN).toBeUndefined();
     expect(options.env?.LM_API_TOKEN).toBeUndefined();
     expect(options.env?.COMMIT_SIGNING_TOKEN).toBe('hook-secret');
   } finally {
-    if (originalGeminiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-    else process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
-    if (originalFreeLlmToken === undefined) delete process.env.GCM_FREELLMAPI_TOKEN;
-    else process.env.GCM_FREELLMAPI_TOKEN = originalFreeLlmToken;
-    if (originalLmToken === undefined) delete process.env.LM_API_TOKEN;
-    else process.env.LM_API_TOKEN = originalLmToken;
-    if (originalSigningToken === undefined) delete process.env.COMMIT_SIGNING_TOKEN;
-    else process.env.COMMIT_SIGNING_TOKEN = originalSigningToken;
+    if (originalGeminiKey === undefined) {
+      delete process.env.GOOGLE_GEMINI_API_KEY;
+    } else {
+      process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
+    }
+    if (originalFreeLlmToken === undefined) {
+      delete process.env.GCM_FREELLMAPI_TOKEN;
+    } else {
+      process.env.GCM_FREELLMAPI_TOKEN = originalFreeLlmToken;
+    }
+    if (originalLmToken === undefined) {
+      delete process.env.LM_API_TOKEN;
+    } else {
+      process.env.LM_API_TOKEN = originalLmToken;
+    }
+    if (originalSigningToken === undefined) {
+      delete process.env.COMMIT_SIGNING_TOKEN;
+    } else {
+      process.env.COMMIT_SIGNING_TOKEN = originalSigningToken;
+    }
   }
 });
 
@@ -78,7 +99,9 @@ test('git-utils: should handle binary diff files output', async () => {
     kill: mock(() => {}),
   }));
   const result = await spawnGitLines(['diff', 'a/foo.png', 'b/foo.png']);
-  expect(result.lines).toEqual(['Binary files a/foo.png and b/foo.png differ\n']);
+  expect(result.lines).toEqual([
+    'Binary files a/foo.png and b/foo.png differ\n',
+  ]);
   expect(result.truncated).toBe(false);
 });
 
@@ -102,7 +125,9 @@ test('git-utils: limits output by bytes, not characters', async () => {
     kill: mock(() => {}),
   }));
 
-  expect(await spawnGitLines(['diff'], { maxBytes: 3, allowTruncated: true })).toEqual({
+  expect(
+    await spawnGitLines(['diff'], { maxBytes: 3, allowTruncated: true }),
+  ).toEqual({
     lines: ['ě'],
     truncated: true,
   });
@@ -117,12 +142,22 @@ test('git-utils: draining past the cap does not flush a split character', async 
   }));
 
   expect(
-    await spawnGitLines(['diff'], { maxBytes: 3, allowTruncated: true, timeoutMs: 0 }),
+    await spawnGitLines(['diff'], {
+      maxBytes: 3,
+      allowTruncated: true,
+      timeoutMs: 0,
+    }),
   ).toEqual({ lines: ['ě'], truncated: true });
 });
 
 test('git-utils: uses the default limit for unsafe byte caps', async () => {
-  for (const maxBytes of [Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER, -1, 1.5]) {
+  for (const maxBytes of [
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER,
+    -1,
+    1.5,
+  ]) {
     mockSpawn.mockImplementationOnce(() => ({
       stdout: new Response('x'.repeat(1024 * 1024 + 1)).body,
       stderr: new Response('').body,
@@ -130,11 +165,14 @@ test('git-utils: uses the default limit for unsafe byte caps', async () => {
       kill: mock(() => {}),
     }));
 
-    const result = await spawnGitLines(['diff'], { maxBytes, allowTruncated: true });
+    const result = await spawnGitLines(['diff'], {
+      maxBytes,
+      allowTruncated: true,
+    });
     expect(result.truncated).toBe(true);
-    expect(new TextEncoder().encode(result.lines.join('')).byteLength).toBeLessThanOrEqual(
-      1024 * 1024,
-    );
+    expect(
+      new TextEncoder().encode(result.lines.join('')).byteLength,
+    ).toBeLessThanOrEqual(1024 * 1024);
   }
 });
 
@@ -153,7 +191,10 @@ test('git-utils: decodes UTF-8 split across stdout chunks', async () => {
     kill: mock(() => {}),
   }));
 
-  expect(await spawnGitLines(['diff'])).toEqual({ lines: ['ě\n'], truncated: false });
+  expect(await spawnGitLines(['diff'])).toEqual({
+    lines: ['ě\n'],
+    truncated: false,
+  });
 });
 
 test('git-utils: decodes UTF-8 split across stderr chunks', async () => {
@@ -182,9 +223,9 @@ test('git-utils: reports the executable that failed', async () => {
     kill: mock(() => {}),
   }));
 
-  await expect(spawnGitStream(['run', 'script.ts'], { execName: 'bun' })).rejects.toThrow(
-    'bun run script.ts failed: boom',
-  );
+  await expect(
+    spawnGitStream(['run', 'script.ts'], { execName: 'bun' }),
+  ).rejects.toThrow('bun run script.ts failed: boom');
 });
 
 test('git-utils: should handle merge conflicts in staging', async () => {
@@ -217,9 +258,9 @@ test('git-utils: should handle submodule paths correctly', async () => {
 });
 
 test('git-utils: should handle very long file paths', async () => {
-  const longPath = 'a/'.repeat(150) + 'file.txt'; // Path > 256 chars
+  const longPath = `${'a/'.repeat(150)}file.txt`; // Path > 256 chars
   mockSpawn.mockImplementationOnce(() => ({
-    stdout: new Response(longPath + '\n').body,
+    stdout: new Response(`${longPath}\n`).body,
     stderr: new Response('').body,
     exited: Promise.resolve(0),
     kill: mock(() => {}),

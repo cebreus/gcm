@@ -19,8 +19,8 @@ Start every reply with `cebreus+gcm`.
 
 ## Architecture
 
-- `gcm.ts` is argv/exit-code entry point; `src/runner.ts` loads initial session state, composes adapters, and dispatches. `src/generation.ts` owns both generation use cases and saves session state only after successful Git action.
-- `src/interactive-generation-dialogue.ts` owns prompts; `src/commit-action-service.ts` authorizes actions.
+- `gcm.ts` is argv/exit-code entry point; `src/runner.ts` loads initial session state, selects the provider, and dispatches; `src/runner-services.ts` composes adapters and `src/active-provider.ts` runs one provider. `src/generation.ts` is the entry to both generation use cases; `src/generation-workflow.ts` runs the loop and `src/generation-attempt.ts` runs one attempt and saves session state only after successful Git action.
+- `src/interactive-generation-dialogue.ts` owns prompts, with review actions in `src/interactive-review-actions.ts`; `src/commit-action-service.ts` authorizes actions.
 - `src/services/` isolates Git and context I/O; `src/openai-compatible-client.ts` is the one chat transport for every HTTP provider, `src/local-cli-provider.ts` runs `codex-cli` / `claude-cli`, and `src/gemini-models.ts` fetches Gemini's model catalogue.
 - Core modules include summarization, scope detection, atomic planning, model limits, CLI parsing, Git process boundaries, and log redaction.
 - `src/runner.ts` calls `loadConfig` once per run and passes resolved settings down; `src/project-config.ts` purely parses repository `.gcmrc.json`. Most tests are named after the module or behaviour they cover; binary tests require fresh build.
@@ -30,7 +30,7 @@ Start every reply with `cebreus+gcm`.
 
 - IMPORTANT: Code must be strictly testable. Isolate I/O and APIs at boundaries; core logic must be pure and deterministic.
 - IMPORTANT: Never guess. If context is missing, say `I don't know`.
-- Write failing test first, confirm reason, implement minimum, then run full test suite. Refactors of covered code may preserve existing tests. Break fix to prove test fails; report red/green results.
+- Follow [testing standard](docs/TESTING.md); report red/green results. Refactors of covered code may preserve existing tests.
 - Handle errors at risk-prone boundaries. Use `unknown` with type guards; Never add `any`.
 - IMPORTANT: Before destructive Git operations, validate inputs and repository state; stop rather than risk data loss.
 - Match local style, avoid speculative abstractions, and fix shared functions rather than call sites.
@@ -51,6 +51,6 @@ Start every reply with `cebreus+gcm`.
 
 - Node API migrations/polyfills; changes to `package.json`, config, or linter settings unless explicitly requested.
 - Refactoring multiple files or changing architecture without user approval.
-- Never change stage without explicit user approval; preserve staged changes.
+- Stage only files changed in the current task; preserve other staged changes. Correct earlier commits only with `fixup!` / `amend!` commits; never rewrite history.
 - Never run destructive operations without explicit user approval and a verified target.
-- Other state-mutating Git commands (`checkout`, `stash`, `rebase`, `push`, `worktree`) in this repository.
+- Other state-mutating Git commands (`checkout`, `stash`, `rebase`, `reset`, `push`, `worktree`) in this repository.

@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test';
+
 import { mkdir, mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { readCommitContextFacts } from '../src/services/repository-context.js';
 import type { SpawnGitStreamResult } from '../src/git-utils.js';
+import { readCommitContextFacts } from '../src/services/repository-context.js';
 
 function gitResult(text: string): SpawnGitStreamResult {
   return { text, truncated: false };
@@ -12,9 +13,10 @@ function gitResult(text: string): SpawnGitStreamResult {
 
 test('reads exact scope and recent history commands for changed paths', async () => {
   const commands: string[][] = [];
-  const history = Array.from({ length: 25 }, function (_, index) {
-    return `feat(core): change ${index + 1}`;
-  });
+  const history = Array.from(
+    { length: 25 },
+    (_, index) => `feat(core): change ${index + 1}`,
+  );
 
   const result = await readCommitContextFacts(['src/a.ts', 'src/b.ts'], {
     runGit: async function (args) {
@@ -104,7 +106,11 @@ test('returns deterministic empty facts without I/O for no changed files', async
     },
   });
 
-  expect(result).toEqual({ scopeHistorySubjects: [], recentSubjects: [], repoType: 'single' });
+  expect(result).toEqual({
+    scopeHistorySubjects: [],
+    recentSubjects: [],
+    repoType: 'single',
+  });
   expect(calls).toBe(0);
 });
 

@@ -1,75 +1,107 @@
 import { afterAll, expect, mock, test } from 'bun:test';
+
 import { mkdtemp, rm } from 'fs/promises';
 
 const originalCwd = process.cwd();
-const originalHome = process.env.HOME;
-const originalProvider = process.env.GCM_PROVIDER;
-const originalUrl = process.env.GCM_FREELLMAPI_URL;
-const originalModel = process.env.GCM_FREELLMAPI_MODEL;
-const originalToken = process.env.GCM_FREELLMAPI_TOKEN;
-const originalLmToken = process.env.LM_API_TOKEN;
-const originalGeminiKey = process.env.GOOGLE_GEMINI_API_KEY;
-const originalExitCode = process.exitCode;
+const {
+  env: {
+    HOME: originalHome,
+    GCM_PROVIDER: originalProvider,
+    GCM_FREELLMAPI_URL: originalUrl,
+    GCM_FREELLMAPI_MODEL: originalModel,
+    GCM_FREELLMAPI_TOKEN: originalToken,
+    LM_API_TOKEN: originalLmToken,
+    GOOGLE_GEMINI_API_KEY: originalGeminiKey,
+  },
+  exitCode: originalExitCode,
+} = process;
 const repository = await mkdtemp(`${Bun.env.TMPDIR ?? '/tmp'}/gcm-freellmapi-`);
-const note = mock(function () {});
-const cancel = mock(function () {});
+const note = mock(() => {});
+const cancel = mock(() => {});
 
-await mock.module('@clack/prompts', function () {
-  return {
-    intro: function () {},
-    outro: function () {},
-    spinner: function () {
-      return { start: function () {}, stop: function () {} };
-    },
-    note,
-    select: async function (options: { message: string }) {
-      if (options.message === 'What would you like to do?') return 'cancel';
-      throw new Error(`Unexpected prompt: ${options.message}`);
-    },
-    text: async function () {
-      throw new Error('Unexpected text prompt');
-    },
-    confirm: async function () {
-      throw new Error('Unexpected confirm prompt');
-    },
-    isCancel: function (value: unknown) {
-      return value === 'cancel';
-    },
-    cancel,
-  };
-});
+await mock.module('@clack/prompts', () => ({
+  intro: function () {},
+  outro: function () {},
+  spinner: function () {
+    return { start: function () {}, stop: function () {} };
+  },
+  note,
+  select: async function (options: { message: string }) {
+    if (options.message === 'What would you like to do?') {
+      return 'cancel';
+    }
+    throw new Error(`Unexpected prompt: ${options.message}`);
+  },
+  text: async function () {
+    throw new Error('Unexpected text prompt');
+  },
+  confirm: async function () {
+    throw new Error('Unexpected confirm prompt');
+  },
+  isCancel: function (value: unknown) {
+    return value === 'cancel';
+  },
+  cancel,
+}));
 
 process.env.HOME = repository;
 delete process.env.GOOGLE_GEMINI_API_KEY;
 process.env.GCM_FREELLMAPI_TOKEN = 'provider-specific-token';
 process.env.LM_API_TOKEN = 'lm-studio-secret-token';
 async function runGit(...args: string[]): Promise<void> {
-  const child = Bun.spawn({ cmd: ['git', ...args], cwd: repository, stderr: 'pipe' });
+  const child = Bun.spawn({
+    cmd: ['git', ...args],
+    cwd: repository,
+    stderr: 'pipe',
+  });
   const stderr = await new Response(child.stderr).text();
-  if ((await child.exited) !== 0) throw new Error(stderr);
+  if ((await child.exited) !== 0) {
+    throw new Error(stderr);
+  }
 }
 
-afterAll(async function () {
+afterAll(async () => {
   process.chdir(originalCwd);
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
-  if (originalProvider === undefined) delete process.env.GCM_PROVIDER;
-  else process.env.GCM_PROVIDER = originalProvider;
-  if (originalUrl === undefined) delete process.env.GCM_FREELLMAPI_URL;
-  else process.env.GCM_FREELLMAPI_URL = originalUrl;
-  if (originalModel === undefined) delete process.env.GCM_FREELLMAPI_MODEL;
-  else process.env.GCM_FREELLMAPI_MODEL = originalModel;
-  if (originalToken === undefined) delete process.env.GCM_FREELLMAPI_TOKEN;
-  else process.env.GCM_FREELLMAPI_TOKEN = originalToken;
-  if (originalLmToken === undefined) delete process.env.LM_API_TOKEN;
-  else process.env.LM_API_TOKEN = originalLmToken;
-  if (originalGeminiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
-  else process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
+  if (originalHome === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = originalHome;
+  }
+  if (originalProvider === undefined) {
+    delete process.env.GCM_PROVIDER;
+  } else {
+    process.env.GCM_PROVIDER = originalProvider;
+  }
+  if (originalUrl === undefined) {
+    delete process.env.GCM_FREELLMAPI_URL;
+  } else {
+    process.env.GCM_FREELLMAPI_URL = originalUrl;
+  }
+  if (originalModel === undefined) {
+    delete process.env.GCM_FREELLMAPI_MODEL;
+  } else {
+    process.env.GCM_FREELLMAPI_MODEL = originalModel;
+  }
+  if (originalToken === undefined) {
+    delete process.env.GCM_FREELLMAPI_TOKEN;
+  } else {
+    process.env.GCM_FREELLMAPI_TOKEN = originalToken;
+  }
+  if (originalLmToken === undefined) {
+    delete process.env.LM_API_TOKEN;
+  } else {
+    process.env.LM_API_TOKEN = originalLmToken;
+  }
+  if (originalGeminiKey === undefined) {
+    delete process.env.GOOGLE_GEMINI_API_KEY;
+  } else {
+    process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
+  }
   process.exitCode = originalExitCode ?? 0;
   await rm(repository, { recursive: true, force: true });
 });
 
-test('FreeLLMAPI provider runs end to end without Gemini API key', async function () {
+test('FreeLLMAPI provider runs end to end without Gemini API key', async () => {
   process.exitCode = 0;
   let generatedPrompt = '';
   let receivedAuth = '';
@@ -99,10 +131,13 @@ test('FreeLLMAPI provider runs end to end without Gemini API key', async functio
         });
       }
 
-      const body = (await request.json()) as { messages: Array<{ content: string }> };
-      const userMessage = body.messages[1];
-      if (!userMessage) throw new Error('Missing user message');
-      generatedPrompt = userMessage.content;
+      const body = (await request.json()) as {
+        messages: Array<{ content: string }>;
+      };
+      const {
+        messages: [, userMessage],
+      } = body;
+      ({ content: generatedPrompt } = userMessage);
 
       return Response.json({
         choices: [
@@ -118,12 +153,18 @@ test('FreeLLMAPI provider runs end to end without Gemini API key', async functio
 
   try {
     await runGit('init', '--quiet');
-    await Bun.write(`${repository}/app.ts`, 'console.log("hello freellmapi");\n');
+    await Bun.write(
+      `${repository}/app.ts`,
+      'console.log("hello freellmapi");\n',
+    );
     await runGit('add', '--', 'app.ts');
     process.chdir(repository);
 
     process.env.GCM_PROVIDER = 'freellmapi';
-    process.env.GCM_FREELLMAPI_URL = server.url.origin;
+    const {
+      url: { origin },
+    } = server;
+    process.env.GCM_FREELLMAPI_URL = origin;
     const { executeCommitMessageGeneration } = await import('../src/runner.js');
 
     await executeCommitMessageGeneration(['--model', 'gemini-2.5-flash'], {

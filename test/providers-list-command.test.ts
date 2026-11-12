@@ -1,17 +1,24 @@
 import { expect, mock, test } from 'bun:test';
-import { runProvidersListCommand } from '../src/providers-list-command.js';
+
 import {
-  createLanguageModelApiError,
   type LanguageModelProvider,
+  createLanguageModelApiError,
 } from '../src/language-model-service.js';
+import { runProvidersListCommand } from '../src/providers-list-command.js';
 
 const model = {
   name: 'model-a',
   label: 'Model A',
-  limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
+  limits: {
+    kind: 'separate' as const,
+    maxInputTokens: 8_192,
+    maxOutputTokens: 1_024,
+  },
 };
 
-function createProvider(overrides: Partial<LanguageModelProvider> = {}): LanguageModelProvider {
+function createProvider(
+  overrides: Partial<LanguageModelProvider> = {},
+): LanguageModelProvider {
   return {
     id: 'ready',
     label: 'Ready',
@@ -28,8 +35,8 @@ function createProvider(overrides: Partial<LanguageModelProvider> = {}): Languag
   };
 }
 
-test('list providers reports a safe mixed result and returns 1', async function () {
-  const note = mock(function (_message: string, _title?: string) {});
+test('list providers reports a safe mixed result and returns 1', async () => {
+  const note = mock((_message: string, _title?: string) => {});
   const exitCode = await runProvidersListCommand({
     factories: [
       {
@@ -69,8 +76,8 @@ test('list providers reports a safe mixed result and returns 1', async function 
   expect(note.mock.calls[0]?.[0]).not.toContain('private.host');
 });
 
-test('list providers rejects unusable providers and returns 2', async function () {
-  const note = mock(function (_message: string, _title?: string) {});
+test('list providers rejects unusable providers and returns 2', async () => {
+  const note = mock((_message: string, _title?: string) => {});
   const exitCode = await runProvidersListCommand({
     factories: [
       {
@@ -81,9 +88,12 @@ test('list providers rejects unusable providers and returns 2', async function (
             id: 'empty',
             label: 'Empty',
             models: async function () {
-              throw createLanguageModelApiError('Gemini returned no compatible text models', {
-                kind: 'no-models',
-              });
+              throw createLanguageModelApiError(
+                'Gemini returned no compatible text models',
+                {
+                  kind: 'no-models',
+                },
+              );
             },
           });
         },
@@ -98,10 +108,14 @@ test('list providers rejects unusable providers and returns 2', async function (
 
 test.each([
   ['request failed (401)', { status: 401 }, 'The API key was not accepted.'],
-  ['request timed out', { kind: 'timeout' }, 'The provider took too long to reply.'],
+  [
+    'request timed out',
+    { kind: 'timeout' },
+    'The provider took too long to reply.',
+  ],
   ['unknown failure', {}, 'Provider check failed.'],
-])('list providers explains %s', async function (error, metadata, expected) {
-  const note = mock(function (_message: string, _title?: string) {});
+])('list providers explains %s', async (error, metadata, expected) => {
+  const note = mock((_message: string, _title?: string) => {});
   await runProvidersListCommand({
     factories: [
       {

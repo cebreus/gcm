@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+
 import {
-  createInteractiveGenerationDialogue,
-  type ReviewCommitCapability,
   type GenerationState,
   type PromptAdapter,
+  type ReviewCommitCapability,
+  createInteractiveGenerationDialogue,
 } from '../src/interactive-generation-dialogue.js';
 import type { ModelSpec } from '../src/model-registry.js';
 
@@ -17,25 +18,37 @@ function createState(): GenerationState {
   };
 }
 
-function createCapability(overrides: Partial<ReviewCommitCapability> = {}): ReviewCommitCapability {
+function createCapability(
+  overrides: Partial<ReviewCommitCapability> = {},
+): ReviewCommitCapability {
   return { allowed: true, mode: 'commit', ...overrides };
 }
 
 function createScriptedDialogue(
   choices: unknown[],
   options: {
-    clipboard?: { write(message: string): Promise<void> };
+    clipboard?: { write: (message: string) => Promise<void> };
     listModels?: () => Promise<string[]>;
     fallbackModels?: ModelSpec[];
     providers?: Array<{ id: string; label: string }>;
   } = {},
-) {
+): {
+  dialogue: ReturnType<typeof createInteractiveGenerationDialogue>;
+  notes: Array<[string, string | undefined]>;
+  outros: string[];
+  copied: string[];
+  selectOptions: Array<Array<{ value: string; label: string; hint?: string }>>;
+  confirmations: string[];
+  cancellations: string[];
+} {
   const notes: Array<[string, string | undefined]> = [];
   const outros: string[] = [];
   const copied: string[] = [];
   const confirmations: string[] = [];
   const cancellations: string[] = [];
-  const selectOptions: Array<Array<{ value: string; label: string; hint?: string }>> = [];
+  const selectOptions: Array<
+    Array<{ value: string; label: string; hint?: string }>
+  > = [];
   const prompts: PromptAdapter = {
     select: async function (options) {
       selectOptions.push(options.options);
@@ -65,34 +78,40 @@ function createScriptedDialogue(
     prompts,
     clipboard: {
       write: async function (message) {
-        if (options.clipboard) return options.clipboard.write(message);
+        if (options.clipboard !== undefined) {
+          return await options.clipboard.write(message);
+        }
         copied.push(message);
       },
     },
     models: async function () {
-      const names = options.listModels
-        ? await options.listModels()
-        : ['gemini-3.7-flash', 'gemini-3.1-pro-preview'];
+      const names =
+        options.listModels === undefined
+          ? ['gemini-3.7-flash', 'gemini-3.1-pro-preview']
+          : await options.listModels();
       const catalogue =
         options.fallbackModels ??
-        names.map(function (name) {
-          return {
+        names.map((name) => ({
+          name,
+          label: name,
+          limits: {
+            kind: 'separate' as const,
+            maxInputTokens: 8_192,
+            maxOutputTokens: 1_024,
+          },
+        }));
+      return names.map(
+        (name) =>
+          catalogue.find((model) => model.name === name) ?? {
             name,
             label: name,
-            limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
-          };
-        });
-      return names.map(function (name) {
-        return (
-          catalogue.find(function (model) {
-            return model.name === name;
-          }) ?? {
-            name,
-            label: name,
-            limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
-          }
-        );
-      });
+            limits: {
+              kind: 'separate' as const,
+              maxInputTokens: 8_192,
+              maxOutputTokens: 1_024,
+            },
+          },
+      );
     },
     providers: options.providers ?? [{ id: 'gemini', label: 'Gemini' }],
   });
@@ -108,7 +127,7 @@ function createScriptedDialogue(
 }
 
 describe('interactive generation dialogue', () => {
-  test('requires an explicit allowed reason to commit without a changeset', async function () {
+  test('requires an explicit allowed reason to commit without a changeset', async () => {
     const { dialogue } = createScriptedDialogue(['commit', 'test-only']);
     const result = await dialogue.review({
       state: createState(),
@@ -119,8 +138,11 @@ describe('interactive generation dialogue', () => {
     expect(result.changesetReason).toBe('test-only');
     expect(result.includeChangeset).toBeUndefined();
   });
-  test('offers explicit changeset choices and returns the selected choice', async function () {
-    const { dialogue, selectOptions } = createScriptedDialogue(['commit-with-changeset', 'cancel']);
+  test('offers explicit changeset choices and returns the selected choice', async () => {
+    const { dialogue, selectOptions } = createScriptedDialogue([
+      'commit-with-changeset',
+      'cancel',
+    ]);
     const result = await dialogue.review({
       state: createState(),
       commitMessage: 'fix: keep model',
@@ -135,29 +157,41 @@ describe('interactive generation dialogue', () => {
   });
   test('offers retry or another model after generation fails', async () => {
     const retry = createScriptedDialogue(['retry']);
-    await expect(retry.dialogue.recoverGeneration('Provider unavailable')).resolves.toBe('retry');
+    await expect(
+      retry.dialogue.recoverGeneration('Provider unavailable'),
+    ).resolves.toBe('retry');
     expect(retry.notes).toEqual([['Provider unavailable', 'Details']]);
 
-    const switched = createScriptedDialogue(['switch', 'gemini-3.1-pro-preview']);
-    await expect(switched.dialogue.recoverGeneration('Provider unavailable')).resolves.toEqual({
+    const switched = createScriptedDialogue([
+      'switch',
+      'gemini-3.1-pro-preview',
+    ]);
+    await expect(
+      switched.dialogue.recoverGeneration('Provider unavailable'),
+    ).resolves.toEqual({
       type: 'switch-model',
       modelName: 'gemini-3.1-pro-preview',
     });
   });
-  test('returns a provider switch request from the main menu', async function () {
+  test('returns a provider switch request from the main menu', async () => {
     const state = createState();
-    const { dialogue, selectOptions } = createScriptedDialogue(['provider', 'lm-studio'], {
-      providers: [
-        { id: 'gemini', label: 'Gemini' },
-        { id: 'lm-studio', label: 'LM Studio' },
-      ],
-    });
+    const { dialogue, selectOptions } = createScriptedDialogue(
+      ['provider', 'lm-studio'],
+      {
+        providers: [
+          { id: 'gemini', label: 'Gemini' },
+          { id: 'lm-studio', label: 'LM Studio' },
+        ],
+      },
+    );
 
     await expect(dialogue.configure(state)).resolves.toEqual({
       type: 'switch-provider',
       providerId: 'lm-studio',
     });
-    expect(selectOptions[0]?.[1]?.label).toBe('Change Provider (Current: Gemini)');
+    expect(selectOptions[0]?.[1]?.label).toBe(
+      'Change Provider (Current: Gemini)',
+    );
     expect(selectOptions[1]).toEqual([
       { value: 'gemini', label: 'Gemini' },
       { value: 'lm-studio', label: 'LM Studio' },
@@ -170,7 +204,11 @@ describe('interactive generation dialogue', () => {
     const { dialogue, outros } = createScriptedDialogue(['cancel']);
 
     await expect(
-      dialogue.review({ state, commitMessage, commitCapability: createCapability() }),
+      dialogue.review({
+        state,
+        commitMessage,
+        commitCapability: createCapability(),
+      }),
     ).resolves.toEqual({
       type: 'cancel',
       modelName: state.modelName,
@@ -187,7 +225,11 @@ describe('interactive generation dialogue', () => {
     const { dialogue, outros } = createScriptedDialogue([escape]);
 
     await expect(
-      dialogue.review({ state, commitMessage, commitCapability: createCapability() }),
+      dialogue.review({
+        state,
+        commitMessage,
+        commitCapability: createCapability(),
+      }),
     ).resolves.toEqual({
       type: 'cancel',
       modelName: state.modelName,
@@ -199,20 +241,21 @@ describe('interactive generation dialogue', () => {
   });
 
   test('shows the disabled reason and omits commit', async () => {
-    const { dialogue, notes, selectOptions } = createScriptedDialogue(['cancel']);
+    const { dialogue, notes, selectOptions } = createScriptedDialogue([
+      'cancel',
+    ]);
 
     await dialogue.review({
       state: createState(),
       commitMessage: 'message',
-      commitCapability: createCapability({ allowed: false, reason: 'No staged changes.' }),
+      commitCapability: createCapability({
+        allowed: false,
+        reason: 'No staged changes.',
+      }),
     });
 
     expect(notes).toEqual([['No staged changes.', 'Commit unavailable']]);
-    expect(
-      selectOptions[0]?.map(function (option) {
-        return option.label;
-      }),
-    ).toEqual([
+    expect(selectOptions[0]?.map((option) => option.label)).toEqual([
       'Copy to clipboard',
       'Edit message',
       'Regenerate (same model)',
@@ -234,7 +277,9 @@ describe('interactive generation dialogue', () => {
       }),
     });
 
-    expect(selectOptions[0]?.[0]?.label).toBe('Amend HEAD (feat: safe subject)');
+    expect(selectOptions[0]?.[0]?.label).toBe(
+      'Amend HEAD (feat: safe subject)',
+    );
   });
 
   test('warns that an amend! commit needs a later manual rebase', async () => {
@@ -255,14 +300,19 @@ describe('interactive generation dialogue', () => {
   });
 
   test('warns about excluded staged paths before offering commit and requires acknowledgement', async () => {
-    const { dialogue, notes, confirmations } = createScriptedDialogue(['commit', true]);
+    const { dialogue, notes, confirmations } = createScriptedDialogue([
+      'commit',
+      true,
+    ]);
     const excludedPath = 'later\nWILL still be committed: forged\u001B[2J.txt';
 
     await expect(
       dialogue.review({
         state: createState(),
         commitMessage: 'message',
-        commitCapability: createCapability({ excludedPaths: ['secrets.txt', excludedPath] }),
+        commitCapability: createCapability({
+          excludedPaths: ['secrets.txt', excludedPath],
+        }),
       }),
     ).resolves.toEqual({
       type: 'commit',
@@ -328,7 +378,10 @@ describe('interactive generation dialogue', () => {
 
   test('copies the original message and returns to the menu', async () => {
     const commitMessage = 'original message';
-    const { dialogue, copied, notes, selectOptions } = createScriptedDialogue(['copy', 'commit']);
+    const { dialogue, copied, notes, selectOptions } = createScriptedDialogue([
+      'copy',
+      'commit',
+    ]);
 
     await expect(
       dialogue.review({
@@ -348,13 +401,16 @@ describe('interactive generation dialogue', () => {
   });
 
   test('reports a clipboard failure and returns to the menu', async () => {
-    const { dialogue, notes, selectOptions } = createScriptedDialogue(['copy', 'commit'], {
-      clipboard: {
-        write: async function () {
-          throw new Error('denied');
+    const { dialogue, notes, selectOptions } = createScriptedDialogue(
+      ['copy', 'commit'],
+      {
+        clipboard: {
+          write: async function () {
+            throw new Error('denied');
+          },
         },
       },
-    });
+    );
 
     await expect(
       dialogue.review({
@@ -368,7 +424,9 @@ describe('interactive generation dialogue', () => {
       userHint: undefined,
       commitMessage: 'message',
     });
-    expect(notes).toEqual([['Failed to copy to clipboard: Error: denied', 'Error']]);
+    expect(notes).toEqual([
+      ['Failed to copy to clipboard: Error: denied', 'Error'],
+    ]);
     expect(selectOptions).toHaveLength(2);
   });
 
@@ -397,7 +455,11 @@ describe('interactive generation dialogue', () => {
 
   test('rejects an empty edited message and keeps the previous message', async () => {
     const commitMessage = 'original message';
-    const { dialogue, notes, selectOptions } = createScriptedDialogue(['edit', '', 'commit']);
+    const { dialogue, notes, selectOptions } = createScriptedDialogue([
+      'edit',
+      '',
+      'commit',
+    ]);
 
     await expect(
       dialogue.review({
@@ -412,14 +474,21 @@ describe('interactive generation dialogue', () => {
       commitMessage: 'original message',
     });
     expect(notes).toEqual([
-      ['Commit message cannot be empty. The previous message was kept.', 'Error'],
+      [
+        'Commit message cannot be empty. The previous message was kept.',
+        'Error',
+      ],
     ]);
     expect(selectOptions).toHaveLength(2);
   });
 
   test('keeps the original message when the edit prompt is cancelled', async () => {
     const commitMessage = 'original message';
-    const { dialogue, notes, selectOptions } = createScriptedDialogue(['edit', escape, 'commit']);
+    const { dialogue, notes, selectOptions } = createScriptedDialogue([
+      'edit',
+      escape,
+      'commit',
+    ]);
 
     await expect(
       dialogue.review({
@@ -438,7 +507,10 @@ describe('interactive generation dialogue', () => {
   });
 
   test('returns to the action menu after an unrecognised action value', async () => {
-    const { dialogue, selectOptions } = createScriptedDialogue(['unrecognised-action', 'commit']);
+    const { dialogue, selectOptions } = createScriptedDialogue([
+      'unrecognised-action',
+      'commit',
+    ]);
 
     await expect(
       dialogue.review({
@@ -457,7 +529,10 @@ describe('interactive generation dialogue', () => {
 
   test('returns regenerate choices with their expected hints', async () => {
     const sameModel = createScriptedDialogue(['regenerate']);
-    const withHint = createScriptedDialogue(['regenerate-hint', 'emphasize refactoring']);
+    const withHint = createScriptedDialogue([
+      'regenerate-hint',
+      'emphasize refactoring',
+    ]);
 
     await expect(
       sameModel.dialogue.review({
@@ -486,7 +561,10 @@ describe('interactive generation dialogue', () => {
   });
 
   test('returns regeneration with an empty hint', async () => {
-    const { dialogue, selectOptions } = createScriptedDialogue(['regenerate-hint', '']);
+    const { dialogue, selectOptions } = createScriptedDialogue([
+      'regenerate-hint',
+      '',
+    ]);
 
     await expect(
       dialogue.review({
@@ -528,7 +606,10 @@ describe('interactive generation dialogue', () => {
   });
 
   test('returns the selected model for regeneration', async () => {
-    const { dialogue } = createScriptedDialogue(['switch', 'gemini-3.1-pro-preview']);
+    const { dialogue } = createScriptedDialogue([
+      'switch',
+      'gemini-3.1-pro-preview',
+    ]);
 
     await expect(
       dialogue.review({
@@ -548,14 +629,21 @@ describe('interactive generation dialogue', () => {
     const localModel = {
       name: 'models/olive-model',
       label: 'Local Model',
-      limits: { kind: 'separate' as const, maxInputTokens: 8_192, maxOutputTokens: 1_024 },
-    };
-    const { dialogue, selectOptions } = createScriptedDialogue(['switch', 'models/olive-model'], {
-      listModels: async function () {
-        return ['models/olive-model'];
+      limits: {
+        kind: 'separate' as const,
+        maxInputTokens: 8_192,
+        maxOutputTokens: 1_024,
       },
-      fallbackModels: [localModel],
-    });
+    };
+    const { dialogue, selectOptions } = createScriptedDialogue(
+      ['switch', 'models/olive-model'],
+      {
+        listModels: async function () {
+          return ['models/olive-model'];
+        },
+        fallbackModels: [localModel],
+      },
+    );
 
     await dialogue.review({
       state: createState(),
@@ -563,12 +651,18 @@ describe('interactive generation dialogue', () => {
       commitCapability: createCapability(),
     });
 
-    expect(selectOptions[1]).toEqual([{ value: 'models/olive-model', label: 'Local Model' }]);
+    expect(selectOptions[1]).toEqual([
+      { value: 'models/olive-model', label: 'Local Model' },
+    ]);
   });
 
   test('continues after escaping the model prompt', async () => {
     const state = createState();
-    const { dialogue, selectOptions } = createScriptedDialogue(['switch', escape, 'commit']);
+    const { dialogue, selectOptions } = createScriptedDialogue([
+      'switch',
+      escape,
+      'commit',
+    ]);
 
     await expect(
       dialogue.review({
@@ -651,29 +745,38 @@ describe('interactive generation dialogue', () => {
       expectedTip: 'git add <files>',
       expectedLabels: ['Re-check changes', 'Show split proposal', 'Cancel'],
     },
-  ])('retries empty staging for a $name', async ({ changedFiles, expectedTip, expectedLabels }) => {
-    const { dialogue, notes, selectOptions } = createScriptedDialogue(['retry']);
+  ])(
+    'retries empty staging for a $name',
+    async ({ changedFiles, expectedTip, expectedLabels }) => {
+      const { dialogue, notes, selectOptions } = createScriptedDialogue([
+        'retry',
+      ]);
 
-    await expect(dialogue.handleEmptyStaging(null, changedFiles)).resolves.toBe('retry');
-    expect(notes).toHaveLength(1);
-    expect(notes[0]?.[0]).toContain(expectedTip);
-    expect(notes[0]?.[1]).toBe('TIP');
-    expect(
-      selectOptions[0]?.map(function (option) {
-        return option.label;
-      }),
-    ).toEqual([...expectedLabels]);
-  });
+      await expect(
+        dialogue.handleEmptyStaging(null, changedFiles),
+      ).resolves.toBe('retry');
+      expect(notes).toHaveLength(1);
+      expect(notes[0]?.[0]).toContain(expectedTip);
+      expect(notes[0]?.[1]).toBe('TIP');
+      expect(selectOptions[0]?.map((option) => option.label)).toEqual([
+        ...expectedLabels,
+      ]);
+    },
+  );
 
   test('shows an empty-staging split proposal then prompts again', async () => {
-    const { dialogue, notes, selectOptions } = createScriptedDialogue(['split', 'retry']);
+    const { dialogue, notes, selectOptions } = createScriptedDialogue([
+      'split',
+      'retry',
+    ]);
 
-    await expect(dialogue.handleEmptyStaging(null, ['src/a.ts'])).resolves.toBe('retry');
-    expect(
-      notes.map(function (entry) {
-        return entry[1];
-      }),
-    ).toEqual(['TIP', 'Atomic split proposal']);
+    await expect(dialogue.handleEmptyStaging(null, ['src/a.ts'])).resolves.toBe(
+      'retry',
+    );
+    expect(notes.map((entry) => entry[1])).toEqual([
+      'TIP',
+      'Atomic split proposal',
+    ]);
     expect(notes[1]?.[0]).toContain('git reset');
     expect(selectOptions).toHaveLength(2);
   });
@@ -682,7 +785,9 @@ describe('interactive generation dialogue', () => {
     ['visible Cancel', 'cancel'],
     ['escape', escape],
   ])('cancels empty staging on %s', async (_, choice) => {
-    const { dialogue, selectOptions, cancellations } = createScriptedDialogue([choice]);
+    const { dialogue, selectOptions, cancellations } = createScriptedDialogue([
+      choice,
+    ]);
 
     await expect(dialogue.handleEmptyStaging(null, [])).resolves.toBe('cancel');
     expect(selectOptions).toHaveLength(1);
@@ -690,9 +795,12 @@ describe('interactive generation dialogue', () => {
   });
 
   test('cancels an empty target commit without prompting', async () => {
-    const { dialogue, notes, selectOptions, cancellations } = createScriptedDialogue([]);
+    const { dialogue, notes, selectOptions, cancellations } =
+      createScriptedDialogue([]);
 
-    await expect(dialogue.handleEmptyStaging('abc123', ['src/a.ts'])).resolves.toBe('cancel');
+    await expect(
+      dialogue.handleEmptyStaging('abc123', ['src/a.ts']),
+    ).resolves.toBe('cancel');
     expect(cancellations).toEqual(['No changes found in commit abc123.']);
     expect(selectOptions).toEqual([]);
     expect(notes).toEqual([]);
@@ -722,16 +830,19 @@ describe('interactive generation dialogue', () => {
     await expect(
       dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], null),
     ).resolves.toBe(true);
-    expect(
-      selectOptions[0]?.map(function (option) {
-        return option.label;
-      }),
-    ).toEqual(['Continue anyway', 'Show split proposal', 'Cancel']);
+    expect(selectOptions[0]?.map((option) => option.label)).toEqual([
+      'Continue anyway',
+      'Show split proposal',
+      'Cancel',
+    ]);
   });
 
   test('shows the split proposal then prompts again', async () => {
     const files = ['src/runner.ts', 'test/runner.test.ts'];
-    const { dialogue, notes, selectOptions } = createScriptedDialogue(['split', 'continue']);
+    const { dialogue, notes, selectOptions } = createScriptedDialogue([
+      'split',
+      'continue',
+    ]);
 
     await expect(dialogue.confirmAtomicity(files, null)).resolves.toBe(true);
     expect(notes[0]?.[1]).toBe('Atomic split proposal');
@@ -743,7 +854,9 @@ describe('interactive generation dialogue', () => {
   test('a single atomic group continues without prompting', async () => {
     const { dialogue, selectOptions } = createScriptedDialogue([]);
 
-    await expect(dialogue.confirmAtomicity(['src/runner.ts'], null)).resolves.toBe(true);
+    await expect(
+      dialogue.confirmAtomicity(['src/runner.ts'], null),
+    ).resolves.toBe(true);
     expect(selectOptions).toEqual([]);
   });
 
@@ -751,7 +864,10 @@ describe('interactive generation dialogue', () => {
     const { dialogue, selectOptions } = createScriptedDialogue([]);
 
     await expect(
-      dialogue.confirmAtomicity(['src/runner.ts', 'test/runner.test.ts'], 'abc123'),
+      dialogue.confirmAtomicity(
+        ['src/runner.ts', 'test/runner.test.ts'],
+        'abc123',
+      ),
     ).resolves.toBe(true);
     expect(selectOptions).toEqual([]);
   });

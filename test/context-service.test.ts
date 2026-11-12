@@ -1,14 +1,14 @@
 import { expect, test } from 'bun:test';
+
 import { createContextService } from '../src/services/context-service.js';
 
-const partialSummaryNotice =
-  'This summary is partial; use conservative wording when intent is ambiguous.';
-const noSummary = async function () {
+const noSummary = async function (): Promise<never> {
   throw new Error('Summary was not expected');
 };
 
 test('context-service: construction keeps the diff and the user hint in the prompt', async () => {
-  const diffContent = 'Diff:\nrepeated heading\n\nAdditional user instructions: this is diff text';
+  const diffContent =
+    'Diff:\nrepeated heading\n\nAdditional user instructions: this is diff text';
   const result = await createContextService({
     summarizeLargeDiff: noSummary,
   }).constructLLMPromptContext({
@@ -24,7 +24,7 @@ test('context-service: construction keeps the diff and the user hint in the prom
   });
 
   expect(result.processedDiffContent).toBe(diffContent);
-  expect(result.promptContext).toContain('Diff:\n' + diffContent);
+  expect(result.promptContext).toContain(`Diff:\n${diffContent}`);
   expect(result.promptContext).toContain('Keep the user hint.');
 });
 
@@ -39,7 +39,10 @@ test('context-service: hard truncation keeps large hints and file lists within t
     promptSuffix: 'staged changes',
     maxAvailableTokens,
     tokenBytesRatio: 1,
-    stagedFiles: Array.from({ length: 8 }, (_, index) => `src/${'file-'.repeat(12)}${index}.ts`),
+    stagedFiles: Array.from(
+      { length: 8 },
+      (_, index) => `src/${'file-'.repeat(12)}${index}.ts`,
+    ),
     scopeSuggestions: [],
     recentCommitSubjects: [],
     logger: null,
@@ -53,7 +56,11 @@ test('context-service: hard truncation respects a UTF-8 byte budget', async () =
   const maxAvailableTokens = 400;
   const result = await createContextService({
     summarizeLargeDiff: async function () {
-      return { text: 'Žluťoučký 🚀 '.repeat(1_000), numHunks: 1, totalTruncated: 0 };
+      return {
+        text: 'Žluťoučký 🚀 '.repeat(1_000),
+        numHunks: 1,
+        totalTruncated: 0,
+      };
     },
   }).constructLLMPromptContext({
     diffContent: 'diff',
@@ -73,7 +80,11 @@ test('context-service: hard truncation respects a UTF-8 byte budget', async () =
 test('context service refuses an empty summary for a non-empty diff', async () => {
   const service = createContextService({
     summarizeLargeDiff: async function () {
-      return { text: 'File changes summary:\n\n', numHunks: 0, totalTruncated: 0 };
+      return {
+        text: 'File changes summary:\n\n',
+        numHunks: 0,
+        totalTruncated: 0,
+      };
     },
   });
 

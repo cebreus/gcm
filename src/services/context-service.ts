@@ -1,8 +1,8 @@
-import { estimateTokenCount, truncateUtf8 } from '../utils.js';
 import type { Logger } from '../logger.js';
+import { estimateTokenCount, hasText, truncateUtf8 } from '../utils.js';
 
 export interface ContextService {
-  constructLLMPromptContext(params: ContextParams): Promise<ContextResult>;
+  constructLLMPromptContext: (params: ContextParams) => Promise<ContextResult>;
 }
 
 interface DiffSummary {
@@ -13,10 +13,10 @@ interface DiffSummary {
 }
 
 interface ContextServiceDeps {
-  summarizeLargeDiff(
+  summarizeLargeDiff: (
     stagedFiles: string[],
     options?: { targetCommit?: string },
-  ): Promise<DiffSummary>;
+  ) => Promise<DiffSummary>;
 }
 
 interface ContextParams {
@@ -42,16 +42,21 @@ interface ContextResult {
 const PARTIAL_SUMMARY_NOTICE =
   'This summary is partial; use conservative wording when intent is ambiguous.';
 
-function buildPromptHeader(promptSuffix: string, customHeader?: string): string {
-  if (customHeader) {
+function buildPromptHeader(
+  promptSuffix: string,
+  customHeader?: string,
+): string {
+  if (hasText(customHeader)) {
     return `${customHeader} ${promptSuffix}:\n\n`;
   }
   return `Analyze the following ${promptSuffix} to generate the requested commit information:\n\n`;
 }
 
 function buildListSection(title: string, values: string[]): string {
-  if (!values.length) return '';
-  return `${title}:\n${values.map(value => `- ${value}`).join('\n')}\n\n`;
+  if (values.length === 0) {
+    return '';
+  }
+  return `${title}:\n${values.map((value) => `- ${value}`).join('\n')}\n\n`;
 }
 
 function buildHints(
@@ -61,14 +66,16 @@ function buildHints(
 ): { contextHeader: string; hintSection: string } {
   const scopeHint =
     scopeSuggestions.length > 0
-      ? `Scope candidates:\n${scopeSuggestions.map(scope => `- ${scope}`).join('\n')}\n\n`
+      ? `Scope candidates:\n${scopeSuggestions.map((scope) => `- ${scope}`).join('\n')}\n\n`
       : '';
   const historyHint =
     recentCommitSubjects.length > 0
-      ? buildListSection('Recent commit style examples for these files', recentCommitSubjects) +
-        'Use recent examples only to align type, scope, and wording style. Do not copy unrelated content.\n\n'
+      ? `${buildListSection(
+          'Recent commit style examples for these files',
+          recentCommitSubjects,
+        )}Use recent examples only to align type, scope, and wording style. Do not copy unrelated content.\n\n`
       : '';
-  const hintSection = userHint
+  const hintSection = hasText(userHint)
     ? `\n\nAdditional user instructions: ${userHint}\nPLEASE ADHERE TO THESE INSTRUCTIONS.`
     : '';
   return { contextHeader: scopeHint + historyHint, hintSection };
@@ -103,8 +110,14 @@ function buildHardTruncatedContext(params: {
   maxAvailableTokens: number;
   tokenBytesRatio: number;
 }): ContextResult {
-  const { header, scopeHint, hintSection, summaryText, maxAvailableTokens, tokenBytesRatio } =
-    params;
+  const {
+    header,
+    scopeHint,
+    hintSection,
+    summaryText,
+    maxAvailableTokens,
+    tokenBytesRatio,
+  } = params;
   const fixedContent = header + scopeHint + hintSection;
   const fixedTokens = estimateTokenCount(fixedContent, tokenBytesRatio);
   if (fixedTokens >= maxAvailableTokens) {
@@ -115,7 +128,7 @@ function buildHardTruncatedContext(params: {
     );
   }
   const truncatedInput = truncateToTokenBudget(
-    'Diff summary:\n' + summaryText + '\n\n' + PARTIAL_SUMMARY_NOTICE,
+    `Diff summary:\n${summaryText}\n\n${PARTIAL_SUMMARY_NOTICE}`,
     maxAvailableTokens - fixedTokens,
     tokenBytesRatio,
   );
@@ -154,7 +167,7 @@ async function constructLLMPromptContext(
     userHint,
   );
   const prefix = header + changedFilesSection + contextHeader;
-  const initialContent = prefix + 'Diff:\n' + diffContent + hintSection;
+  const initialContent = `${prefix}Diff:\n${diffContent}${hintSection}`;
   const estimatedTokens = estimateTokenCount(initialContent, tokenBytesRatio);
   if (estimatedTokens <= maxAvailableTokens) {
     return buildContextResult(initialContent, diffContent, tokenBytesRatio);
@@ -164,15 +177,20 @@ async function constructLLMPromptContext(
     `Input token count (${estimatedTokens}) exceeds limit (${maxAvailableTokens}). Summarizing diff...`,
   );
   const summary = await summarize(stagedFiles, { targetCommit });
-  if (diffContent.trim() && !hasSummaryEvidence(summary)) {
+  if (diffContent.trim() !== '' && !hasSummaryEvidence(summary)) {
     throw new Error('Diff summary contains no evidence for a non-empty diff');
   }
-  const summaryBody = summary.text + '\n\n' + PARTIAL_SUMMARY_NOTICE;
-  const summaryContent = prefix + 'Diff summary:\n' + summaryBody + hintSection;
-  if (estimateTokenCount(summaryContent, tokenBytesRatio) <= maxAvailableTokens) {
+  const summaryBody = `${summary.text}\n\n${PARTIAL_SUMMARY_NOTICE}`;
+  const summaryContent = `${prefix}Diff summary:\n${summaryBody}${hintSection}`;
+  if (
+    estimateTokenCount(summaryContent, tokenBytesRatio) <= maxAvailableTokens
+  ) {
     return buildContextResult(summaryContent, summary.text, tokenBytesRatio);
   }
-  logger?.log('warn', 'Summary was still too large, performing hard truncation.');
+  logger?.log(
+    'warn',
+    'Summary was still too large, performing hard truncation.',
+  );
   return buildHardTruncatedContext({
     header,
     scopeHint: changedFilesSection + contextHeader,
@@ -187,6 +205,7 @@ export function createContextService({
   summarizeLargeDiff: summarize,
 }: ContextServiceDeps): ContextService {
   return {
-    constructLLMPromptContext: params => constructLLMPromptContext(params, summarize),
+    constructLLMPromptContext: async (params) =>
+      await constructLLMPromptContext(params, summarize),
   };
 }

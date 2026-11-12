@@ -1,0 +1,4 @@
+{
+  "baseline": "5e9e59a7d5a3bebc48be82120a485c5dd76ef04c",
+  "reason": "Commits before adoption of the bun-app changeset gate lack Changeset decisions."
+}

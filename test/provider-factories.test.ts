@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
-import { createProviderFactories } from '../src/provider-factories.js';
-import { loadConfig } from '../gcm.config.js';
 
-test('local CLI registration follows installed binaries without probing during help', async function () {
+import { loadConfig } from '../gcm.config.js';
+import { createProviderFactories } from '../src/provider-factories.js';
+
+test('local CLI registration follows installed binaries without probing during help', async () => {
   const calls: string[][] = [];
   const factories = createProviderFactories(
     {
@@ -18,7 +19,7 @@ test('local CLI registration follows installed binaries without probing during h
     false,
     loadConfig({}),
   );
-  expect(factories.map(factory => factory.id)).toEqual([
+  expect(factories.map((factory) => factory.id)).toEqual([
     'gemini',
     'freellmapi',
     'lm-studio',
@@ -30,24 +31,30 @@ test('local CLI registration follows installed binaries without probing during h
   expect(calls).toEqual([['/fake/codex', 'login', 'status']]);
 });
 
-test('Claude factory refuses a logged-out CLI even when status exits zero', async function () {
+test('Claude factory refuses a logged-out CLI even when status exits zero', async () => {
   const factories = createProviderFactories(
     {
       which: function (command) {
         return command === 'claude' ? '/fake/claude' : null;
       },
       localCliRun: async function () {
-        return { exitCode: 0, stdout: JSON.stringify({ loggedIn: false }), stderr: '' };
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ loggedIn: false }),
+          stderr: '',
+        };
       },
     },
     { log: function () {} },
     false,
     loadConfig({}),
   );
-  await expect(factories.at(-1)?.create({ probeOnly: true })).rejects.toThrow('login is required');
+  await expect(factories.at(-1)?.create({ probeOnly: true })).rejects.toThrow(
+    'login is required',
+  );
 });
 
-test('injected factories keep precedence over local CLI discovery', function () {
+test('injected factories keep precedence over local CLI discovery', () => {
   const factories: [] = [];
   expect(
     createProviderFactories(
@@ -64,7 +71,7 @@ test('injected factories keep precedence over local CLI discovery', function () 
   ).toBe(factories);
 });
 
-test('LM Studio factory reads its URL when the factory runs', async function () {
+test('LM Studio factory reads its URL when the factory runs', async () => {
   let staleRequests = 0;
   const staleServer = Bun.serve({
     hostname: '127.0.0.1',
@@ -90,9 +97,14 @@ test('LM Studio factory reads its URL when the factory runs', async function () 
       });
     },
   });
-  const previousUrl = process.env.GCM_LM_STUDIO_URL;
+  const {
+    env: { GCM_LM_STUDIO_URL: previousUrl },
+  } = process;
   try {
-    process.env.GCM_LM_STUDIO_URL = staleServer.url.origin;
+    const {
+      url: { origin: staleOrigin },
+    } = staleServer;
+    process.env.GCM_LM_STUDIO_URL = staleOrigin;
     const factories = createProviderFactories(
       {},
       {
@@ -101,20 +113,26 @@ test('LM Studio factory reads its URL when the factory runs', async function () 
       false,
       loadConfig({ GCM_LM_STUDIO_URL: activeServer.url.origin }),
     );
-    process.env.GCM_LM_STUDIO_URL = activeServer.url.origin;
-    const factory = factories.find(function (candidate) {
-      return candidate.id === 'lm-studio';
-    });
+    const {
+      url: { origin: activeOrigin },
+    } = activeServer;
+    process.env.GCM_LM_STUDIO_URL = activeOrigin;
+    const factory = factories.find((candidate) => candidate.id === 'lm-studio');
     expect(factory).toBeDefined();
-    if (!factory) throw new Error('LM Studio factory not found');
+    if (factory === undefined) {
+      throw new Error('LM Studio factory not found');
+    }
 
     const provider = await factory.create({ probeOnly: true });
 
     expect(provider.defaultModel).toBe('local-model');
     expect(staleRequests).toBe(0);
   } finally {
-    if (previousUrl === undefined) delete process.env.GCM_LM_STUDIO_URL;
-    else process.env.GCM_LM_STUDIO_URL = previousUrl;
+    if (previousUrl === undefined) {
+      delete process.env.GCM_LM_STUDIO_URL;
+    } else {
+      process.env.GCM_LM_STUDIO_URL = previousUrl;
+    }
     await staleServer.stop(true);
     await activeServer.stop(true);
   }

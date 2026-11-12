@@ -1,7 +1,12 @@
 import type { Config } from '../../gcm.config.js';
 import { BINARY_EXTENSIONS } from '../constants.js';
-import { summarizeDiff, type DiffFileFacts } from '../diff-summary.js';
-import { literalPathspec, spawnGitLines, spawnGitStream } from '../git-utils.js';
+import { type DiffFileFacts, summarizeDiff } from '../diff-summary.js';
+import {
+  type SpawnGitStreamResult,
+  literalPathspec,
+  spawnGitLines,
+  spawnGitStream,
+} from '../git-utils.js';
 
 interface DiffLinesResult {
   lines: string[];
@@ -9,23 +14,40 @@ interface DiffLinesResult {
 }
 
 interface RepositorySummaryOptions {
-  spawnLinesImpl?: (args: string[], options?: Record<string, unknown>) => Promise<DiffLinesResult>;
+  spawnLinesImpl?: (
+    args: string[],
+    options?: Record<string, unknown>,
+  ) => Promise<DiffLinesResult>;
   spawnStreamImpl?: (
     args: string[],
     options?: Record<string, unknown>,
-  ) => Promise<{ text: string; truncated: boolean }>;
+  ) => Promise<SpawnGitStreamResult>;
   targetCommit?: string;
 }
 
+interface ReadFileFactsOptions {
+  file: string;
+  spawnLinesImpl: NonNullable<RepositorySummaryOptions['spawnLinesImpl']>;
+  targetCommit: string | undefined;
+  ignoreWhitespace: boolean;
+  config?: Pick<Config, 'PER_FILE_BUFFER'>;
+}
+
+const MAX_CONCURRENT_GIT_PROCESSES = 8;
 function getBasename(filePath: string): string {
-  return filePath.split(/[\\/]/).pop() ?? '';
+  return filePath.replaceAll('\\', '/').split('/').pop() ?? '';
 }
 
 function isConfigFile(filePath: string): boolean {
   const lowerFilePath = filePath.toLowerCase();
   const baseName = getBasename(lowerFilePath);
-  if (baseName.endsWith('.config.js') || baseName.endsWith('.config.ts')) return true;
-  if (baseName.startsWith('.') && (baseName.endsWith('rc') || baseName.startsWith('.env'))) {
+  if (baseName.endsWith('.config.js') || baseName.endsWith('.config.ts')) {
+    return true;
+  }
+  if (
+    baseName.startsWith('.') &&
+    (baseName.endsWith('rc') || baseName.startsWith('.env'))
+  ) {
     return true;
   }
   return (
@@ -37,7 +59,9 @@ function isConfigFile(filePath: string): boolean {
 }
 
 function isBinaryFile(file: string): boolean {
-  return new RegExp(`\\.(${BINARY_EXTENSIONS.join('|')})$`).test(file.toLowerCase());
+  return new RegExp(`\\.(?:${BINARY_EXTENSIONS.join('|')})$`, 'v').test(
+    file.toLowerCase(),
+  );
 }
 
 function diffArgs(
@@ -49,30 +73,45 @@ function diffArgs(
   const plain = ['--no-color', '--no-ext-diff', '--no-textconv'];
   const w = ignoreWhitespace ? ['-w'] : [];
   return [
-    ...(targetCommit
-      ? ['show', '--first-parent', '--format=', ...w, ...plain, ...options, targetCommit]
-      : ['diff', '--staged', ...w, ...plain, ...options]),
+    ...(targetCommit === undefined
+      ? ['diff', '--staged', ...w, ...plain, ...options]
+      : [
+          'show',
+          '--first-parent',
+          '--format=',
+          ...w,
+          ...plain,
+          ...options,
+          targetCommit,
+        ]),
     '--',
     ...files.map(literalPathspec),
   ];
 }
 
 async function readFileFacts(
-  file: string,
-  spawnLinesImpl: NonNullable<RepositorySummaryOptions['spawnLinesImpl']>,
-  targetCommit: string | undefined,
-  ignoreWhitespace: boolean,
-  config?: Pick<Config, 'PER_FILE_BUFFER'>,
+  options: ReadFileFactsOptions,
 ): Promise<DiffFileFacts> {
-  if (isBinaryFile(file)) return { file, lines: [], skipped: true, truncated: false };
+  const { file, spawnLinesImpl, targetCommit, ignoreWhitespace, config } =
+    options;
+  if (isBinaryFile(file)) {
+    return { file, lines: [], skipped: true, truncated: false };
+  }
   const contextLines = isConfigFile(file) ? 0 : 1;
-  const args = diffArgs(targetCommit, [`-U${contextLines}`], [file], ignoreWhitespace);
+  const args = diffArgs(
+    targetCommit,
+    [`-U${contextLines}`],
+    [file],
+    ignoreWhitespace,
+  );
   const result = await spawnLinesImpl(args, {
     maxBytes: config?.PER_FILE_BUFFER,
     allowTruncated: true,
   });
   const gitDetectedBinary = result.lines.some(
-    line => /^Binary files .* differ\s*$/.test(line) || line.trim() === 'GIT binary patch',
+    (line) =>
+      /^Binary files .* differ\s*$/v.test(line) ||
+      line.trim() === 'GIT binary patch',
   );
   return {
     file,
@@ -84,16 +123,21 @@ async function readFileFacts(
 
 export async function summarizeRepositoryDiff(
   stagedFiles: string[],
-  options: RepositorySummaryOptions | undefined = undefined,
-  config: Pick<Config, 'PER_FILE_BUFFER' | 'MAX_HUNKS' | 'CHILD_PROCESS_MAX_BUFFER'>,
-) {
+  options: RepositorySummaryOptions | undefined,
+  config: Pick<
+    Config,
+    'PER_FILE_BUFFER' | 'MAX_HUNKS' | 'CHILD_PROCESS_MAX_BUFFER'
+  >,
+): Promise<ReturnType<typeof summarizeDiff>> {
   const dependencies = {
     spawnLinesImpl: options?.spawnLinesImpl ?? spawnGitLines,
     spawnStreamImpl: options?.spawnStreamImpl ?? spawnGitStream,
     targetCommit: options?.targetCommit,
   };
-  const readStats = (ignoreWhitespace: boolean) =>
-    dependencies.spawnStreamImpl(
+  const readStats = async (
+    ignoreWhitespace: boolean,
+  ): Promise<SpawnGitStreamResult> =>
+    await dependencies.spawnStreamImpl(
       diffArgs(
         dependencies.targetCommit,
         ['--stat', '--stat-width=80'],
@@ -110,33 +154,30 @@ export async function summarizeRepositoryDiff(
     stats = await readStats(false);
   }
   const files = new Array<DiffFileFacts>(stagedFiles.length);
-  const failures = new Array<{ error: unknown } | undefined>(stagedFiles.length);
-  let nextIndex = 0;
-  let failed = false;
-  // Bound concurrent Git processes to avoid exhausting resources on large repositories.
-  async function readNextFile(): Promise<void> {
-    while (!failed) {
-      const index = nextIndex;
-      nextIndex += 1;
-      const file = stagedFiles[index];
-      if (file === undefined) return;
-      try {
-        files[index] = await readFileFacts(
-          file,
-          dependencies.spawnLinesImpl,
-          dependencies.targetCommit,
-          ignoreWhitespace,
-          config,
-        );
-      } catch (error) {
-        failures[index] = { error };
-        failed = true;
-      }
+  async function readFileBatch(startIndex: number): Promise<void> {
+    const batch = stagedFiles.slice(
+      startIndex,
+      startIndex + MAX_CONCURRENT_GIT_PROCESSES,
+    );
+    if (batch.length === 0) {
+      return;
     }
+    const facts = await Promise.all(
+      batch.map(
+        async (file) =>
+          await readFileFacts({
+            file,
+            spawnLinesImpl: dependencies.spawnLinesImpl,
+            targetCommit: dependencies.targetCommit,
+            ignoreWhitespace,
+            config,
+          }),
+      ),
+    );
+    files.splice(startIndex, facts.length, ...facts);
+    await readFileBatch(startIndex + facts.length);
   }
-  await Promise.all(Array.from({ length: Math.min(8, stagedFiles.length) }, () => readNextFile()));
-  const firstFailure = failures.find(Boolean);
-  if (firstFailure) throw firstFailure.error;
+  await readFileBatch(0);
   const statsText = stats.truncated
     ? `${stats.text}\n... (file statistics truncated by output limit) ...`
     : stats.text;

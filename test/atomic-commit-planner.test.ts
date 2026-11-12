@@ -1,8 +1,13 @@
-import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildAtomicSplitProposal, detectAtomicGroup } from '../src/atomic-commit-planner.js';
+
+import { expect, test } from 'bun:test';
+
+import {
+  buildAtomicSplitProposal,
+  detectAtomicGroup,
+} from '../src/atomic-commit-planner.js';
 
 async function runGit(repository: string, args: string[]): Promise<string> {
   const child = Bun.spawn({
@@ -16,7 +21,9 @@ async function runGit(repository: string, args: string[]): Promise<string> {
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
   ]);
-  if (exitCode !== 0) throw new Error(stderr);
+  if (exitCode !== 0) {
+    throw new Error(stderr);
+  }
   return stdout;
 }
 
@@ -46,7 +53,9 @@ test('atomic commit planner: classifies paths in rule precedence order', () => {
     ['LICENSE', 'core'],
   ];
 
-  for (const [file, group] of cases) expect(detectAtomicGroup(file)).toBe(group);
+  for (const [file, group] of cases) {
+    expect(detectAtomicGroup(file)).toBe(group);
+  }
 });
 
 test('atomic commit planner: groups matching files and orders groups deterministically', () => {
@@ -64,7 +73,9 @@ test('atomic commit planner: groups matching files and orders groups determinist
   expect(proposal).toContain('Commit 1: deps');
   expect(proposal).toContain('Commit 2: src');
   expect(proposal).toContain('Commit 3: docs-formatting');
-  expect(proposal).toContain('- src/runner.ts\n- src/services/api.ts\n- src/services/auth.ts');
+  expect(proposal).toContain(
+    '- src/runner.ts\n- src/services/api.ts\n- src/services/auth.ts',
+  );
 });
 
 test('atomic commit planner: renders a complete deterministic proposal', () => {
@@ -76,7 +87,8 @@ test('atomic commit planner: renders a complete deterministic proposal', () => {
     'src/services/auth.ts',
   ]);
 
-  expect(proposal).toBe(`Found 5 changed file(s) in the worktree, proposed 3 atomic group(s).
+  expect(proposal)
+    .toBe(`Found 5 changed file(s) in the worktree, proposed 3 atomic group(s).
 
 Rules applied: lockfiles grouped with dependency manifests; docs/formatting split from functional changes.
 
@@ -134,7 +146,9 @@ test('atomic commit planner: classifies alternate dependency, documentation, and
     ['docs/scope-detector.ts', 'docs'],
   ];
 
-  for (const [file, group] of cases) expect(detectAtomicGroup(file)).toBe(group);
+  for (const [file, group] of cases) {
+    expect(detectAtomicGroup(file)).toBe(group);
+  }
 });
 
 test('atomic commit planner: uses multi-file commit wording', () => {
@@ -144,7 +158,9 @@ test('atomic commit planner: uses multi-file commit wording', () => {
     'src/services/auth.ts',
   ]);
 
-  expect(proposal).toContain("git commit -m $'refactor(src): split changes updates'");
+  expect(proposal).toContain(
+    "git commit -m $'refactor(src): split changes updates'",
+  );
   expect(proposal).toContain("-m $'- group src changes into one atomic unit'");
 });
 
@@ -162,7 +178,9 @@ test('atomic commit planner: safely quotes shell paths', () => {
 });
 
 test('atomic commit planner: renders control characters in filenames without terminal escapes', () => {
-  const proposal = buildAtomicSplitProposal(['src/\u001B]8;;https://example.test\u0007unsafe.ts']);
+  const proposal = buildAtomicSplitProposal([
+    'src/\u001B]8;;https://example.test\u0007unsafe.ts',
+  ]);
 
   expect(proposal).not.toContain('\u001B');
   expect(proposal).not.toContain('\u0007');
@@ -215,8 +233,10 @@ git reset`);
 test('atomic commit planner: a later group stages only its own files', async () => {
   const repository = await mkdtemp(join(tmpdir(), 'gcm-atomic-plan-'));
   const proposal = buildAtomicSplitProposal(['src/one.ts', 'test/two.test.ts']);
-  const laterGroup = proposal.split('Commit 2: tests\n')[1]?.split('\ngit commit')[0];
-  const laterCommands = laterGroup?.split('Suggested commands:\n')[1];
+  const laterGroup = proposal
+    .split('Commit 2: tests\n')[1]
+    ?.split('\ngit commit')[0];
+  const [, laterCommands] = laterGroup.split('Suggested commands:\n');
 
   try {
     await mkdir(join(repository, 'src'));
@@ -226,12 +246,20 @@ test('atomic commit planner: a later group stages only its own files', async () 
     await runGit(repository, ['init', '-q']);
     await runGit(repository, ['add', '--', 'src/one.ts']);
 
-    if (laterCommands === undefined) throw new Error('Missing later group commands');
     expect(laterCommands).toBe(`git reset
 git add -- ':(top,literal)test/two.test.ts'`);
-    const child = Bun.spawn({ cmd: ['sh', '-c', laterCommands], cwd: repository, stderr: 'pipe' });
-    const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    if (exitCode !== 0) throw new Error(stderr);
+    const child = Bun.spawn({
+      cmd: ['sh', '-c', laterCommands],
+      cwd: repository,
+      stderr: 'pipe',
+    });
+    const [exitCode, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stderr).text(),
+    ]);
+    if (exitCode !== 0) {
+      throw new Error(stderr);
+    }
 
     expect(await runGit(repository, ['diff', '--cached', '--name-only'])).toBe(
       'test/two.test.ts\n',

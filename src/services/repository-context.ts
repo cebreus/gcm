@@ -1,10 +1,12 @@
 import { fileExists, literalPathspec, spawnGitStream } from '../git-utils.js';
 import type { CommitContextFacts } from '../scope-detector.js';
 
-type RepositoryContextDependencies = {
+const RECENT_SUBJECT_LIMIT = 20;
+
+interface RepositoryContextDependencies {
   runGit: typeof spawnGitStream;
-  fileExists(path: string): Promise<boolean>;
-};
+  fileExists: (path: string) => Promise<boolean>;
+}
 
 async function readHistory(
   dependencies: RepositoryContextDependencies,
@@ -12,9 +14,11 @@ async function readHistory(
 ): Promise<string[] | null> {
   try {
     const result = await dependencies.runGit(args);
-    if (result.truncated) throw new Error('Git history output was truncated');
-    const text = result.text;
-    return text ? text.split('\n') : [];
+    if (result.truncated) {
+      throw new Error('Git history output was truncated');
+    }
+    const { text } = result;
+    return text === '' ? [] : text.split('\n');
   } catch {
     return null;
   }
@@ -27,8 +31,9 @@ export async function readCommitContextFacts(
     fileExists,
   },
 ): Promise<CommitContextFacts> {
-  if (changedFiles.length === 0)
+  if (changedFiles.length === 0) {
     return { scopeHistorySubjects: [], recentSubjects: [], repoType: 'single' };
+  }
   const historyPromise = readHistory(dependencies, [
     'log',
     '-n',
@@ -36,22 +41,28 @@ export async function readCommitContextFacts(
     '--pretty=format:%s',
     '--',
     ...changedFiles.map(literalPathspec),
-  ]).then(history => {
+  ]).then((history) => {
     if (history !== null) {
-      return { scopeHistorySubjects: history, recentSubjects: history.slice(0, 20) };
+      return {
+        scopeHistorySubjects: history,
+        recentSubjects: history.slice(0, RECENT_SUBJECT_LIMIT),
+      };
     }
     return { scopeHistorySubjects: [], recentSubjects: [] };
   });
-  const [history, hasLerna, hasPnpmWorkspace, hasPackagesDir, hasAppsDir] = await Promise.all([
-    historyPromise,
-    dependencies.fileExists('lerna.json'),
-    dependencies.fileExists('pnpm-workspace.yaml'),
-    dependencies.fileExists('packages'),
-    dependencies.fileExists('apps'),
-  ]);
+  const [history, hasLerna, hasPnpmWorkspace, hasPackagesDir, hasAppsDir] =
+    await Promise.all([
+      historyPromise,
+      dependencies.fileExists('lerna.json'),
+      dependencies.fileExists('pnpm-workspace.yaml'),
+      dependencies.fileExists('packages'),
+      dependencies.fileExists('apps'),
+    ]);
   return {
     ...history,
     repoType:
-      hasLerna || hasPnpmWorkspace || (hasPackagesDir && hasAppsDir) ? 'monorepo' : 'single',
+      hasLerna || hasPnpmWorkspace || (hasPackagesDir && hasAppsDir)
+        ? 'monorepo'
+        : 'single',
   };
 }

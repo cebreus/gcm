@@ -1,7 +1,9 @@
-import { test, expect } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { expect, test } from 'bun:test';
+
 import { parseArgs } from '../src/cli';
 import { createCommitActionService } from '../src/commit-action-service';
 import { spawnGitStream } from '../src/git-utils';
@@ -9,10 +11,13 @@ import { createGitService } from '../src/services/git-service';
 import { shouldExcludeFile } from '../src/utils';
 
 function filterExcludedFiles(files: string[], patterns: string[]): string[] {
-  return files.filter(file => !shouldExcludeFile(file, patterns));
+  return files.filter((file) => !shouldExcludeFile(file, patterns));
 }
 
-async function runGitInRepository(repository: string, args: string[]): Promise<string> {
+async function runGitInRepository(
+  repository: string,
+  args: string[],
+): Promise<string> {
   const child = Bun.spawn({
     cmd: ['git', ...args],
     cwd: repository,
@@ -24,7 +29,9 @@ async function runGitInRepository(repository: string, args: string[]): Promise<s
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
   ]);
-  if (exitCode !== 0) throw new Error(stderr);
+  if (exitCode !== 0) {
+    throw new Error(stderr);
+  }
   return stdout;
 }
 
@@ -52,7 +59,12 @@ test('exclude-files: should support short flag -e', () => {
   const parsedArgs = parseArgs(['-e', '*test*']);
   expect(parsedArgs.exclude).toEqual(['*test*']);
 
-  const files = ['src/app.ts', 'src/app.test.ts', 'src/test-utils.ts', 'src/utils.ts'];
+  const files = [
+    'src/app.ts',
+    'src/app.test.ts',
+    'src/test-utils.ts',
+    'src/utils.ts',
+  ];
 
   const filteredFiles = filterExcludedFiles(files, parsedArgs.exclude);
   expect(filteredFiles).toEqual(['src/app.ts', 'src/utils.ts']);
@@ -84,7 +96,10 @@ test('exclude-files: should handle multiple exclude flags with different pattern
 });
 
 test('exclude-files: real-world scenario - excluding build and manifest files', () => {
-  const parsedArgs = parseArgs(['--exclude', 'dist/*,build/*,*manifest*,*lock*']);
+  const parsedArgs = parseArgs([
+    '--exclude',
+    'dist/*,build/*,*manifest*,*lock*',
+  ]);
 
   const files = [
     'src/index.ts',
@@ -101,13 +116,17 @@ test('exclude-files: real-world scenario - excluding build and manifest files', 
   ];
 
   const filteredFiles = filterExcludedFiles(files, parsedArgs.exclude);
-  expect(filteredFiles).toEqual(['src/index.ts', 'src/utils.ts', 'package.json']);
+  expect(filteredFiles).toEqual([
+    'src/index.ts',
+    'src/utils.ts',
+    'package.json',
+  ]);
 });
 
 test('exclude-files: excludes root and nested dist from staged and commit analysis by default', async () => {
   const calls: string[][] = [];
   const service = createGitService({
-    gitCommandRunner: async args => {
+    gitCommandRunner: async (args) => {
       calls.push(args);
       if (args.includes('--name-status')) {
         return {
@@ -115,7 +134,9 @@ test('exclude-files: excludes root and nested dist from staged and commit analys
           truncated: false,
         };
       }
-      if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
+      if (args[0] === 'write-tree') {
+        return { text: 'tree\n', truncated: false };
+      }
       if (args[0] === 'ls-files') {
         return {
           text: '100644 1111111111111111111111111111111111111111 0\tsrc/app.ts\0',
@@ -171,41 +192,57 @@ test('exclude-files: secret-bearing files never reach the diff request by defaul
     'tls.key',
   ];
   const calls: string[][] = [];
-  const makeService = (paths: string[]) =>
+  const makeService = (paths: string[]): ReturnType<typeof createGitService> =>
     createGitService({
-      gitCommandRunner: async args => {
+      gitCommandRunner: async (args) => {
         calls.push(args);
         if (args.includes('--name-status')) {
-          return { text: paths.map(path => `M\0${path}\0`).join(''), truncated: false };
+          return {
+            text: paths.map((path) => `M\0${path}\0`).join(''),
+            truncated: false,
+          };
         }
         return { text: 'diff', truncated: false };
       },
     });
 
-  const staged = await makeService(['src/app.ts', ...secretPaths]).retrieveStagedChanges(
+  const staged = await makeService([
+    'src/app.ts',
+    ...secretPaths,
+  ]).retrieveStagedChanges(null, null);
+  expect(staged?.stagedFiles).toEqual(['src/app.ts']);
+  expect(
+    calls.flat().some((arg) => arg.includes('env') || arg.includes('pem')),
+  ).toBe(false);
+
+  // Only secret files staged: empty snapshot that still reports them (not "nothing staged").
+  const onlySecret = await makeService(['.env']).retrieveStagedChanges(
     null,
     null,
   );
-  expect(staged?.stagedFiles).toEqual(['src/app.ts']);
-  expect(calls.flat().some(arg => arg.includes('env') || arg.includes('pem'))).toBe(false);
-
-  // Only secret files staged: empty snapshot that still reports them (not "nothing staged").
-  const onlySecret = await makeService(['.env']).retrieveStagedChanges(null, null);
   expect(onlySecret?.stagedFiles).toEqual([]);
   expect(onlySecret?.excludedPaths).toEqual(['.env']);
   // Glob syntax has no negation, so `.env.example` is excluded as well.
-  const example = await makeService(['.env.example']).retrieveStagedChanges(null, null);
+  const example = await makeService(['.env.example']).retrieveStagedChanges(
+    null,
+    null,
+  );
   expect(example?.excludedPaths).toEqual(['.env.example']);
   // Silent default excludes alone keep the "nothing to analyse" null.
-  expect(await makeService(['dist/a.js']).retrieveStagedChanges(null, null)).toBeNull();
+  expect(
+    await makeService(['dist/a.js']).retrieveStagedChanges(null, null),
+  ).toBeNull();
 });
 
-test('exclude-files: project excludes omit analysis without reporting excluded paths', async function () {
+test('exclude-files: project excludes omit analysis without reporting excluded paths', async () => {
   const repository = await mkdtemp(join(tmpdir(), 'gcm-project-exclude-'));
   try {
     await runGitInRepository(repository, ['init']);
     await writeFile(join(repository, 'keep.ts'), 'export const keep = true;\n');
-    await writeFile(join(repository, 'generated.ts'), 'export const generated = true;\n');
+    await writeFile(
+      join(repository, 'generated.ts'),
+      'export const generated = true;\n',
+    );
     await runGitInRepository(repository, ['add', '.']);
     const previousCwd = process.cwd();
     process.chdir(repository);
@@ -230,10 +267,12 @@ test('exclude-files: project excludes omit analysis without reporting excluded p
 test('exclude-files: diff requests only include non-excluded paths', async () => {
   const calls: string[][] = [];
   const service = createGitService({
-    gitCommandRunner: async args => {
+    gitCommandRunner: async (args) => {
       calls.push(args);
       return {
-        text: args.includes('--name-status') ? 'M\0src/app.ts\0M\0.env.local\0' : 'diff',
+        text: args.includes('--name-status')
+          ? 'M\0src/app.ts\0M\0.env.local\0'
+          : 'diff',
         truncated: false,
       };
     },
@@ -256,35 +295,51 @@ test('exclude-files: diff requests only include non-excluded paths', async () =>
 
 test('exclude-files: carries excluded staged paths alongside the analysed snapshot', async () => {
   const service = createGitService({
-    gitCommandRunner: async args => {
-      if (args.includes('--name-status'))
+    gitCommandRunner: async (args) => {
+      if (args.includes('--name-status')) {
         return { text: 'M\0src/app.ts\0M\0secrets.txt\0', truncated: false };
-      if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
-      if (args[0] === 'ls-files')
+      }
+      if (args[0] === 'write-tree') {
+        return { text: 'tree\n', truncated: false };
+      }
+      if (args[0] === 'ls-files') {
         return {
           text: '100644 1111111111111111111111111111111111111111 0\tsrc/app.ts\0',
           truncated: false,
         };
+      }
       return { text: 'diff', truncated: false };
     },
   });
 
-  const staged = await service.retrieveStagedChanges(null, null, ['secrets.txt']);
+  const staged = await service.retrieveStagedChanges(null, null, [
+    'secrets.txt',
+  ]);
 
   expect(staged?.excludedPaths).toEqual(['secrets.txt']);
 });
 
 test('exclude-files: reports project excludes separately from CLI excludes', async () => {
   const service = createGitService({
-    gitCommandRunner: async args => {
-      if (args.includes('--name-status'))
+    gitCommandRunner: async (args) => {
+      if (args.includes('--name-status')) {
         return { text: 'M\0src/app.ts\0M\0generated.txt\0', truncated: false };
-      if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
-      if (args[0] === 'ls-files') return { text: '', truncated: false };
+      }
+      if (args[0] === 'write-tree') {
+        return { text: 'tree\n', truncated: false };
+      }
+      if (args[0] === 'ls-files') {
+        return { text: '', truncated: false };
+      }
       return { text: 'diff', truncated: false };
     },
   });
-  const staged = await service.retrieveStagedChanges(null, null, [], ['generated.txt']);
+  const staged = await service.retrieveStagedChanges(
+    null,
+    null,
+    [],
+    ['generated.txt'],
+  );
   expect(staged?.projectExcludesMatched).toBe(true);
   expect(staged?.excludedPaths).toEqual([]);
 });
@@ -293,28 +348,44 @@ test('exclude-files: parses NUL-separated file-list fixtures as real paths', asy
   const nulPath = ' leading space.txt';
   const quotedNulPath = '"quoted name"';
   const service = createGitService({
-    gitCommandRunner: async args => {
+    gitCommandRunner: async (args) => {
       if (args.includes('--name-status')) {
-        return { text: `M\0${nulPath}\0M\0${quotedNulPath}\0M\0source.ts\0`, truncated: false };
+        return {
+          text: `M\0${nulPath}\0M\0${quotedNulPath}\0M\0source.ts\0`,
+          truncated: false,
+        };
       }
-      if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
-      if (args[0] === 'ls-files') return { text: '', truncated: false };
+      if (args[0] === 'write-tree') {
+        return { text: 'tree\n', truncated: false };
+      }
+      if (args[0] === 'ls-files') {
+        return { text: '', truncated: false };
+      }
       return { text: 'diff', truncated: false };
     },
   });
 
-  const nul = await service.retrieveStagedChanges(null, null, [nulPath, quotedNulPath]);
+  const nul = await service.retrieveStagedChanges(null, null, [
+    nulPath,
+    quotedNulPath,
+  ]);
   expect(nul?.stagedFiles).toEqual(['source.ts']);
 });
 
 test('exclude-files: refuses a truncated staged file list', async () => {
   const calls: string[][] = [];
   const service = createGitService({
-    gitCommandRunner: async args => {
+    gitCommandRunner: async (args) => {
       calls.push(args);
-      if (args.includes('--name-status')) return { text: 'M\0source.ts\0', truncated: true };
-      if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
-      if (args[0] === 'ls-files') return { text: '', truncated: false };
+      if (args.includes('--name-status')) {
+        return { text: 'M\0source.ts\0', truncated: true };
+      }
+      if (args[0] === 'write-tree') {
+        return { text: 'tree\n', truncated: false };
+      }
+      if (args[0] === 'ls-files') {
+        return { text: '', truncated: false };
+      }
       return { text: 'diff', truncated: false };
     },
   });
@@ -322,15 +393,21 @@ test('exclude-files: refuses a truncated staged file list', async () => {
   await expect(service.retrieveStagedChanges(null, null)).rejects.toThrow(
     'File list output was truncated. Reduce the change set, then try again.',
   );
-  expect(calls).toEqual([['diff', '--staged', '--name-status', '-z', '--find-renames']]);
+  expect(calls).toEqual([
+    ['diff', '--staged', '--name-status', '-z', '--find-renames'],
+  ]);
 });
 
 test('exclude-files: keeps a truncated staged diff as a warning', async () => {
   const logs: string[] = [];
   const service = createGitService({
-    gitCommandRunner: async args => {
-      if (args.includes('--name-status')) return { text: 'M\0source.ts\0', truncated: false };
-      if (args[0] === 'write-tree') return { text: 'tree\n', truncated: false };
+    gitCommandRunner: async (args) => {
+      if (args.includes('--name-status')) {
+        return { text: 'M\0source.ts\0', truncated: false };
+      }
+      if (args[0] === 'write-tree') {
+        return { text: 'tree\n', truncated: false };
+      }
       if (args[0] === 'ls-files') {
         return {
           text: '100644 1111111111111111111111111111111111111111 0\tsource.ts\0',
@@ -358,25 +435,45 @@ test('exclude-files: real GitService excludes Unicode paths and keeps newline pa
   try {
     await runGitInRepository(repository, ['init', '-q']);
     await mkdir(join(repository, 'src'));
-    await runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
+    await runGitInRepository(repository, [
+      'config',
+      'user.email',
+      'test@gcm.local',
+    ]);
     await runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
     await writeFile(join(repository, excludedPath), 'secret\n');
     await writeFile(join(repository, includedPath), 'included\n');
-    await runGitInRepository(repository, ['add', '--', excludedPath, includedPath]);
+    await runGitInRepository(repository, [
+      'add',
+      '--',
+      excludedPath,
+      includedPath,
+    ]);
 
     const service = createGitService({
-      gitCommandRunner: args => spawnGitStream(['-C', join(repository, 'src'), ...args]),
+      gitCommandRunner: async (args) =>
+        await spawnGitStream(['-C', join(repository, 'src'), ...args]),
     });
-    const staged = await service.retrieveStagedChanges(null, null, [excludedPath]);
+    const staged = await service.retrieveStagedChanges(null, null, [
+      excludedPath,
+    ]);
 
     expect(staged?.stagedFiles).toEqual([includedPath]);
     expect(staged?.excludedPaths).toEqual([excludedPath]);
     expect(staged?.stagedDiff).toContain('included');
     expect(staged?.stagedDiff).not.toContain('secret');
 
-    await runGitInRepository(repository, ['commit', '-qm', 'Add special paths']);
-    const hash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
-    const committed = await service.retrieveStagedChanges(hash, null, [excludedPath]);
+    await runGitInRepository(repository, [
+      'commit',
+      '-qm',
+      'Add special paths',
+    ]);
+    const hash = (
+      await runGitInRepository(repository, ['rev-parse', 'HEAD'])
+    ).trim();
+    const committed = await service.retrieveStagedChanges(hash, null, [
+      excludedPath,
+    ]);
     expect(committed?.stagedFiles).toEqual([includedPath]);
     expect(committed?.excludedPaths).toEqual([excludedPath]);
     expect(committed?.stagedDiff).toContain('included');
@@ -402,7 +499,8 @@ test('exclude-files: real GitService treats staged filenames as literal pathspec
     ]);
 
     const service = createGitService({
-      gitCommandRunner: args => spawnGitStream(['-C', repository, ...args]),
+      gitCommandRunner: async (args) =>
+        await spawnGitStream(['-C', repository, ...args]),
     });
     const staged = await service.retrieveStagedChanges(null, null);
 
@@ -420,12 +518,18 @@ test('exclude-files: real GitService reads root, ordinary, merge, octopus, and r
   const renamedPath = 'přejmenováno.txt';
   try {
     await runGitInRepository(repository, ['init', '-q', '-b', 'main']);
-    await runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
+    await runGitInRepository(repository, [
+      'config',
+      'user.email',
+      'test@gcm.local',
+    ]);
     await runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
     await writeFile(join(repository, rootPath), 'root\n');
     await runGitInRepository(repository, ['add', rootPath]);
     await runGitInRepository(repository, ['commit', '-qm', 'root']);
-    const rootHash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
+    const rootHash = (
+      await runGitInRepository(repository, ['rev-parse', 'HEAD'])
+    ).trim();
 
     await runGitInRepository(repository, ['checkout', '-qb', 'feature']);
     await writeFile(join(repository, 'feature.txt'), 'feature\n');
@@ -435,9 +539,19 @@ test('exclude-files: real GitService reads root, ordinary, merge, octopus, and r
     await writeFile(join(repository, 'main.txt'), 'main\n');
     await runGitInRepository(repository, ['add', 'main.txt']);
     await runGitInRepository(repository, ['commit', '-qm', 'ordinary']);
-    const ordinaryHash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
-    await runGitInRepository(repository, ['merge', '--no-ff', 'feature', '-m', 'merge']);
-    const mergeHash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
+    const ordinaryHash = (
+      await runGitInRepository(repository, ['rev-parse', 'HEAD'])
+    ).trim();
+    await runGitInRepository(repository, [
+      'merge',
+      '--no-ff',
+      'feature',
+      '-m',
+      'merge',
+    ]);
+    const mergeHash = (
+      await runGitInRepository(repository, ['rev-parse', 'HEAD'])
+    ).trim();
 
     await runGitInRepository(repository, ['checkout', '-qb', 'octopus-a']);
     await writeFile(join(repository, 'a.txt'), 'a\n');
@@ -457,21 +571,38 @@ test('exclude-files: real GitService reads root, ordinary, merge, octopus, and r
       '-m',
       'octopus',
     ]);
-    const octopusHash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
+    const octopusHash = (
+      await runGitInRepository(repository, ['rev-parse', 'HEAD'])
+    ).trim();
 
     await runGitInRepository(repository, ['mv', rootPath, renamedPath]);
     await runGitInRepository(repository, ['commit', '-qm', 'rename']);
-    const renameHash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
+    const renameHash = (
+      await runGitInRepository(repository, ['rev-parse', 'HEAD'])
+    ).trim();
     const service = createGitService({
-      gitCommandRunner: args => spawnGitStream(['-C', repository, ...args]),
+      gitCommandRunner: async (args) =>
+        await spawnGitStream(['-C', repository, ...args]),
     });
 
     const rootResult = await service.retrieveStagedChanges(rootHash, null);
-    const ordinaryResult = await service.retrieveStagedChanges(ordinaryHash, null);
+    const ordinaryResult = await service.retrieveStagedChanges(
+      ordinaryHash,
+      null,
+    );
     const mergeResult = await service.retrieveStagedChanges(mergeHash, null);
-    const octopusResult = await service.retrieveStagedChanges(octopusHash, null);
+    const octopusResult = await service.retrieveStagedChanges(
+      octopusHash,
+      null,
+    );
     const renameResult = await service.retrieveStagedChanges(renameHash, null);
-    if (!rootResult || !ordinaryResult || !mergeResult || !octopusResult || !renameResult) {
+    if (
+      rootResult === null ||
+      ordinaryResult === null ||
+      mergeResult === null ||
+      octopusResult === null ||
+      renameResult === null
+    ) {
       throw new Error('Expected commit diffs');
     }
     expect(rootResult.stagedFiles).toEqual([rootPath]);
@@ -493,23 +624,37 @@ test('exclude-files: real GitService hides excluded staged and commit diff conte
   const repository = await mkdtemp(join(tmpdir(), 'gcm-exclude-files-'));
   try {
     await runGitInRepository(repository, ['init', '-q']);
-    await runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
+    await runGitInRepository(repository, [
+      'config',
+      'user.email',
+      'test@gcm.local',
+    ]);
     await runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
     await writeFile(join(repository, 'source.ts'), 'export const value = 1;\n');
-    await writeFile(join(repository, 'secrets.txt'), 'hunter2_should_never_leak\n');
+    await writeFile(
+      join(repository, 'secrets.txt'),
+      'hunter2_should_never_leak\n',
+    );
     await runGitInRepository(repository, ['add', 'source.ts', 'secrets.txt']);
 
     const service = createGitService({
-      gitCommandRunner: args => spawnGitStream(['-C', repository, ...args]),
+      gitCommandRunner: async (args) =>
+        await spawnGitStream(['-C', repository, ...args]),
     });
 
-    const staged = await service.retrieveStagedChanges(null, null, ['secrets.txt']);
+    const staged = await service.retrieveStagedChanges(null, null, [
+      'secrets.txt',
+    ]);
     expect(staged?.stagedFiles).toEqual(['source.ts']);
     expect(staged?.stagedDiff).not.toContain('hunter2_should_never_leak');
 
     await runGitInRepository(repository, ['commit', '-qm', 'Add staged files']);
-    const hash = (await runGitInRepository(repository, ['rev-parse', 'HEAD'])).trim();
-    const committed = await service.retrieveStagedChanges(hash, null, ['secrets.txt']);
+    const hash = (
+      await runGitInRepository(repository, ['rev-parse', 'HEAD'])
+    ).trim();
+    const committed = await service.retrieveStagedChanges(hash, null, [
+      'secrets.txt',
+    ]);
     expect(committed?.stagedFiles).toEqual(['source.ts']);
     expect(committed?.stagedDiff).not.toContain('hunter2_should_never_leak');
   } finally {
@@ -521,35 +666,58 @@ test('exclude-files: a real commit includes excluded paths only after acknowledg
   const repository = await mkdtemp(join(tmpdir(), 'gcm-exclude-commit-'));
   try {
     await runGitInRepository(repository, ['init', '-q']);
-    await runGitInRepository(repository, ['config', 'user.email', 'test@gcm.local']);
+    await runGitInRepository(repository, [
+      'config',
+      'user.email',
+      'test@gcm.local',
+    ]);
     await runGitInRepository(repository, ['config', 'user.name', 'GCM Test']);
     await writeFile(join(repository, 'base.ts'), 'export const base = true;\n');
     await runGitInRepository(repository, ['add', 'base.ts']);
     await runGitInRepository(repository, ['commit', '-qm', 'chore: base']);
     await writeFile(join(repository, 'source.ts'), 'export const value = 1;\n');
-    await writeFile(join(repository, 'secrets.txt'), 'hunter2_should_still_commit\n');
+    await writeFile(
+      join(repository, 'secrets.txt'),
+      'hunter2_should_still_commit\n',
+    );
     await runGitInRepository(repository, ['add', 'source.ts', 'secrets.txt']);
 
     const gitService = createGitService({
-      gitCommandRunner: args => spawnGitStream(['-C', repository, ...args]),
+      gitCommandRunner: async (args) =>
+        await spawnGitStream(['-C', repository, ...args]),
     });
-    const actions = createCommitActionService({ gitService, logger: { log: function () {} } });
-    const staged = await gitService.retrieveStagedChanges(null, null, ['secrets.txt']);
-    if (!staged?.snapshot) throw new Error('Expected staged snapshot');
+    const actions = createCommitActionService({
+      gitService,
+      logger: { log: function () {} },
+    });
+    const staged = await gitService.retrieveStagedChanges(null, null, [
+      'secrets.txt',
+    ]);
+    if (staged?.snapshot === undefined) {
+      throw new Error('Expected staged snapshot');
+    }
     const inspection = await actions.inspect(null, staged.snapshot);
-    const capability = { ...inspection.capability, excludedPaths: staged.excludedPaths };
+    const capability = {
+      ...inspection.capability,
+      excludedPaths: staged.excludedPaths,
+    };
 
     await expect(actions.apply(capability, 'feat: add source')).rejects.toThrow(
       'Explicit confirmation is required before committing excluded staged paths',
     );
-    expect((await runGitInRepository(repository, ['rev-list', '--count', 'HEAD'])).trim()).toBe(
-      '1',
-    );
+    expect(
+      (
+        await runGitInRepository(repository, ['rev-list', '--count', 'HEAD'])
+      ).trim(),
+    ).toBe('1');
 
-    await actions.apply({ ...capability, exclusionsAcknowledged: true }, 'feat: add source');
-    expect(await runGitInRepository(repository, ['show', 'HEAD:secrets.txt'])).toBe(
-      'hunter2_should_still_commit\n',
+    await actions.apply(
+      { ...capability, exclusionsAcknowledged: true },
+      'feat: add source',
     );
+    expect(
+      await runGitInRepository(repository, ['show', 'HEAD:secrets.txt']),
+    ).toBe('hunter2_should_still_commit\n');
   } finally {
     await rm(repository, { recursive: true, force: true });
   }
@@ -563,14 +731,17 @@ test('exclude-files: staged default secret files are reported, dist stays silent
     await mkdir(join(repository, 'dist'));
     await writeFile(join(repository, 'src/a.ts'), 'export const a = 1;\n');
     await writeFile(join(repository, '.env'), 'TOKEN=hunter2_secret\n');
-    await writeFile(join(repository, '.npmrc'), '//registry/:_authToken=npm_secret\n');
+    await writeFile(
+      join(repository, '.npmrc'),
+      '//registry/:_authToken=npm_secret\n',
+    );
     await writeFile(join(repository, 'dist/x.js'), 'dist_content\n');
     await runGitInRepository(repository, ['add', '-A']);
     const requests: string[][] = [];
     const gitService = createGitService({
-      gitCommandRunner: args => {
+      gitCommandRunner: async (args) => {
         requests.push(args);
-        return spawnGitStream(['-C', repository, ...args]);
+        return await spawnGitStream(['-C', repository, ...args]);
       },
     });
     const staged = await gitService.retrieveStagedChanges(null, null);
@@ -578,7 +749,9 @@ test('exclude-files: staged default secret files are reported, dist stays silent
     expect(staged?.excludedPaths?.sort()).toEqual(['.env', '.npmrc']);
     expect(staged?.stagedDiff).not.toContain('hunter2_secret');
     expect(staged?.stagedDiff).not.toContain('npm_secret');
-    expect(requests.some(args => args.includes('.env') && args.includes('diff'))).toBe(false);
+    expect(
+      requests.some((args) => args.includes('.env') && args.includes('diff')),
+    ).toBe(false);
   } finally {
     await rm(repository, { recursive: true, force: true });
   }

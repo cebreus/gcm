@@ -1,14 +1,17 @@
-import { test, expect, mock, afterAll, beforeAll, beforeEach } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, expect, mock, test } from 'bun:test';
+
 import { createLogger } from '../src/logger';
 
-const originalStdoutWrite = process.stdout.write;
-const originalStderrWrite = process.stderr.write;
+const {
+  stdout: { write: originalStdoutWrite },
+  stderr: { write: originalStderrWrite },
+} = process;
 const stdoutWriteMock = mock((_text: string) => true);
 const stderrWriteMock = mock((_text: string) => true);
 
 beforeAll(() => {
-  process.stdout.write = stdoutWriteMock as unknown as typeof process.stdout.write;
-  process.stderr.write = stderrWriteMock as unknown as typeof process.stderr.write;
+  process.stdout.write = stdoutWriteMock;
+  process.stderr.write = stderrWriteMock;
 });
 
 afterAll(() => {
@@ -29,7 +32,7 @@ test('logger: redacts secrets in console output', () => {
     password: 'plain-password',
   });
 
-  const output = stderrWriteMock.mock.calls.map(call => String(call[0])).join('');
+  const output = stderrWriteMock.mock.calls.map((call) => call[0]).join('');
   expect(output).toContain('[REDACTED-KEY]');
   expect(output).not.toContain('sk-abcdef1234567890');
   expect(output).not.toContain('plain-api-credential');
@@ -40,7 +43,7 @@ test('logger: redacts secrets in log messages', () => {
   const logger = createLogger({ LOG_LEVEL: 'info' });
   logger.log('info', 'Model output: sk-abcdef1234567890');
 
-  const output = stderrWriteMock.mock.calls.map(call => String(call[0])).join('');
+  const output = stderrWriteMock.mock.calls.map((call) => call[0]).join('');
   expect(output).toContain('[REDACTED-KEY]');
   expect(output).not.toContain('sk-abcdef1234567890');
 });
@@ -51,12 +54,12 @@ test('logger: redacts current GitHub and Google keys in messages', () => {
   const googleKey = 'AQ.ZzTestOnly_cDeFgHiJkLmNoPqRsTuVwXyZ1234';
   const logger = createLogger({ LOG_LEVEL: 'info' });
 
-  logger.log('info', 'GitHub key: ' + githubKey + ' is invalid.');
+  logger.log('info', `GitHub key: ${githubKey} is invalid.`);
   logger.log('info', JSON.stringify({ provider: 'google', key: googleKey }));
-  logger.log('info', 'Google key at end: ' + googleKey);
+  logger.log('info', `Google key at end: ${googleKey}`);
 
-  const output = stderrWriteMock.mock.calls.map(call => String(call[0])).join('');
-  expect(output.match(/\[REDACTED-KEY\]/g)).toHaveLength(3);
+  const output = stderrWriteMock.mock.calls.map((call) => call[0]).join('');
+  expect(output.match(/\[REDACTED-KEY\]/gv)).toHaveLength(3);
   expect(output).not.toContain(githubKey);
   expect(output).not.toContain(googleKey);
 });
@@ -70,7 +73,7 @@ test('logger: sanitises terminal controls and nested metadata secrets', () => {
     error: { message: `request failed with ${secret}\x1B[31m` },
   });
 
-  const output = stderrWriteMock.mock.calls.map(call => String(call[0])).join('');
+  const output = stderrWriteMock.mock.calls.map((call) => call[0]).join('');
   expect(output).toContain('model output');
   expect(output).toContain('[REDACTED-KEY]');
   expect(output).not.toContain(secret);
@@ -85,7 +88,7 @@ test('logger: preserves arrays while redacting their values', () => {
     values: ['safe', { token: 'private' }],
   });
 
-  const output = stderrWriteMock.mock.calls.map(call => String(call[0])).join('');
+  const output = stderrWriteMock.mock.calls.map((call) => call[0]).join('');
   expect(output).toContain('"values":["safe",{"token":"[REDACTED]"}]');
 });
 
@@ -94,11 +97,11 @@ test('logger: keeps full redacted messages while truncating metadata', () => {
   const logger = createLogger({ LOG_LEVEL: 'info' });
   const messageTail = 'message-tail';
   const metadataTail = 'metadata-tail';
-  logger.log('info', 'x'.repeat(256) + messageTail + ' sk-abcdef1234567890', {
+  logger.log('info', `${'x'.repeat(256) + messageTail} sk-abcdef1234567890`, {
     detail: 'x'.repeat(256) + metadataTail,
   });
 
-  const output = stderrWriteMock.mock.calls.map(call => String(call[0])).join('');
+  const output = stderrWriteMock.mock.calls.map((call) => call[0]).join('');
   expect(output).toContain(messageTail);
   expect(output).toContain('[REDACTED-KEY]');
   expect(output).not.toContain('sk-abcdef1234567890');
@@ -116,9 +119,9 @@ test('logger: log level filtering', () => {
   logger.log('warn', 'this is a warning');
   logger.log('error', 'this is an error');
 
-  const stdoutCalls = stdoutWriteMock.mock.calls as unknown as Array<unknown[]>;
-  const stderrCalls = stderrWriteMock.mock.calls as unknown as Array<unknown[]>;
-  const stderrOutput = stderrCalls.map(call => String(call[0])).join('\n');
+  const stdoutCalls = stdoutWriteMock.mock.calls as unknown as unknown[][];
+  const stderrCalls = stderrWriteMock.mock.calls as unknown as unknown[][];
+  const stderrOutput = stderrCalls.map((call) => String(call[0])).join('\n');
   expect(stdoutCalls).toHaveLength(0);
   expect(stderrOutput).not.toContain('this should be ignored');
   expect(stderrOutput).not.toContain('this should also be ignored');
@@ -129,7 +132,7 @@ test('logger: log level filtering', () => {
 test('logger: empty log level uses the default', () => {
   stdoutWriteMock.mockClear();
   createLogger({ LOG_LEVEL: '' }).log('info', 'default level');
-  const output = stderrWriteMock.mock.calls.map(call => String(call[0])).join('');
+  const output = stderrWriteMock.mock.calls.map((call) => call[0]).join('');
   expect(output).toContain('default level');
 });
 
@@ -142,7 +145,7 @@ test('logger: serialises circular and bigint metadata without throwing', () => {
     createLogger({ LOG_LEVEL: 'info' }).log('info', 'safe', circular);
   }).not.toThrow();
 
-  const output = stderrWriteMock.mock.calls.map(call => String(call[0])).join('');
+  const output = stderrWriteMock.mock.calls.map((call) => call[0]).join('');
   expect(output).toContain('"count":"1"');
   expect(output).toContain('"token":"[REDACTED]"');
   expect(output).toContain('"self":"[Circular]"');
@@ -158,7 +161,7 @@ test('logger: keeps token counts but redacts token values', () => {
     promptTokensKey: 654321,
   });
 
-  const output = stderrWriteMock.mock.calls.map(call => String(call[0])).join('');
+  const output = stderrWriteMock.mock.calls.map((call) => call[0]).join('');
   expect(output).toContain('"promptTokens":212');
   expect(output).toContain('"outputTokens":9');
   expect(output).not.toContain('plain-access');
