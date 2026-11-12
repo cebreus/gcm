@@ -1599,6 +1599,7 @@ describe('Refactored Runner', () => {
 
     try {
       await executeCommitMessageGeneration([], {
+        isInteractive: true,
         logger: mockLogger,
         gitService: mockGitService,
         contextService: mockContextService,
@@ -1708,6 +1709,7 @@ describe('Refactored Runner', () => {
 
     try {
       await executeCommitMessageGeneration([], {
+        isInteractive: true,
         logger: mockLogger,
         gitService: mockGitService,
         contextService: mockContextService,
@@ -1802,6 +1804,7 @@ describe('Refactored Runner', () => {
 
     try {
       await executeCommitMessageGeneration([], {
+        isInteractive: true,
         logger: mockLogger,
         gitService: mockGitService,
         contextService: mockContextService,

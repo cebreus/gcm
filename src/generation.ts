@@ -293,17 +293,6 @@ async function runGenerationWorkflow(params: {
     state,
   } = params;
   logTargetCommitInfo(services.output, logger, targetCommit);
-  if (canSwitchProvider && (!parsedArgs.model || providerReadinessError)) {
-    const providerConfiguration = await services.dialogue.configure(state);
-    if (providerConfiguration === 'exit') return 'success';
-    if (typeof providerConfiguration === 'object') return providerConfiguration;
-    if (providerReadinessError) {
-      services.output.cancel(
-        `Error: ${services.output.sanitizeTerminalText(providerReadinessError)}`,
-      );
-      return 'failure';
-    }
-  }
   const readyState = await resolveReadyRepositoryState({
     services,
     parsedArgs,
@@ -334,12 +323,18 @@ async function runGenerationWorkflow(params: {
     inspection.capability,
     services.output,
   );
-  const preflight =
-    state.nonInteractive || canSwitchProvider || parsedArgs.model
-      ? 'continue'
-      : await services.dialogue.configure(state);
+  const shouldConfigure = canSwitchProvider
+    ? !parsedArgs.model || Boolean(providerReadinessError)
+    : !state.nonInteractive && !parsedArgs.model;
+  const preflight = shouldConfigure ? await services.dialogue.configure(state) : 'continue';
   if (preflight === 'exit') return 'success';
   if (typeof preflight === 'object') return preflight;
+  if (providerReadinessError) {
+    services.output.cancel(
+      `Error: ${services.output.sanitizeTerminalText(providerReadinessError)}`,
+    );
+    return 'failure';
+  }
   const commitCapability = {
     ...inspection.capability,
     excludedPaths: targetCommit ? [] : (staged.excludedPaths ?? []),
