@@ -37,7 +37,10 @@ test('cli: --models-list prints available models', async () => {
   const originalApiKey = process.env.GOOGLE_GEMINI_API_KEY;
   const originalExitCode = process.exitCode;
   const originalStdoutWrite = process.stdout.write;
+  const originalColumns = process.stdout.columns;
   const stdoutChunks: string[] = [];
+  // A zero-width pseudo-terminal makes clack wrap the note one character per line.
+  process.stdout.columns = 80;
   process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
   process.exitCode = 0;
   process.stdout.write = mock((chunk: string | Uint8Array) => {
@@ -54,6 +57,7 @@ test('cli: --models-list prints available models', async () => {
     expect(stdoutChunks.join('')).not.toContain('robotics');
   } finally {
     process.stdout.write = originalStdoutWrite;
+    process.stdout.columns = originalColumns;
     process.exitCode = originalExitCode ?? 0;
     if (originalApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY;
     else process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
