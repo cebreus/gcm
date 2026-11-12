@@ -638,6 +638,14 @@ test('binary contract: reports no staged changes without calling Gemini', async 
   expect(result.exitCode).not.toBe(0);
   expect(result.stderr).toContain('No staged changes found');
   expect(result.stderr).toContain('Use "git add" to stage files.');
+  expect(result.stderr.split('No staged changes found').length - 1).toBe(1);
+});
+
+test('binary contract: a non-TTY stderr carries no terminal styling', async () => {
+  const result = await runSubprocess([binaryPath], gitRepository, 'not-a-real-key');
+
+  expect(result.stderr).toContain('Commit Message Helper');
+  expect(result.stderr).not.toMatch(ansiEscape);
 });
 
 test('binary contract: reports a missing Gemini API key', async () => {

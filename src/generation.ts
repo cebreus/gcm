@@ -50,7 +50,8 @@ export type GenerationServices = {
   output: {
     isInteractive: boolean;
     startProgress(message: string): void;
-    stopProgress(message: string): void;
+    /** Without a message the progress indicator is removed without a line. */
+    stopProgress(message?: string): void;
     cancel(message: string): void;
     note(message: string, title?: string): void;
     warn(message: string, title?: string): void;
@@ -488,8 +489,10 @@ async function loadStagedChanges(params: {
     services.projectConfig?.exclude,
   );
   if (!staged) {
-    services.output.stopProgress(services.output.style.yellow('No staged changes found'));
-    if (!suppressNoChangesMessage) {
+    if (suppressNoChangesMessage) {
+      services.output.stopProgress(services.output.style.yellow('No staged changes found'));
+    } else {
+      services.output.stopProgress();
       services.output.cancel('No staged changes found. Use "git add" to stage files.');
     }
     return null;

@@ -71,9 +71,9 @@ const C = {
   magenta: '\x1b[35m',
 };
 
-// Styling only for a terminal; a redirected stdout gets plain text.
-function forStdout(text: string): string {
-  return process.stdout.isTTY ? text : stripTerminalControlSequences(text);
+// Styling only for a terminal; a redirected stream gets plain text.
+function forStream(text: string, stream: NodeJS.WriteStream = process.stdout): string {
+  return stream.isTTY ? text : stripTerminalControlSequences(text);
 }
 
 function showHelp(providerLabel: string, providerIds: string[]) {
@@ -130,7 +130,7 @@ ${options}
         and never runs rebase.
 
     `;
-  process.stdout.write(forStdout(helpText.trim() + '\n'));
+  process.stdout.write(forStream(helpText.trim() + '\n'));
 }
 
 const providerModelEnv: Record<string, string | undefined> = {
@@ -213,7 +213,7 @@ function createRunnerServices(
 }
 
 function createRunnerOutput(
-  s: Pick<ReturnType<typeof spinner>, 'start' | 'stop'>,
+  s: Pick<ReturnType<typeof spinner>, 'start' | 'stop' | 'clear'>,
   isInteractive: boolean,
   printOnly: boolean,
 ): GenerationServices['output'] {
@@ -225,7 +225,8 @@ function createRunnerOutput(
     },
     stopProgress: message => {
       if (printOnly) return;
-      s.stop(message);
+      if (message === undefined) s.clear();
+      else s.stop(message);
     },
     cancel: reportCancel,
     note: (message, title) => {
@@ -440,7 +441,7 @@ export async function executeCommitMessageGeneration(
     }
     if (parsedArgs.help) {
       intro(
-        forStdout(
+        forStream(
           `${C.bright}${helpFactory.label} Commit Message Helper v${pkg.version}${C.reset}`,
         ),
       );
@@ -520,9 +521,13 @@ export async function executeCommitMessageGeneration(
         break;
       }
       if (!parsedArgs.print)
-        intro(`${C.bright}${provider.label} Commit Message Helper v${pkg.version}${C.reset}`, {
-          output: process.stderr,
-        });
+        intro(
+          forStream(
+            `${C.bright}${provider.label} Commit Message Helper v${pkg.version}${C.reset}`,
+            process.stderr,
+          ),
+          { output: process.stderr },
+        );
       const earlyExitCode = await maybeHandleModelsList(parsedArgs, provider);
       if (earlyExitCode !== null) {
         exitCode = earlyExitCode;
@@ -545,6 +550,7 @@ export async function executeCommitMessageGeneration(
             start: () => {},
             stop: (message?: string) =>
               void process.stderr.write(`${sanitizeTerminalText(message ?? '')}\n`),
+            clear: () => {},
           };
       const output = createRunnerOutput(
         s,
