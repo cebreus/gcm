@@ -108,7 +108,7 @@ Codex and Claude check existing CLI login status before use. Copilot CLI does no
 a read-only login-status command, so an unavailable login fails its first generation.
 GCM does not switch to an API provider when CLI authentication fails. Codex offers Luna,
 Sol and Terra, with Luna as default and Sol as its availability fallback. Claude offers
-Haiku, Sonnet, Opus and Fable, with Haiku as default and Sonnet as its availability
+Sonnet, Haiku, Opus and Fable, with Sonnet as default and Haiku as its availability
 fallback. Copilot offers GPT-6 Luna as default, then Claude Sonnet 5.5, Gemini 4
 Hydrogen, Gemini 3.8 Flash and Claude Haiku 5.5, without a fallback. Model access
 still depends on the CLI version, account and configured backend.
@@ -120,13 +120,13 @@ servers and an empty tool allowlist; its keychain login remains available.
 Primary and fallback CLI attempts share a 90-second deadline. Unsupported safety flags
 fail the request; GCM does not retry without them.
 
-For API generation, selecting `gemini-3.5-flash-lite` enables an availability fallback
+For API generation, selecting `gemini-4-hydrogen` enables an availability fallback
 to `gemini-3.5-flash`. The fallback
 must exist in the provider catalogue and cover the primary model's token limits.
-Authentication and malformed responses do not trigger model switching. Existing API
-defaults remain unchanged; the historical pilot benchmark is not sufficient evidence
-to replace them. Each API chat request has a 90-second timeout, including its transport
-retries; an API model fallback starts a new request deadline.
+Authentication and malformed responses do not trigger model switching. Default models
+follow the [model defaults decision](docs/adr/0008-model-defaults-from-gcm-model-comparison.md).
+Each API chat request has a 90-second timeout, including its transport retries; an API
+model fallback starts a new request deadline.
 
 `--providers-list` returns `0` when all providers are available, `1` when only some are
 available, and `2` when none are available. Checks do not load LM Studio models.
@@ -182,7 +182,7 @@ The diff is untrusted, so the model's reply is too. After the subject line, GCM 
 
 | Variable                | Default                 | Purpose                                                |
 | ----------------------- | ----------------------- | ------------------------------------------------------ |
-| `GCM_MODEL`             | `gemini-3.7-flash`      | Gemini model.                                          |
+| `GCM_MODEL`             | `gemini-4-hydrogen`     | Gemini model.                                          |
 | `GCM_PROVIDER`          | none                    | Provider; unset: last used, then `gemini`.             |
 | `GCM_FREELLMAPI_URL`    | `http://127.0.0.1:3001` | FreeLLMAPI endpoint URL.                               |
 | `GCM_FREELLMAPI_MODEL`  | `auto`                  | FreeLLMAPI routing model.                              |

@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { loadConfig } from '../gcm.config.js';
 
 const DEFAULT_CONFIG = {
-  model: 'gemini-3.7-flash',
+  model: 'gemini-4-hydrogen',
   temp: 1,
   maxBuffer: 50 * 1024 * 1024,
   maxHunks: 40,

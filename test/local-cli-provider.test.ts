@@ -374,7 +374,7 @@ test('Codex CLI does not fallback when authentication is unavailable', async () 
   expect(calls).toBe(1);
 });
 
-test('Claude CLI defaults to Haiku with Sonnet fallback', async () => {
+test('Claude CLI defaults to Sonnet with Haiku fallback', async () => {
   const calls: Array<Parameters<LocalCliRun>[0]> = [];
   const fallbacks: string[][] = [];
   const provider = createClaudeCliProvider({
@@ -401,14 +401,14 @@ test('Claude CLI defaults to Haiku with Sonnet fallback', async () => {
   });
 
   expect((await provider.models()).map((model) => model.name)).toEqual([
-    'haiku',
     'sonnet',
+    'haiku',
     'opus',
     'fable',
   ]);
-  expect(provider.defaultModel).toBe('haiku');
+  expect(provider.defaultModel).toBe('sonnet');
   await expect(
-    provider.service.generate({ ...generateParams, modelName: 'haiku' }),
+    provider.service.generate({ ...generateParams, modelName: 'sonnet' }),
   ).resolves.toEqual({
     text: 'feat(cli): add Claude provider',
     truncated: false,
@@ -418,7 +418,7 @@ test('Claude CLI defaults to Haiku with Sonnet fallback', async () => {
     '/opt/homebrew/bin/claude',
     '--print',
     '--model',
-    'sonnet',
+    'haiku',
     '--tools',
     '',
     '--no-session-persistence',
@@ -436,7 +436,7 @@ test('Claude CLI defaults to Haiku with Sonnet fallback', async () => {
   ]);
   expect(calls[1]?.stdin).toBe('staged diff');
   expect(calls[1]?.timeoutMs).toBeLessThanOrEqual(90_000);
-  expect(fallbacks).toEqual([['haiku', 'sonnet']]);
+  expect(fallbacks).toEqual([['sonnet', 'haiku']]);
 });
 
 test('local CLI timeout force-kills a process that ignores SIGTERM', async () => {

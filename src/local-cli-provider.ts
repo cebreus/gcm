@@ -260,15 +260,15 @@ export function createClaudeCliProvider(options: {
 }): LanguageModelProvider {
   const run = options.run ?? runLocalCli;
   const models = [
-    { name: 'haiku', label: 'Claude Haiku', limits: LOCAL_CLI_LIMITS },
     { name: 'sonnet', label: 'Claude Sonnet', limits: LOCAL_CLI_LIMITS },
+    { name: 'haiku', label: 'Claude Haiku', limits: LOCAL_CLI_LIMITS },
     { name: 'opus', label: 'Claude Opus', limits: LOCAL_CLI_LIMITS },
     { name: 'fable', label: 'Claude Fable', limits: LOCAL_CLI_LIMITS },
   ];
   return {
     id: 'claude-cli',
     label: 'Claude CLI',
-    defaultModel: 'haiku',
+    defaultModel: 'sonnet',
     models: async function (): Promise<typeof models> {
       return await Promise.resolve(models);
     },
@@ -320,15 +320,18 @@ export function createClaudeCliProvider(options: {
         try {
           return await generateWithModel(params.modelName, CLI_TIMEOUT_MS);
         } catch (error) {
-          if (params.modelName !== 'haiku' || !isModelUnavailableError(error)) {
+          if (
+            params.modelName !== 'sonnet' ||
+            !isModelUnavailableError(error)
+          ) {
             throw error;
           }
           const remainingMs = deadline - Date.now();
           if (remainingMs <= 0) {
             throw error;
           }
-          options.onFallback?.('haiku', 'sonnet');
-          return await generateWithModel('sonnet', remainingMs);
+          options.onFallback?.('sonnet', 'haiku');
+          return await generateWithModel('haiku', remainingMs);
         }
       },
     },

@@ -18,7 +18,7 @@ import {
 import { generateOpenAiCompatibleChat } from './openai-compatible-client.js';
 import { type ProviderFetch, withRequestTrace } from './provider-http.js';
 
-const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+const DEFAULT_MODEL = 'gemini-4-hydrogen';
 const FALLBACK_MODEL = 'gemini-3.5-flash';
 
 const CHAT_URL =

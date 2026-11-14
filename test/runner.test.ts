@@ -85,6 +85,15 @@ const mockListModels = mock(
   async () =>
     await Promise.resolve([
       {
+        name: 'models/gemini-4-hydrogen',
+        label: 'Gemini 4 Hydrogen',
+        limits: {
+          kind: 'separate' as const,
+          maxInputTokens: 1_048_576,
+          maxOutputTokens: 65_536,
+        },
+      },
+      {
         name: 'models/gemini-3.7-flash',
         label: 'Gemini 3.7 Flash',
         limits: {
@@ -1929,7 +1938,7 @@ describe('Refactored Runner', () => {
     {
       name: 'only --hint is provided',
       args: ['--hint', 'emphasise refactoring'],
-      expectSettings: 'Settings: [Provider: Gemini] [Model: gemini-3.7-flash]',
+      expectSettings: 'Settings: [Provider: Gemini] [Model: gemini-4-hydrogen]',
     },
     {
       name: '--model selects the single remaining setting',

@@ -825,7 +825,7 @@ test('binary contract: an unconfigured run still shows configuration', async () 
 
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain(
-    'Settings: [Provider: Gemini] [Model: gemini-3.7-flash]',
+    'Settings: [Provider: Gemini] [Model: gemini-4-hydrogen]',
   );
   expect(result.stderr).not.toMatch(/ERROR|Error/v);
 });

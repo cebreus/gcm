@@ -80,7 +80,7 @@ function readConfig(env: Record<string, string | undefined>): Config {
       fallback: DEFAULT_PER_FILE_BUFFER,
       invalidName: 'GCM_PER_FILE_BUFFER',
     }),
-    MODEL: stringOrDefault(env.GCM_MODEL, 'gemini-3.7-flash'),
+    MODEL: stringOrDefault(env.GCM_MODEL, 'gemini-4-hydrogen'),
     TEMP: numberInRange(env.GCM_TEMP, {
       minimum: 0,
       maximum: 1,

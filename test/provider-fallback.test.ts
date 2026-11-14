@@ -13,8 +13,7 @@ for (const kind of ['gemini', 'freellmapi'] as const) {
     'explicit-model',
   ] as const) {
     test(`${kind === 'gemini' ? 'gemini fallback respects' : 'freellmapi does not fall back on'} ${scenario}`, async () => {
-      const primary =
-        kind === 'gemini' ? 'gemini-3.5-flash-lite' : 'free-router';
+      const primary = kind === 'gemini' ? 'gemini-4-hydrogen' : 'free-router';
       const fallback = kind === 'gemini' ? 'gemini-3.5-flash' : 'kilo-auto';
       const calls: string[] = [];
       const notices: string[] = [];
@@ -124,7 +123,7 @@ test('Gemini timeout uses availability fallback, caller cancellation does not', 
       }),
       logger: { log: function () {} },
       listModels: async function () {
-        return ['gemini-3.5-flash-lite', 'gemini-3.5-flash'].map((model) => ({
+        return ['gemini-4-hydrogen', 'gemini-3.5-flash'].map((model) => ({
           name: model,
           label: model,
           limits: {
@@ -146,7 +145,7 @@ test('Gemini timeout uses availability fallback, caller cancellation does not', 
     });
     const result = provider.service.generate({
       meta: {},
-      modelName: 'gemini-3.5-flash-lite',
+      modelName: 'gemini-4-hydrogen',
       systemPrompt: 'rules',
       promptContext: 'diff',
       maxOutputTokens: 100,
