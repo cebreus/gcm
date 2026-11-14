@@ -54,6 +54,29 @@ test('Claude factory refuses a logged-out CLI even when status exits zero', asyn
   );
 });
 
+test('Copilot factory registers an installed binary without an auth side effect', async () => {
+  const calls: string[][] = [];
+  const factories = createProviderFactories(
+    {
+      which: function (command) {
+        return command === 'copilot' ? '/fake/copilot' : null;
+      },
+      localCliRun: async function (request) {
+        calls.push(request.cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    },
+    { log: function () {} },
+    false,
+    loadConfig({}),
+  );
+
+  expect(factories.map((factory) => factory.id)).toContain('copilot-cli');
+  const provider = await factories.at(-1)?.create({ probeOnly: true });
+  expect(provider?.id).toBe('copilot-cli');
+  expect(calls).toEqual([]);
+});
+
 test('injected factories keep precedence over local CLI discovery', () => {
   const factories: [] = [];
   expect(

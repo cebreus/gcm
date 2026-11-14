@@ -1,6 +1,6 @@
 # GCM
 
-Generate Conventional Commit messages from staged changes or existing commits with Gemini, OpenAI-compatible APIs, LM Studio, or the local `codex-cli` / `claude-cli`.
+Generate Conventional Commit messages from staged changes or existing commits with Gemini, OpenAI-compatible APIs, LM Studio, or local Codex, Claude and GitHub Copilot CLIs.
 
 Review every result before any Git write.
 
@@ -76,7 +76,7 @@ The provider is `--provider`, then `GCM_PROVIDER`, then the last used provider, 
 
 Scope suggestions come from recent commit subjects and from paths: in a monorepo only `apps/<name>/` and `packages/<name>/` are workspace folders and suggest `<name>`; `.github/` suggests `ci`; root `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` and `tsconfig.json` suggest `build`; `src/<dir>/` suggests `<dir>`. Split proposals use the same two workspace folders and put `package.json` and lockfiles into one dependency group proposed as `build(deps)`; other paths follow the documentation, CI, test and top-level-directory rules.
 
-Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Built-in values: `gemini`, `freellmapi`, `lm-studio`; installed CLIs also enable `codex-cli` and `claude-cli`.
+Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Built-in values: `gemini`, `freellmapi`, `lm-studio`; installed CLIs also enable `codex-cli`, `claude-cli` and `copilot-cli`.
 
 Model catalogues must publish authoritative limits. Gemini exposes separate input/output limits;
 FreeLLMAPI and LM Studio expose a shared context window.
@@ -103,15 +103,20 @@ See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 | `-h, --help`              | Show built-in help.                                                                                          |
 | `--version`               | Show the version.                                                                                            |
 
-Local CLI providers `codex-cli` and `claude-cli` are registered when their binaries are
-on PATH. They check existing CLI login status before use. GCM does not switch to an API
-provider when CLI authentication fails. Codex offers Luna, Sol and Terra, with Luna as
-default and Sol as its availability fallback. Claude offers Haiku, Sonnet, Opus and
-Fable, with Haiku as default and Sonnet as its availability fallback. Model access still
-depends on the CLI version, account and configured backend.
+Local CLI providers are registered when `codex`, `claude` or `copilot` is on PATH.
+Codex and Claude check existing CLI login status before use. Copilot CLI does not expose
+a read-only login-status command, so an unavailable login fails its first generation.
+GCM does not switch to an API provider when CLI authentication fails. Codex offers Luna,
+Sol and Terra, with Luna as default and Sol as its availability fallback. Claude offers
+Haiku, Sonnet, Opus and Fable, with Haiku as default and Sonnet as its availability
+fallback. Copilot offers GPT-6 Luna as default, then Claude Sonnet 5.5, Gemini 4
+Hydrogen, Gemini 3.8 Flash and Claude Haiku 5.5, without a fallback. Model access
+still depends on the CLI version, account and configured backend.
 
 CLI generation is ephemeral, runs outside the repository, disables CLI tools and
 customizations where supported, redacts recognised credentials, and bounds output.
+Copilot runs with a fresh temporary `COPILOT_HOME`, no custom instructions, no MCP
+servers and an empty tool allowlist; its keychain login remains available.
 Primary and fallback CLI attempts share a 90-second deadline. Unsupported safety flags
 fail the request; GCM does not retry without them.
 
@@ -165,11 +170,11 @@ Analysed diff is sent to the selected provider. Whitespace noise is ignored when
 
 Files that usually hold secrets are excluded from analysis by default, next to `dist/**` and nested `dist` directories: `.env` and `.env.*` in any directory, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.keystore`, `*.tfvars`, `*.tfstate`, and `.netrc`, `.npmrc`, `id_rsa*` / `id_ed25519*` in any directory. `.env.example` and `.env.sample` match `.env.*` and are excluded too. Excluded files are neither sent nor listed in the request. They stay staged; committing them needs explicit confirmation, and `--non-interactive --apply` refuses. When every staged file is excluded, GCM reports `Only excluded files are staged` and stops.
 
-`codex-cli` and `claude-cli` are started without `GOOGLE_GEMINI_API_KEY`, `GCM_FREELLMAPI_TOKEN` and `LM_API_TOKEN` in their environment.
+Local CLI providers are started without `GOOGLE_GEMINI_API_KEY`, `GCM_FREELLMAPI_TOKEN` and `LM_API_TOKEN` in their environment.
 
 The diff is untrusted, so the model's reply is too. After the subject line, GCM drops every line that starts with a denylisted trailer (`Co-authored-by`, `Signed-off-by`, `Reviewed-by`, `Acked-by`, `Tested-by`, `Skip-checks`, `Release-As`, `Co-developed-by`, `Reported-by`, `Suggested-by`, `Helped-by`, `Cc`, `Change-Id`) and every line that contains a closing keyword with an issue reference (`Closes #12`, `fixes owner/repo#3`, `Resolves https://...`), wherever it sits. CI skip markers (`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]`, `***NO_CI***`) are removed from the whole reply, nested ones included. `BREAKING CHANGE:` footers and ordinary prose such as `Note:` lines are kept.
 
-`--debug` prints redacted request/response traces to the console, each body capped at 32 KiB. Traces cover the HTTP providers (Gemini, FreeLLMAPI, LM Studio); `codex-cli` and `claude-cli` produce none. No trace file is written. The traces contain the analysed diff, so avoid `--debug` where the output is kept: a shared terminal, a recorded session or CI logs. See [secret redaction](docs/adr/0004-redact-secrets-leaving-the-machine.md).
+`--debug` prints redacted request/response traces to the console, each body capped at 32 KiB. Traces cover the HTTP providers (Gemini, FreeLLMAPI, LM Studio); local CLI providers produce none. No trace file is written. The traces contain the analysed diff, so avoid `--debug` where the output is kept: a shared terminal, a recorded session or CI logs. See [secret redaction](docs/adr/0004-redact-secrets-leaving-the-machine.md).
 
 ## Configuration
 

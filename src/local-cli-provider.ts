@@ -1,4 +1,8 @@
+// eslint-disable-next-line no-restricted-imports -- Bun has no temporary-directory API.
+import { mkdtemp, rm } from 'node:fs/promises';
+
 import { tmpdir } from 'os';
+import { join } from 'path';
 
 import { childEnvironment } from './git-utils.js';
 import {
@@ -18,6 +22,7 @@ import {
   cliFailure,
   parseClaudeOutput,
   parseCodexOutput,
+  parseCopilotOutput,
 } from './local-cli-output.js';
 import {
   isRecord,
@@ -31,6 +36,7 @@ const CLI_AUTH_TIMEOUT_MS = 5_000;
 
 interface LocalCliRunRequest {
   cmd: string[];
+  env?: Record<string, string>;
   stdin: string;
   timeoutMs: number;
 }
@@ -97,7 +103,7 @@ export async function runLocalCli(
   const child = Bun.spawn({
     cmd: request.cmd,
     cwd: tmpdir(),
-    env: childEnvironment(),
+    env: { ...childEnvironment(), ...request.env },
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -323,6 +329,84 @@ export function createClaudeCliProvider(options: {
           }
           options.onFallback?.('haiku', 'sonnet');
           return await generateWithModel('sonnet', remainingMs);
+        }
+      },
+    },
+  };
+}
+
+export function createCopilotCliProvider(options: {
+  executable: string;
+  run?: LocalCliRun;
+}): LanguageModelProvider {
+  const run = options.run ?? runLocalCli;
+  // Default first, then ranked by the GCM model comparison (2026-11-14).
+  const models = [
+    { name: 'gpt-6-luna', label: 'GPT-6 Luna', limits: LOCAL_CLI_LIMITS },
+    {
+      name: 'claude-sonnet-5.5',
+      label: 'Claude Sonnet 5.5',
+      limits: LOCAL_CLI_LIMITS,
+    },
+    {
+      name: 'gemini-4-hydrogen',
+      label: 'Gemini 4 Hydrogen',
+      limits: LOCAL_CLI_LIMITS,
+    },
+    {
+      name: 'gemini-3.8-flash',
+      label: 'Gemini 3.8 Flash',
+      limits: LOCAL_CLI_LIMITS,
+    },
+    {
+      name: 'claude-haiku-5.5',
+      label: 'Claude Haiku 5.5',
+      limits: LOCAL_CLI_LIMITS,
+    },
+  ];
+  return {
+    id: 'copilot-cli',
+    label: 'GitHub Copilot CLI',
+    defaultModel: 'gpt-6-luna',
+    models: async function (): Promise<typeof models> {
+      return await Promise.resolve(models);
+    },
+    service: {
+      generate: async function (params) {
+        if (!models.some((model) => model.name === params.modelName)) {
+          throw new Error('Unknown Copilot CLI model');
+        }
+        const copilotHome = await mkdtemp(join(tmpdir(), 'gcm-copilot-'));
+        try {
+          const result = await run({
+            cmd: [
+              options.executable,
+              '--model',
+              params.modelName,
+              '--output-format',
+              'json',
+              '--no-custom-instructions',
+              '--disable-builtin-mcps',
+              '--available-tools=none',
+              '--silent',
+            ],
+            env: { COPILOT_HOME: copilotHome },
+            stdin: redactSensitiveTextForPrompt(
+              `${params.systemPrompt}\n\n${params.promptContext}`,
+            ),
+            timeoutMs: CLI_TIMEOUT_MS,
+          });
+          if (result.exitCode !== 0) {
+            cliFailure('Copilot CLI', result);
+          }
+          const response = parseCopilotOutput(result.stdout);
+          return {
+            ...response,
+            text: sanitizeTerminalText(response.text),
+            truncated: false,
+          };
+        } finally {
+          await rm(copilotHome, { recursive: true, force: true });
         }
       },
     },

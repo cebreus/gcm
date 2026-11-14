@@ -29,13 +29,13 @@ function readUsage(value: unknown): LanguageModelResponse['usage'] {
   return { promptTokens, outputTokens };
 }
 
-interface CodexEventResult {
+interface CliEventResult {
   text?: string;
   completed: boolean;
   usage?: LanguageModelResponse['usage'];
 }
 
-function readCodexEvent(event: unknown, stdout: string): CodexEventResult {
+function readCodexEvent(event: unknown, stdout: string): CliEventResult {
   if (!isRecord(event)) {
     return { completed: false };
   }
@@ -105,6 +105,53 @@ export function parseClaudeOutput(stdout: string): LanguageModelResponse {
     throw createLanguageModelApiError('Claude CLI returned no message');
   }
   return { text: value.result, usage: readUsage(value.usage) };
+}
+
+function readCopilotEvent(event: unknown, stdout: string): CliEventResult {
+  if (!isRecord(event)) {
+    return { completed: false };
+  }
+  if (event.type === 'result') {
+    if (event.exitCode !== 0) {
+      cliFailure('Copilot CLI', { exitCode: 1, stdout, stderr: '' });
+    }
+    return { completed: true };
+  }
+  if (
+    event.type === 'assistant.message' &&
+    isRecord(event.data) &&
+    typeof event.data.content === 'string' &&
+    Array.isArray(event.data.toolRequests) &&
+    event.data.toolRequests.length === 0
+  ) {
+    return { text: event.data.content, completed: false };
+  }
+  return { completed: false };
+}
+
+export function parseCopilotOutput(stdout: string): LanguageModelResponse {
+  let text: string | null = null;
+  let completed = false;
+  for (const line of stdout.split('\n')) {
+    if (line.trim() === '') {
+      continue;
+    }
+    const result = readCopilotEvent(
+      parseLocalCliJson(line, 'Copilot CLI returned malformed JSON'),
+      stdout,
+    );
+    if (hasText(result.text)) {
+      ({ text } = result);
+    }
+    completed ||= result.completed;
+  }
+  if (!hasText(text) || !completed) {
+    throw createLanguageModelApiError(
+      'Copilot CLI returned no completed message',
+    );
+  }
+  // Copilot JSON reports premium requests, not tokens, so usage stays empty.
+  return { text, usage: {} };
 }
 
 function failureDetails(event: Record<string, unknown>): string[] {

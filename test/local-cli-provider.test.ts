@@ -5,6 +5,7 @@ import {
   type LocalCliRun,
   createClaudeCliProvider,
   createCodexCliProvider,
+  createCopilotCliProvider,
   runLocalCli,
 } from '../src/local-cli-provider.js';
 
@@ -155,6 +156,84 @@ test('Claude rejects error result even when result text exists', async () => {
   await expect(
     provider.service.generate({ ...generateParams, modelName: 'haiku' }),
   ).rejects.toThrow();
+});
+
+test('Copilot returns final completed assistant message without tools', async () => {
+  const provider = createCopilotCliProvider({
+    executable: 'unused',
+    run: async function (request) {
+      expect(request.cmd).toContain('--disable-builtin-mcps');
+      expect(request.cmd).toContain('--no-custom-instructions');
+      expect(request.cmd).toContain('--available-tools=none');
+      expect(request.env?.COPILOT_HOME).toContain('gcm-copilot-');
+      return {
+        exitCode: 0,
+        stderr: '',
+        stdout: [
+          JSON.stringify({
+            type: 'assistant.message',
+            data: { content: 'fix: partial', toolRequests: [{ name: 'bash' }] },
+          }),
+          JSON.stringify({
+            type: 'assistant.message',
+            data: { content: 'fix: final', toolRequests: [] },
+          }),
+          JSON.stringify({ type: 'assistant.turn_end', data: { turnId: '0' } }),
+          JSON.stringify({ type: 'result', exitCode: 0 }),
+        ].join('\n'),
+      };
+    },
+  });
+
+  await expect(
+    provider.service.generate({
+      ...generateParams,
+      modelName: 'gpt-6-luna',
+    }),
+  ).resolves.toMatchObject({ text: 'fix: final' });
+  expect((await provider.models()).map((model) => model.name)).toEqual([
+    'gpt-6-luna',
+    'claude-sonnet-5.5',
+    'gemini-4-hydrogen',
+    'gemini-3.8-flash',
+    'claude-haiku-5.5',
+  ]);
+  expect(provider.defaultModel).toBe('gpt-6-luna');
+});
+
+test('Copilot rejects failed result', async () => {
+  const provider = createCopilotCliProvider({
+    executable: 'unused',
+    run: async function () {
+      return {
+        exitCode: 0,
+        stderr: '',
+        stdout: JSON.stringify({ type: 'result', exitCode: 1 }),
+      };
+    },
+  });
+  await expect(
+    provider.service.generate({
+      ...generateParams,
+      modelName: 'gpt-6-luna',
+    }),
+  ).rejects.toThrow();
+});
+
+test('Copilot removes its temporary home after a failed run', async () => {
+  let home = '';
+  const provider = createCopilotCliProvider({
+    executable: 'unused',
+    run: async function (request) {
+      home = request.env?.COPILOT_HOME ?? '';
+      expect(Bun.spawnSync(['test', '-d', home]).exitCode).toBe(0);
+      return { exitCode: 1, stderr: 'boom', stdout: '' };
+    },
+  });
+  await expect(
+    provider.service.generate({ ...generateParams, modelName: 'gpt-6-luna' }),
+  ).rejects.toThrow('Copilot CLI failed: boom');
+  expect(Bun.spawnSync(['test', '-e', home]).exitCode).toBe(1);
 });
 
 test('CLI overflow stops the child and reports bounded failure', async () => {

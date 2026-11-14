@@ -88,7 +88,8 @@ ${options}
     ${C.bright}Provider:${C.reset}
       Use ${C.cyan}--provider <name>${C.reset}, choose in interactive Settings,
       or set ${C.cyan}GCM_PROVIDER${C.reset}.
-      Available values: ${providerIds.join(', ')}.
+      Available values:
+        ${providerIds.join(', ')}.
       Example: ${C.cyan}GCM_PROVIDER=lm-studio gcm${C.reset}
 
     ${C.bright}Examples:${C.reset}

@@ -12,6 +12,7 @@ import {
   checkLocalCliAuthentication,
   createClaudeCliProvider,
   createCodexCliProvider,
+  createCopilotCliProvider,
 } from './local-cli-provider.js';
 import type { Logger } from './logger.js';
 import type { ModelSpec } from './model-registry.js';
@@ -91,6 +92,7 @@ export function createProviderFactories(
   for (const [command, id, label, create] of [
     ['codex', 'codex-cli', 'Codex CLI', createCodexCliProvider],
     ['claude', 'claude-cli', 'Claude CLI', createClaudeCliProvider],
+    ['copilot', 'copilot-cli', 'GitHub Copilot CLI', createCopilotCliProvider],
   ] as const) {
     const executable = which(command);
     if (executable === null) {
@@ -100,11 +102,13 @@ export function createProviderFactories(
       id,
       label,
       create: async function () {
-        await checkLocalCliAuthentication(
-          command,
-          executable,
-          options.localCliRun,
-        );
+        if (command !== 'copilot') {
+          await checkLocalCliAuthentication(
+            command,
+            executable,
+            options.localCliRun,
+          );
+        }
         return create({
           executable,
           run: options.localCliRun,
