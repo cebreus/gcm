@@ -72,6 +72,16 @@ export function showHelp(providerLabel: string, providerIds: string[]): void {
       ),
     ].join('\n');
   }).join('\n');
+  const providerValues = (
+    `${providerIds.join(', ')}.`.match(
+      new RegExp(
+        `.{1,${HELP_LINE_WIDTH - HELP_DESCRIPTION_INDENT}}(?:\\s|$)`,
+        'gv',
+      ),
+    ) ?? []
+  )
+    .map((line) => line.trim())
+    .join(`\n${' '.repeat(HELP_DESCRIPTION_INDENT)}`);
   const helpText = `
     ${C.bright}${providerLabel} Commit Message Helper${C.reset}
     Version: ${pkg.version}
@@ -89,7 +99,7 @@ ${options}
       Use ${C.cyan}--provider <name>${C.reset}, choose in interactive Settings,
       or set ${C.cyan}GCM_PROVIDER${C.reset}.
       Available values:
-        ${providerIds.join(', ')}.
+        ${providerValues}
       Example: ${C.cyan}GCM_PROVIDER=lm-studio gcm${C.reset}
 
     ${C.bright}Examples:${C.reset}

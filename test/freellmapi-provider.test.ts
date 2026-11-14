@@ -6,10 +6,13 @@ import { createFreeLlmApiProvider as createFreeLlmApiProviderWithConfig } from '
 async function createFreeLlmApiProvider(
   options: Omit<
     Parameters<typeof createFreeLlmApiProviderWithConfig>[0],
-    'config'
-  >,
+    'config' | 'id' | 'label'
+  > &
+    Partial<Parameters<typeof createFreeLlmApiProviderWithConfig>[0]>,
 ): Promise<Awaited<ReturnType<typeof createFreeLlmApiProviderWithConfig>>> {
   return await createFreeLlmApiProviderWithConfig({
+    id: 'freellmapi',
+    label: 'FreeLLMAPI',
     ...options,
     config: loadConfig({}),
   });
@@ -146,6 +149,39 @@ test('createFreeLlmApiProvider fetches models and generates text', async () => {
     expect(response?.text).toBe('feat: add freellmapi provider');
     expect(response?.usage.promptTokens).toBe(15);
     expect(response?.usage.outputTokens).toBe(8);
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test('OpenAI-compatible router keeps its own identity and errors', async () => {
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: function () {
+      return Response.json({
+        data: [{ id: 'google/gemini-4-hydrogen', context_length: 32_768 }],
+      });
+    },
+  });
+  try {
+    const provider = await createFreeLlmApiProvider({
+      id: 'openrouter',
+      label: 'OpenRouter',
+      baseUrl: `${server.url.origin}/api/v1`,
+      model: 'google/gemini-4-hydrogen',
+    });
+    expect(provider.id).toBe('openrouter');
+    expect(provider.label).toBe('OpenRouter');
+    expect(provider.defaultModel).toBe('google/gemini-4-hydrogen');
+    await expect(
+      createFreeLlmApiProvider({
+        id: 'openrouter',
+        label: 'OpenRouter',
+        baseUrl: `${server.url.origin}/api/v1`,
+        model: 'missing/model',
+      }),
+    ).rejects.toThrow('Configured OpenRouter model is not available');
   } finally {
     await server.stop(true);
   }
@@ -564,6 +600,8 @@ async function collectFreeLlmApiTrace(options: {
   });
   try {
     const provider = await createFreeLlmApiProviderWithConfig({
+      id: 'freellmapi',
+      label: 'FreeLLMAPI',
       baseUrl: server.url.origin,
       config: { ...loadConfig({}), DEBUG_API: options.configDebug === true },
       debugApi: options.debugApi,

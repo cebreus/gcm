@@ -16,6 +16,8 @@ const DEFAULT_CONFIG = {
   freeLlmApiUrl: 'http://127.0.0.1:3001',
   freeLlmApiModel: 'auto',
   freeLlmApiToken: null,
+  openRouterModel: 'google/gemini-4-hydrogen',
+  openRouterToken: null,
   autoChangeset: false,
 };
 
@@ -35,6 +37,8 @@ async function readConfig(env: Record<string, string>): Promise<unknown> {
     freeLlmApiUrl: config.FREELLMAPI_URL,
     freeLlmApiModel: config.FREELLMAPI_MODEL,
     freeLlmApiToken: config.FREELLMAPI_TOKEN ?? null,
+    openRouterModel: config.OPENROUTER_MODEL,
+    openRouterToken: config.OPENROUTER_TOKEN ?? null,
     autoChangeset: config.AUTO_CHANGESET,
   };
 }
@@ -137,6 +141,19 @@ test('config: reads only FreeLLMAPI-specific names', async () => {
     freeLlmApiUrl: 'https://free.example/v1',
     freeLlmApiModel: 'router',
     freeLlmApiToken: 'free-token',
+  });
+});
+
+test('config: reads OpenRouter names', async () => {
+  await expect(
+    readConfig({
+      GCM_OPENROUTER_MODEL: 'openai/gpt-6-luna',
+      OPENROUTER_API_KEY: 'router-token',
+    }),
+  ).resolves.toEqual({
+    ...DEFAULT_CONFIG,
+    openRouterModel: 'openai/gpt-6-luna',
+    openRouterToken: 'router-token',
   });
 });
 

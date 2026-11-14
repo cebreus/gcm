@@ -1,6 +1,6 @@
 # GCM
 
-Generate Conventional Commit messages from staged changes or existing commits with Gemini, OpenAI-compatible APIs, LM Studio, or local Codex, Claude and GitHub Copilot CLIs.
+Generate Conventional Commit messages from staged changes or existing commits with Gemini, OpenRouter, OpenAI-compatible APIs, LM Studio, or local Codex, Claude and GitHub Copilot CLIs.
 
 Review every result before any Git write.
 
@@ -8,7 +8,7 @@ Review every result before any Git write.
 
 - [Bun](https://bun.sh/) 1.4+ to build or to run from source; the built `dist/gcm` is a standalone executable
 - Git
-- [Google Gemini API key](https://aistudio.google.com/app/apikey), FreeLLMAPI, or LM Studio
+- [Google Gemini API key](https://aistudio.google.com/app/apikey), [OpenRouter API key](https://openrouter.ai/keys), FreeLLMAPI, or LM Studio
 
 ## Install
 
@@ -70,16 +70,20 @@ From source checkout, replace `gcm` with `bun run ./gcm.ts` (see the caveat in [
 
 Interactive flow lets you configure provider and model, regenerate, add hint, switch models, edit or copy message, select available Git action. Selected provider and model saved only after successful Git action.
 
-The initial model is `--model`, then the provider's model variable (`GCM_MODEL`, `GCM_FREELLMAPI_MODEL`, `GCM_LM_STUDIO_MODEL`), then the last used model, then the provider default.
+The initial model is `--model`, then the provider's model variable (`GCM_MODEL`, `GCM_FREELLMAPI_MODEL`, `GCM_OPENROUTER_MODEL`, `GCM_LM_STUDIO_MODEL`), then the last used model, then the provider default.
 
 The provider is `--provider`, then `GCM_PROVIDER`, then the last used provider, then the first registered provider (`gemini`). GCM does not check readiness when it picks that default. When only the last used provider selected it and that provider cannot be started in a non-interactive run, GCM prints a warning to stderr and tries the first registered provider instead. Any other provider that cannot be started stops a non-interactive run with an error; an interactive run asks you to select another provider.
 
 Scope suggestions come from recent commit subjects and from paths: in a monorepo only `apps/<name>/` and `packages/<name>/` are workspace folders and suggest `<name>`; `.github/` suggests `ci`; root `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` and `tsconfig.json` suggest `build`; `src/<dir>/` suggests `<dir>`. Split proposals use the same two workspace folders and put `package.json` and lockfiles into one dependency group proposed as `build(deps)`; other paths follow the documentation, CI, test and top-level-directory rules.
 
-Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Built-in values: `gemini`, `freellmapi`, `lm-studio`; installed CLIs also enable `codex-cli`, `claude-cli` and `copilot-cli`.
+Choose a provider in interactive Settings, or set `GCM_PROVIDER` before running `gcm`. Built-in values: `gemini`, `freellmapi`, `openrouter`, `lm-studio`; installed CLIs also enable `codex-cli`, `claude-cli` and `copilot-cli`.
 
 Model catalogues must publish authoritative limits. Gemini exposes separate input/output limits;
-FreeLLMAPI and LM Studio expose a shared context window.
+FreeLLMAPI, OpenRouter and LM Studio expose a shared context window.
+
+`openrouter` calls `https://openrouter.ai/api/v1` with `OPENROUTER_API_KEY` and needs no
+local server. A key with a credit limit rejects a request whose `max_tokens` it cannot
+afford, with HTTP 402; lower `GCM_MAX_OUTPUT_TOKENS` to fit that limit.
 
 See [user-flow diagrams](docs/user-flow.md) for all generation flows.
 
@@ -170,38 +174,40 @@ Analysed diff is sent to the selected provider. Whitespace noise is ignored when
 
 Files that usually hold secrets are excluded from analysis by default, next to `dist/**` and nested `dist` directories: `.env` and `.env.*` in any directory, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.keystore`, `*.tfvars`, `*.tfstate`, and `.netrc`, `.npmrc`, `id_rsa*` / `id_ed25519*` in any directory. `.env.example` and `.env.sample` match `.env.*` and are excluded too. Excluded files are neither sent nor listed in the request. They stay staged; committing them needs explicit confirmation, and `--non-interactive --apply` refuses. When every staged file is excluded, GCM reports `Only excluded files are staged` and stops.
 
-Local CLI providers are started without `GOOGLE_GEMINI_API_KEY`, `GCM_FREELLMAPI_TOKEN` and `LM_API_TOKEN` in their environment.
+Local CLI providers are started without `GOOGLE_GEMINI_API_KEY`, `GCM_FREELLMAPI_TOKEN`, `OPENROUTER_API_KEY` and `LM_API_TOKEN` in their environment.
 
 The diff is untrusted, so the model's reply is too. After the subject line, GCM drops every line that starts with a denylisted trailer (`Co-authored-by`, `Signed-off-by`, `Reviewed-by`, `Acked-by`, `Tested-by`, `Skip-checks`, `Release-As`, `Co-developed-by`, `Reported-by`, `Suggested-by`, `Helped-by`, `Cc`, `Change-Id`) and every line that contains a closing keyword with an issue reference (`Closes #12`, `fixes owner/repo#3`, `Resolves https://...`), wherever it sits. CI skip markers (`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]`, `***NO_CI***`) are removed from the whole reply, nested ones included. `BREAKING CHANGE:` footers and ordinary prose such as `Note:` lines are kept.
 
-`--debug` prints redacted request/response traces to the console, each body capped at 32 KiB. Traces cover the HTTP providers (Gemini, FreeLLMAPI, LM Studio); local CLI providers produce none. No trace file is written. The traces contain the analysed diff, so avoid `--debug` where the output is kept: a shared terminal, a recorded session or CI logs. See [secret redaction](docs/adr/0004-redact-secrets-leaving-the-machine.md).
+`--debug` prints redacted request/response traces to the console, each body capped at 32 KiB. Traces cover the HTTP providers (Gemini, FreeLLMAPI, OpenRouter, LM Studio); local CLI providers produce none. No trace file is written. The traces contain the analysed diff, so avoid `--debug` where the output is kept: a shared terminal, a recorded session or CI logs. See [secret redaction](docs/adr/0004-redact-secrets-leaving-the-machine.md).
 
 ## Configuration
 
 `GCM_MODEL`, `GCM_TEMP` only model/temperature names. Invalid or out-of-range numeric values and an unknown `GCM_LOG_LEVEL` stop GCM with an `Invalid <NAME>` error.
 
-| Variable                | Default                 | Purpose                                                |
-| ----------------------- | ----------------------- | ------------------------------------------------------ |
-| `GCM_MODEL`             | `gemini-4-hydrogen`     | Gemini model.                                          |
-| `GCM_PROVIDER`          | none                    | Provider; unset: last used, then `gemini`.             |
-| `GCM_FREELLMAPI_URL`    | `http://127.0.0.1:3001` | FreeLLMAPI endpoint URL.                               |
-| `GCM_FREELLMAPI_MODEL`  | `auto`                  | FreeLLMAPI routing model.                              |
-| `GCM_FREELLMAPI_TOKEN`  | none                    | FreeLLMAPI Bearer token.                               |
-| `GCM_LM_STUDIO_URL`     | `http://127.0.0.1:1234` | LM Studio loopback URL.                                |
-| `GCM_LM_STUDIO_MODEL`   | Loaded, else first      | Strict LM Studio model override.                       |
-| `LM_API_TOKEN`          | none                    | Optional LM Studio API token.                          |
-| `GCM_TEMP`              | `1`                     | Temperature from 0 to 1.                               |
-| `GCM_MAX_BUFFER`        | `50 MiB`                | Maximum Git output.                                    |
-| `GCM_PER_FILE_BUFFER`   | `1 MiB`                 | Maximum per-file diff when a large diff is summarised. |
-| `GCM_MAX_HUNKS`         | `40`                    | Maximum hunks when a large diff is summarised.         |
-| `GCM_TOKEN_BYTES_RATIO` | `3.5`                   | Estimated bytes per input token.                       |
-| `GCM_MAX_OUTPUT_TOKENS` | `8192`                  | Response-token policy; the model cap also applies.     |
-| `GCM_LOG_LEVEL`         | `info`                  | Console log level: `debug`, `info`, `warn`, `error`.   |
-| `GCM_DEBUG_API`         | `false`                 | Enable API trace logging.                              |
-| `GCM_AUTO_CHANGESET`    | `false`                 | Prepare a Changeset during interactive staged commits. |
-| `GCM_MAX_RETRIES`       | `3`                     | Retries for transient provider failures.               |
-| `GCM_RETRY_BASE_MS`     | `1000`                  | Initial retry delay.                                   |
-| `GCM_RETRY_MAX_MS`      | `60000`                 | Maximum retry delay.                                   |
+| Variable                | Default                    | Purpose                                                |
+| ----------------------- | -------------------------- | ------------------------------------------------------ |
+| `GCM_MODEL`             | `gemini-4-hydrogen`        | Gemini model.                                          |
+| `GCM_PROVIDER`          | none                       | Provider; unset: last used, then `gemini`.             |
+| `GCM_FREELLMAPI_URL`    | `http://127.0.0.1:3001`    | FreeLLMAPI endpoint URL.                               |
+| `GCM_FREELLMAPI_MODEL`  | `auto`                     | FreeLLMAPI routing model.                              |
+| `GCM_FREELLMAPI_TOKEN`  | none                       | FreeLLMAPI Bearer token.                               |
+| `GCM_OPENROUTER_MODEL`  | `google/gemini-4-hydrogen` | OpenRouter model.                                      |
+| `OPENROUTER_API_KEY`    | none                       | OpenRouter API key.                                    |
+| `GCM_LM_STUDIO_URL`     | `http://127.0.0.1:1234`    | LM Studio loopback URL.                                |
+| `GCM_LM_STUDIO_MODEL`   | Loaded, else first         | Strict LM Studio model override.                       |
+| `LM_API_TOKEN`          | none                       | Optional LM Studio API token.                          |
+| `GCM_TEMP`              | `1`                        | Temperature from 0 to 1.                               |
+| `GCM_MAX_BUFFER`        | `50 MiB`                   | Maximum Git output.                                    |
+| `GCM_PER_FILE_BUFFER`   | `1 MiB`                    | Maximum per-file diff when a large diff is summarised. |
+| `GCM_MAX_HUNKS`         | `40`                       | Maximum hunks when a large diff is summarised.         |
+| `GCM_TOKEN_BYTES_RATIO` | `3.5`                      | Estimated bytes per input token.                       |
+| `GCM_MAX_OUTPUT_TOKENS` | `8192`                     | Response-token policy; the model cap also applies.     |
+| `GCM_LOG_LEVEL`         | `info`                     | Console log level: `debug`, `info`, `warn`, `error`.   |
+| `GCM_DEBUG_API`         | `false`                    | Enable API trace logging.                              |
+| `GCM_AUTO_CHANGESET`    | `false`                    | Prepare a Changeset during interactive staged commits. |
+| `GCM_MAX_RETRIES`       | `3`                        | Retries for transient provider failures.               |
+| `GCM_RETRY_BASE_MS`     | `1000`                     | Initial retry delay.                                   |
+| `GCM_RETRY_MAX_MS`      | `60000`                    | Maximum retry delay.                                   |
 
 Set `GCM_AUTO_CHANGESET=true` to prepare a Changeset after generating an interactive
 staged commit message. Review the proposed note, then choose **Commit with changeset**

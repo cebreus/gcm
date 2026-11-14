@@ -41,6 +41,8 @@ export interface Config {
   FREELLMAPI_URL: string;
   FREELLMAPI_MODEL: string;
   FREELLMAPI_TOKEN: string | undefined;
+  OPENROUTER_MODEL: string;
+  OPENROUTER_TOKEN: string | undefined;
   PROVIDER: string | undefined;
   LM_STUDIO_URL: string;
   LM_STUDIO_MODEL: string | undefined;
@@ -111,6 +113,11 @@ function readConfig(env: Record<string, string | undefined>): Config {
     ),
     FREELLMAPI_MODEL: stringOrDefault(env.GCM_FREELLMAPI_MODEL, 'auto'),
     FREELLMAPI_TOKEN: env.GCM_FREELLMAPI_TOKEN,
+    OPENROUTER_MODEL: stringOrDefault(
+      env.GCM_OPENROUTER_MODEL,
+      'google/gemini-4-hydrogen',
+    ),
+    OPENROUTER_TOKEN: env.OPENROUTER_API_KEY,
     PROVIDER: env.GCM_PROVIDER,
     LM_STUDIO_URL: stringOrDefault(
       env.GCM_LM_STUDIO_URL,

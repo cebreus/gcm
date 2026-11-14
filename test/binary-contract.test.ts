@@ -779,7 +779,7 @@ test('binary contract: shows documented help', async () => {
     .filter((line) => line.length > 80);
   expect(wideLines).toEqual([]);
   expect(result.stdout).toContain('GCM_PROVIDER=lm-studio gcm');
-  expect(result.stdout).toContain('gemini, freellmapi, lm-studio');
+  expect(result.stdout).toContain('gemini, freellmapi, openrouter, lm-studio');
   expect(result.stderr).toBe('');
 });
 

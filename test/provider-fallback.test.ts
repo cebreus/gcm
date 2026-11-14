@@ -84,6 +84,8 @@ for (const kind of ['gemini', 'freellmapi'] as const) {
                 },
               })
             : await createFreeLlmApiProvider({
+                id: 'freellmapi',
+                label: 'FreeLLMAPI',
                 config,
                 baseUrl: server.url.origin,
                 model: primary,

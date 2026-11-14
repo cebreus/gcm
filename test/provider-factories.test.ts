@@ -22,6 +22,7 @@ test('local CLI registration follows installed binaries without probing during h
   expect(factories.map((factory) => factory.id)).toEqual([
     'gemini',
     'freellmapi',
+    'openrouter',
     'lm-studio',
     'codex-cli',
   ]);
@@ -29,6 +30,18 @@ test('local CLI registration follows installed binaries without probing during h
   const provider = await factories.at(-1)?.create({ probeOnly: true });
   expect(provider?.id).toBe('codex-cli');
   expect(calls).toEqual([['/fake/codex', 'login', 'status']]);
+});
+
+test('OpenRouter factory requires its API key before any request', async () => {
+  const factories = createProviderFactories(
+    { which: () => null },
+    { log: function () {} },
+    false,
+    loadConfig({}),
+  );
+  const openRouter = factories.find((factory) => factory.id === 'openrouter');
+  expect(openRouter?.label).toBe('OpenRouter');
+  await expect(openRouter?.create()).rejects.toThrow('OPENROUTER_API_KEY');
 });
 
 test('Claude factory refuses a logged-out CLI even when status exits zero', async () => {

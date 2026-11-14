@@ -157,6 +157,7 @@ function candidateCatalogueError(
 async function discoverModels(
   url: URL,
   config: Config,
+  label: string,
   token?: string,
 ): Promise<{ models: ModelSpec[] }> {
   const candidates = resolveModelCandidates(url);
@@ -166,7 +167,7 @@ async function discoverModels(
     try {
       // eslint-disable-next-line no-await-in-loop -- model endpoints are ordered fallbacks and stop after first success
       const payload = await requestLanguageModelJson({
-        providerLabel: 'FreeLLMAPI',
+        providerLabel: label,
         url: modelsUrl,
         timeoutMs: MODEL_CATALOGUE_TIMEOUT_MS,
         token,
@@ -186,13 +187,13 @@ async function discoverModels(
         rejectUnsafeModelMetadata(
           [entry.id, entry.name, entry.key, entry.label, entry.display_name],
           token,
-          'Invalid FreeLLMAPI model metadata',
+          `Invalid ${label} model metadata`,
         );
       }
 
       const models = collectSortedModels(rawList, parseModel);
 
-      requireDistinctModels(models, 'FreeLLMAPI', candidateCatalogueError);
+      requireDistinctModels(models, label, candidateCatalogueError);
       return { models };
     } catch (error) {
       if (isLanguageModelApiError(error)) {
@@ -210,7 +211,7 @@ async function discoverModels(
   if (lastError instanceof Error) {
     throw lastError;
   }
-  throw new Error('FreeLLMAPI model discovery failed', { cause: lastError });
+  throw new Error(`${label} model discovery failed`, { cause: lastError });
 }
 
 function isCandidateFailure(error: LanguageModelApiError): boolean {
@@ -235,6 +236,8 @@ function readModelList(payload: unknown): unknown[] {
 }
 
 export async function createFreeLlmApiProvider(options: {
+  id: string;
+  label: string;
   baseUrl: string;
   model?: string;
   token?: string;
@@ -242,32 +245,28 @@ export async function createFreeLlmApiProvider(options: {
   logger?: Logger;
   debugApi?: boolean;
 }): Promise<LanguageModelProvider> {
-  const url = parseProviderBaseUrl(options.baseUrl, 'FreeLLMAPI', {
+  const { id, label } = options;
+  const url = parseProviderBaseUrl(options.baseUrl, label, {
     allowHttps: true,
-    loopbackError: 'FreeLLMAPI URL must use HTTPS or a loopback hostname',
+    loopbackError: `${label} URL must use HTTPS or a loopback hostname`,
   });
   if (options.token !== undefined && !isHeaderSafeToken(options.token)) {
-    throw createLanguageModelApiError('Invalid FreeLLMAPI API token');
+    throw createLanguageModelApiError(`Invalid ${label} API token`);
   }
 
   const { config } = options;
   const fetchImpl =
     options.logger !== undefined &&
     (options.debugApi === true || config.DEBUG_API)
-      ? withRequestTrace(
-          options.logger,
-          globalThis.fetch,
-          'FreeLLMAPI',
-          options.token,
-        )
+      ? withRequestTrace(options.logger, globalThis.fetch, label, options.token)
       : undefined;
-  const { models } = await discoverModels(url, config, options.token);
+  const { models } = await discoverModels(url, config, label, options.token);
 
   if (
     options.model !== undefined &&
     !models.some((model) => model.name === options.model)
   ) {
-    throw new Error('Configured FreeLLMAPI model is not available');
+    throw new Error(`Configured ${label} model is not available`);
   }
 
   const byName = new Map(models.map((model) => [model.name, model]));
@@ -275,7 +274,7 @@ export async function createFreeLlmApiProvider(options: {
   const defaultModel = options.model ?? DEFAULT_FREELLMAPI_MODEL;
   if (!models.some((model) => model.name === defaultModel)) {
     throw createLanguageModelApiError(
-      'FreeLLMAPI auto model is unavailable or lacks context metadata',
+      `${label} ${defaultModel} model is unavailable or lacks context metadata`,
     );
   }
 
@@ -285,11 +284,11 @@ export async function createFreeLlmApiProvider(options: {
   ): ReturnType<typeof generateOpenAiCompatibleChat> {
     const model = byName.get(modelName);
     if (model === undefined) {
-      throw new Error('Unknown FreeLLMAPI model');
+      throw new Error(`Unknown ${label} model`);
     }
 
     return await generateOpenAiCompatibleChat({
-      providerLabel: 'FreeLLMAPI',
+      providerLabel: label,
       url: resolveChatEndpoint(url),
       token: options.token,
       params: { ...params, modelName },
@@ -305,8 +304,8 @@ export async function createFreeLlmApiProvider(options: {
   }
 
   return {
-    id: 'freellmapi',
-    label: 'FreeLLMAPI',
+    id,
+    label,
     defaultModel,
 
     service: {

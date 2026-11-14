@@ -1,10 +1,11 @@
 import type { Config } from '../gcm.config.js';
 import { createFreeLlmApiProvider } from './freellmapi-provider.js';
 import { createGeminiProvider } from './gemini-provider.js';
-import type {
-  LanguageModelProvider,
-  LanguageModelProviderFactory,
-  LanguageModelService,
+import {
+  type LanguageModelProvider,
+  type LanguageModelProviderFactory,
+  type LanguageModelService,
+  createLanguageModelApiError,
 } from './language-model-service.js';
 import { createLmStudioProvider } from './lm-studio-provider.js';
 import {
@@ -65,6 +66,8 @@ export function createProviderFactories(
       label: 'FreeLLMAPI',
       create: async () =>
         await createFreeLlmApiProvider({
+          id: 'freellmapi',
+          label: 'FreeLLMAPI',
           baseUrl: config.FREELLMAPI_URL,
           model: config.FREELLMAPI_MODEL,
           token: config.FREELLMAPI_TOKEN,
@@ -72,6 +75,27 @@ export function createProviderFactories(
           logger,
           debugApi,
         }),
+    },
+    {
+      id: 'openrouter',
+      label: 'OpenRouter',
+      create: async function () {
+        if (config.OPENROUTER_TOKEN === undefined) {
+          throw createLanguageModelApiError(
+            'OpenRouter needs OPENROUTER_API_KEY',
+          );
+        }
+        return await createFreeLlmApiProvider({
+          id: 'openrouter',
+          label: 'OpenRouter',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          model: config.OPENROUTER_MODEL,
+          token: config.OPENROUTER_TOKEN,
+          config,
+          logger,
+          debugApi,
+        });
+      },
     },
     {
       id: 'lm-studio',

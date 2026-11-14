@@ -44,6 +44,7 @@ interface SpawnGitOptions {
 const PROVIDER_CREDENTIAL_NAMES = new Set([
   'GOOGLE_GEMINI_API_KEY',
   'GCM_FREELLMAPI_TOKEN',
+  'OPENROUTER_API_KEY',
   'LM_API_TOKEN',
 ]);
 const CHILD_KILL_GRACE_MS = 2_000;
