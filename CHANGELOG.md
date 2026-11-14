@@ -1,5 +1,49 @@
 # gcm
 
+## 0.14.0
+
+> GCM 0.14 adds local `codex-cli`, `claude-cli` and `copilot-cli` providers, an `openrouter` provider, `--print` output, and `.gcmrc.json` repository configuration. Default models follow the GCM model comparison, provider variables now use `GCM_<PROVIDER>_API_KEY`, `GCM_<PROVIDER>_MODEL` and `GCM_<PROVIDER>_URL`, and LM Studio uses the first loaded or compatible model. Standalone binaries now ignore working-directory `.env` and `bunfig.toml` files, secret-bearing files are excluded by default, and prompt redaction covers more credential formats. Logs and notices now go to stderr, repository checks run before contacting providers, and large diffs, hooks, and empty replies are handled more cleanly.
+
+### Minor Changes
+
+- Add local `copilot-cli` provider with sandboxed execution, and register it when `copilot` is on PATH.
+- Breaking behaviour change: remove the LM Studio preference for `gemma-4-e4b-it-mlx` and its model fallback notice; without `GCM_LM_STUDIO_MODEL` or `--model`, LM Studio uses the first loaded model, otherwise loads the first compatible one and stops if that load fails. Set `GCM_LM_STUDIO_MODEL` or `--model` to pin a model.
+- Add local `codex-cli` and `claude-cli` providers with login checks, sandboxed read-only execution and fallback chains, and list available providers dynamically in `--help`.
+- Change default models from the GCM model comparison: Gemini uses `gemini-4-hydrogen` with `gemini-3.5-flash` fallback, and Claude CLI uses `sonnet` with `haiku` fallback.
+- Add `openrouter` provider that uses `GCM_OPENROUTER_API_KEY` and `GCM_OPENROUTER_MODEL`, with `google/gemini-4-hydrogen` as default model.
+- Add `--print` for clean generated-message output, refuse truncated output, keep fallback notices on stderr, and support explicit breaking-change hints.
+- Repositories can state commit types, scopes, analysis excludes and prompt instructions in `.gcmrc.json`; repository instructions cannot override higher-priority prompt rules, and automatic Changesets are skipped when project excludes hide changed paths.
+- Add model availability fallback for Gemini (`gemini-4-hydrogen` to `gemini-3.5-flash`), raise the chat request timeout to 90 seconds, and add redacted request tracing to FreeLLMAPI.
+- Exclude secret-bearing files from analysis by default: `.env` and `.env.*` (including `.env.example`), `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*` and `id_ed25519*`; they are neither sent nor listed and still commit normally.
+- Build `dist/gcm` and the release binaries as standalone executables that ignore `bunfig.toml` and `.env` in the working directory, so a repository cannot inject preload scripts or settings. A project `.env` no longer configures `gcm`; set variables in the shell environment.
+- Rename provider variables to `GCM_<PROVIDER>_API_KEY`, `GCM_<PROVIDER>_MODEL` and `GCM_<PROVIDER>_URL`. `GOOGLE_GEMINI_API_KEY` becomes `GCM_GEMINI_API_KEY`, `GCM_MODEL` becomes `GCM_GEMINI_MODEL`, `GCM_FREELLMAPI_TOKEN` becomes `GCM_FREELLMAPI_API_KEY` and `LM_API_TOKEN` becomes `GCM_LM_STUDIO_API_KEY`. The old names are no longer read. Every `GCM_*_API_KEY` variable is removed from Git and local CLI environments.
+
+### Patch Changes
+
+- Check for a Git repository before contacting any provider, so runs outside one fail without a network call.
+- Reports an invalid configuration value as a single error line.
+- Write CLI errors and cancellation messages to stderr, keep `--version` and `--help` usable when settings are invalid, apply provider model environment variables before saved session models, and reject flag-like separated values for `--commit-range`.
+- Wait for commit hooks without a time limit when committing, amending or creating an `amend!` commit, instead of stopping Git after 120 seconds. Hooks that print more output than the Git output limit no longer abort the commit.
+- Debug logs show prompt and output token counts instead of redacting them.
+- An empty or whitespace-only provider reply is now reported as "did not return a usable response" instead of a misleading parse failure.
+- An unknown `GCM_LOG_LEVEL` now stops gcm with `Invalid GCM_LOG_LEVEL` instead of silently using `info`, and an empty `GCM_FREELLMAPI_MODEL` uses the default `auto`.
+- Split proposals use top-level-directory groups as a fallback after test, documentation and workspace rules.
+- Apply `GCM_MAX_BUFFER` to Git commands and keep repository-root file paths working when gcm runs from a subdirectory.
+- Git output caps (`GCM_MAX_BUFFER`, `GCM_PER_FILE_BUFFER`) now keep the first bytes up to the cap instead of sometimes dropping the whole output, which made gcm report an empty diff.
+- Large whitespace-only changes are summarised from the plain diff instead of failing with "Diff summary contains no evidence".
+- Write logs, the intro banner and progress to stderr so stdout carries only results, and draw the spinner only on a terminal. Repository warnings, commit failures, provider-unavailable notices and a reply that cannot be parsed are reported on stderr, and an unknown provider error names the rejected provider and lists the valid ones.
+- Remove model-written metadata from replies: trailers such as `Co-authored-by`, `Signed-off-by`, `Cc`, `Release-As` and `Change-Id`, issue-closing lines and nested CI skip markers anywhere after the subject, including inside `BREAKING CHANGE` blocks. `BREAKING CHANGE` footers and ordinary prose such as `Note:` lines are kept.
+- Prompt redaction also covers `Bearer` tokens, more Slack tokens, Stripe test keys, Google OAuth tokens, unquoted `key: value` secrets and unterminated private key blocks; redaction stays best-effort.
+- `gcm --help` writes plain text without terminal escape sequences when stdout is not a terminal.
+- Disable external diff drivers, textconv and colour in Git reads, report renamed files once, and omit rename diffs when either path matches an exclude pattern.
+- Write the banner without terminal styling when stderr is not a terminal, and report missing staged changes once instead of twice.
+- Redact URL passwords, more vendor tokens, secret environment assignments and quoted secret literals from prompts, share redacted HTTP debug tracing with LM Studio, and preserve ordinary prose containing secret keywords in replies.
+- Start with the last used provider when neither `--provider` nor `GCM_PROVIDER` is set, and ignore a saved provider that is not known. When the saved provider cannot be started in a non-interactive run, warn on stderr and use the first available provider; a provider set by `--provider` or `GCM_PROVIDER` still fails.
+- Check the repository and staged snapshot before offering provider settings, so a run that cannot continue stops without asking for a provider or model first.
+- Reports a provider failure once.
+- Analyse whitespace-only changes, such as re-indented YAML or Python, instead of sending the model an empty diff; whitespace noise is still ignored when a change has other content.
+- Scope suggestions and split proposals treat only `apps/` and `packages/` as workspace folders; `sites/`, `tools/`, `infra/` and `scripts/` follow the general rules, and `package-lock.json` and `yarn.lock` suggest the `build` scope.
+
 ## 0.13.0
 
 ### Minor Changes
