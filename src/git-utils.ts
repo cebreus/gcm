@@ -41,12 +41,7 @@ interface SpawnGitOptions {
   allowTruncated?: boolean;
 }
 
-const PROVIDER_CREDENTIAL_NAMES = new Set([
-  'GOOGLE_GEMINI_API_KEY',
-  'GCM_FREELLMAPI_TOKEN',
-  'OPENROUTER_API_KEY',
-  'LM_API_TOKEN',
-]);
+const PROVIDER_CREDENTIAL_NAME = /^GCM_[A-Z_]+_API_KEY$/v;
 const CHILD_KILL_GRACE_MS = 2_000;
 const DEFAULT_GIT_OUTPUT_BYTES = BYTES_PER_KIBIBYTE * KIBIBYTES_PER_MEBIBYTE;
 const DEFAULT_GIT_TIMEOUT_MS = 120_000;
@@ -96,7 +91,7 @@ export function childEnvironment(
   return Object.fromEntries(
     Object.entries(env).filter(
       (entry): entry is [string, string] =>
-        entry[1] !== undefined && !PROVIDER_CREDENTIAL_NAMES.has(entry[0]),
+        entry[1] !== undefined && !PROVIDER_CREDENTIAL_NAME.test(entry[0]),
     ),
   );
 }

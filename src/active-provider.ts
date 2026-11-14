@@ -27,7 +27,7 @@ import type { GCMSession } from './session.js';
 import { sanitizeTerminalText } from './utils.js';
 
 const providerModelEnv: Record<string, string | undefined> = {
-  gemini: 'GCM_MODEL',
+  gemini: 'GCM_GEMINI_MODEL',
   freellmapi: 'GCM_FREELLMAPI_MODEL',
   openrouter: 'GCM_OPENROUTER_MODEL',
   'lm-studio': 'GCM_LM_STUDIO_MODEL',

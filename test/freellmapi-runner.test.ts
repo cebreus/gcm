@@ -9,9 +9,9 @@ const {
     GCM_PROVIDER: originalProvider,
     GCM_FREELLMAPI_URL: originalUrl,
     GCM_FREELLMAPI_MODEL: originalModel,
-    GCM_FREELLMAPI_TOKEN: originalToken,
-    LM_API_TOKEN: originalLmToken,
-    GOOGLE_GEMINI_API_KEY: originalGeminiKey,
+    GCM_FREELLMAPI_API_KEY: originalToken,
+    GCM_LM_STUDIO_API_KEY: originalLmToken,
+    GCM_GEMINI_API_KEY: originalGeminiKey,
   },
   exitCode: originalExitCode,
 } = process;
@@ -45,9 +45,9 @@ await mock.module('@clack/prompts', () => ({
 }));
 
 process.env.HOME = repository;
-delete process.env.GOOGLE_GEMINI_API_KEY;
-process.env.GCM_FREELLMAPI_TOKEN = 'provider-specific-token';
-process.env.LM_API_TOKEN = 'lm-studio-secret-token';
+delete process.env.GCM_GEMINI_API_KEY;
+process.env.GCM_FREELLMAPI_API_KEY = 'provider-specific-token';
+process.env.GCM_LM_STUDIO_API_KEY = 'lm-studio-secret-token';
 async function runGit(...args: string[]): Promise<void> {
   const child = Bun.spawn({
     cmd: ['git', ...args],
@@ -83,19 +83,19 @@ afterAll(async () => {
     process.env.GCM_FREELLMAPI_MODEL = originalModel;
   }
   if (originalToken === undefined) {
-    delete process.env.GCM_FREELLMAPI_TOKEN;
+    delete process.env.GCM_FREELLMAPI_API_KEY;
   } else {
-    process.env.GCM_FREELLMAPI_TOKEN = originalToken;
+    process.env.GCM_FREELLMAPI_API_KEY = originalToken;
   }
   if (originalLmToken === undefined) {
-    delete process.env.LM_API_TOKEN;
+    delete process.env.GCM_LM_STUDIO_API_KEY;
   } else {
-    process.env.LM_API_TOKEN = originalLmToken;
+    process.env.GCM_LM_STUDIO_API_KEY = originalLmToken;
   }
   if (originalGeminiKey === undefined) {
-    delete process.env.GOOGLE_GEMINI_API_KEY;
+    delete process.env.GCM_GEMINI_API_KEY;
   } else {
-    process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
+    process.env.GCM_GEMINI_API_KEY = originalGeminiKey;
   }
   process.exitCode = originalExitCode ?? 0;
   await rm(repository, { recursive: true, force: true });

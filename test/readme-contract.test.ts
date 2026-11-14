@@ -109,7 +109,7 @@ test('README environment table lists exactly the variables gcm.config.ts reads',
   ];
   // The Gemini key is documented in Install, not in the table.
   expect(new Set(documented)).toEqual(
-    new Set(read.filter((name) => name !== 'GOOGLE_GEMINI_API_KEY')),
+    new Set(read.filter((name) => name !== 'GCM_GEMINI_API_KEY')),
   );
 });
 

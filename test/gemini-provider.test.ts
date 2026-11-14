@@ -30,9 +30,9 @@ function createGenerateParams(): Parameters<
 
 test('Gemini generates over the OpenAI-compatible endpoint with bearer auth', async () => {
   const {
-    env: { GOOGLE_GEMINI_API_KEY: originalKey },
+    env: { GCM_GEMINI_API_KEY: originalKey },
   } = process;
-  process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
+  process.env.GCM_GEMINI_API_KEY = 'test-key';
   const requests: Array<{
     url: string;
     authorization: string | null;
@@ -89,18 +89,18 @@ test('Gemini generates over the OpenAI-compatible endpoint with bearer auth', as
     });
   } finally {
     if (originalKey === undefined) {
-      delete process.env.GOOGLE_GEMINI_API_KEY;
+      delete process.env.GCM_GEMINI_API_KEY;
     } else {
-      process.env.GOOGLE_GEMINI_API_KEY = originalKey;
+      process.env.GCM_GEMINI_API_KEY = originalKey;
     }
   }
 });
 
 test('Gemini reports truncation when the model stops on length', async () => {
   const {
-    env: { GOOGLE_GEMINI_API_KEY: originalKey },
+    env: { GCM_GEMINI_API_KEY: originalKey },
   } = process;
-  process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
+  process.env.GCM_GEMINI_API_KEY = 'test-key';
   try {
     const provider = createGeminiProvider({
       config: loadConfig(process.env),
@@ -126,18 +126,18 @@ test('Gemini reports truncation when the model stops on length', async () => {
     expect(response?.truncated).toBe(true);
   } finally {
     if (originalKey === undefined) {
-      delete process.env.GOOGLE_GEMINI_API_KEY;
+      delete process.env.GCM_GEMINI_API_KEY;
     } else {
-      process.env.GOOGLE_GEMINI_API_KEY = originalKey;
+      process.env.GCM_GEMINI_API_KEY = originalKey;
     }
   }
 });
 
 test('Gemini model discovery retries after failure and caches success', async () => {
   const {
-    env: { GOOGLE_GEMINI_API_KEY: originalKey },
+    env: { GCM_GEMINI_API_KEY: originalKey },
   } = process;
-  process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
+  process.env.GCM_GEMINI_API_KEY = 'test-key';
   let calls = 0;
   try {
     const provider = createGeminiProvider({
@@ -173,18 +173,18 @@ test('Gemini model discovery retries after failure and caches success', async ()
     expect(calls).toBe(2);
   } finally {
     if (originalKey === undefined) {
-      delete process.env.GOOGLE_GEMINI_API_KEY;
+      delete process.env.GCM_GEMINI_API_KEY;
     } else {
-      process.env.GOOGLE_GEMINI_API_KEY = originalKey;
+      process.env.GCM_GEMINI_API_KEY = originalKey;
     }
   }
 });
 
 test('Gemini model discovery keeps stable text models only', async () => {
   const {
-    env: { GOOGLE_GEMINI_API_KEY: originalKey },
+    env: { GCM_GEMINI_API_KEY: originalKey },
   } = process;
-  process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
+  process.env.GCM_GEMINI_API_KEY = 'test-key';
   try {
     const model = function (name: string): ModelSpec {
       return {
@@ -222,18 +222,18 @@ test('Gemini model discovery keeps stable text models only', async () => {
     ]);
   } finally {
     if (originalKey === undefined) {
-      delete process.env.GOOGLE_GEMINI_API_KEY;
+      delete process.env.GCM_GEMINI_API_KEY;
     } else {
-      process.env.GOOGLE_GEMINI_API_KEY = originalKey;
+      process.env.GCM_GEMINI_API_KEY = originalKey;
     }
   }
 });
 
 test('Gemini debug tracing never logs an unbounded response body', async () => {
   const {
-    env: { GOOGLE_GEMINI_API_KEY: originalKey },
+    env: { GCM_GEMINI_API_KEY: originalKey },
   } = process;
-  process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
+  process.env.GCM_GEMINI_API_KEY = 'test-key';
   const logged: string[] = [];
   try {
     const provider = createGeminiProvider({
@@ -266,9 +266,9 @@ test('Gemini debug tracing never logs an unbounded response body', async () => {
     expect(logged[0]?.length).toBeLessThanOrEqual(1024 * 1024);
   } finally {
     if (originalKey === undefined) {
-      delete process.env.GOOGLE_GEMINI_API_KEY;
+      delete process.env.GCM_GEMINI_API_KEY;
     } else {
-      process.env.GOOGLE_GEMINI_API_KEY = originalKey;
+      process.env.GCM_GEMINI_API_KEY = originalKey;
     }
   }
 });
@@ -277,9 +277,9 @@ test.each(['length', 'max_tokens', 'MAX_TOKENS'])(
   'Gemini reports truncation for finish_reason %s',
   async (finishReason) => {
     const {
-      env: { GOOGLE_GEMINI_API_KEY: originalKey },
+      env: { GCM_GEMINI_API_KEY: originalKey },
     } = process;
-    process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
+    process.env.GCM_GEMINI_API_KEY = 'test-key';
     try {
       const provider = createGeminiProvider({
         config: loadConfig(process.env),
@@ -305,9 +305,9 @@ test.each(['length', 'max_tokens', 'MAX_TOKENS'])(
       ).toBe(true);
     } finally {
       if (originalKey === undefined) {
-        delete process.env.GOOGLE_GEMINI_API_KEY;
+        delete process.env.GCM_GEMINI_API_KEY;
       } else {
-        process.env.GOOGLE_GEMINI_API_KEY = originalKey;
+        process.env.GCM_GEMINI_API_KEY = originalKey;
       }
     }
   },

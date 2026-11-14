@@ -49,7 +49,7 @@ function controlledEnvironment(
     TERM: 'dumb',
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null',
-    GOOGLE_GEMINI_API_KEY: apiKey ?? '',
+    GCM_GEMINI_API_KEY: apiKey ?? '',
     ...extra,
   };
 }
@@ -807,7 +807,7 @@ test('binary contract: reports a missing Gemini API key', async () => {
   const result = await runBinary([], excludeRepository);
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stderr).toContain('GOOGLE_GEMINI_API_KEY');
+  expect(result.stderr).toContain('GCM_GEMINI_API_KEY');
 });
 
 test('binary contract: reports conflicts before showing settings', async () => {
@@ -906,7 +906,7 @@ test('binary contract: excludes a dash-prefixed sentinel from the changed-file s
     'Excluded 1 file(s) matching patterns: -generated/*',
   );
   expect(result.stderr).toContain('Found 1 file(s) changed');
-  expect(result.stderr).toContain('GOOGLE_GEMINI_API_KEY');
+  expect(result.stderr).toContain('GCM_GEMINI_API_KEY');
   expect(result.stdout).not.toContain('Missing value for flag: --exclude');
   expect(result.stderr).not.toContain('Missing value for flag: --exclude');
 });

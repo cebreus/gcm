@@ -82,7 +82,7 @@ function readConfig(env: Record<string, string | undefined>): Config {
       fallback: DEFAULT_PER_FILE_BUFFER,
       invalidName: 'GCM_PER_FILE_BUFFER',
     }),
-    MODEL: stringOrDefault(env.GCM_MODEL, 'gemini-4-hydrogen'),
+    MODEL: stringOrDefault(env.GCM_GEMINI_MODEL, 'gemini-4-hydrogen'),
     TEMP: numberInRange(env.GCM_TEMP, {
       minimum: 0,
       maximum: 1,
@@ -112,20 +112,20 @@ function readConfig(env: Record<string, string | undefined>): Config {
       'http://127.0.0.1:3001',
     ),
     FREELLMAPI_MODEL: stringOrDefault(env.GCM_FREELLMAPI_MODEL, 'auto'),
-    FREELLMAPI_TOKEN: env.GCM_FREELLMAPI_TOKEN,
+    FREELLMAPI_TOKEN: env.GCM_FREELLMAPI_API_KEY,
     OPENROUTER_MODEL: stringOrDefault(
       env.GCM_OPENROUTER_MODEL,
       'google/gemini-4-hydrogen',
     ),
-    OPENROUTER_TOKEN: env.OPENROUTER_API_KEY,
+    OPENROUTER_TOKEN: env.GCM_OPENROUTER_API_KEY,
     PROVIDER: env.GCM_PROVIDER,
     LM_STUDIO_URL: stringOrDefault(
       env.GCM_LM_STUDIO_URL,
       'http://127.0.0.1:1234',
     ),
     LM_STUDIO_MODEL: env.GCM_LM_STUDIO_MODEL,
-    LM_STUDIO_TOKEN: env.LM_API_TOKEN,
-    GEMINI_API_KEY: env.GOOGLE_GEMINI_API_KEY ?? '',
+    LM_STUDIO_TOKEN: env.GCM_LM_STUDIO_API_KEY,
+    GEMINI_API_KEY: env.GCM_GEMINI_API_KEY ?? '',
   };
 }
 

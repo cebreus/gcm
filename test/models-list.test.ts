@@ -58,14 +58,14 @@ await mock.module('../src/gemini-models', () => ({
 test('cli: --models-list prints available models', async () => {
   const { executeCommitMessageGeneration } = await import('../src/runner.js'); // Use named export
   const {
-    env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+    env: { GCM_GEMINI_API_KEY: originalApiKey },
     exitCode: originalExitCode,
     stdout: { write: originalStdoutWrite, columns: originalColumns },
   } = process;
   const stdoutChunks: string[] = [];
   // A zero-width pseudo-terminal makes clack wrap the note one character per line.
   process.stdout.columns = 80;
-  process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
+  process.env.GCM_GEMINI_API_KEY = 'test-key';
   process.exitCode = 0;
   process.stdout.write = mock((chunk: string | Uint8Array) => {
     stdoutChunks.push(String(chunk));
@@ -87,9 +87,9 @@ test('cli: --models-list prints available models', async () => {
     process.stdout.columns = originalColumns;
     process.exitCode = originalExitCode ?? 0;
     if (originalApiKey === undefined) {
-      delete process.env.GOOGLE_GEMINI_API_KEY;
+      delete process.env.GCM_GEMINI_API_KEY;
     } else {
-      process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      process.env.GCM_GEMINI_API_KEY = originalApiKey;
     }
   }
 });
@@ -97,10 +97,10 @@ test('cli: --models-list prints available models', async () => {
 test('cli: --models-list without API key exits with code 1', async () => {
   const { executeCommitMessageGeneration } = await import('../src/runner.js');
   const {
-    env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+    env: { GCM_GEMINI_API_KEY: originalApiKey },
     exitCode: originalExitCode,
   } = process;
-  delete process.env.GOOGLE_GEMINI_API_KEY;
+  delete process.env.GCM_GEMINI_API_KEY;
 
   const consoleErrorMock = spyOn(console, 'error').mockImplementation(() => {});
   process.exitCode = 0;
@@ -111,9 +111,9 @@ test('cli: --models-list without API key exits with code 1', async () => {
     consoleErrorMock.mockRestore();
     process.exitCode = originalExitCode ?? 0;
     if (originalApiKey === undefined) {
-      delete process.env.GOOGLE_GEMINI_API_KEY;
+      delete process.env.GCM_GEMINI_API_KEY;
     } else {
-      process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      process.env.GCM_GEMINI_API_KEY = originalApiKey;
     }
   }
 });
@@ -121,7 +121,7 @@ test('cli: --models-list without API key exits with code 1', async () => {
 test('cli: --models-list uses the injected model list failure contract', async () => {
   const { executeCommitMessageGeneration } = await import('../src/runner.js');
   const {
-    env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+    env: { GCM_GEMINI_API_KEY: originalApiKey },
     exitCode: originalExitCode,
     stderr: { write: originalStderrWrite },
   } = process;
@@ -130,7 +130,7 @@ test('cli: --models-list uses the injected model list failure contract', async (
   );
   const stderrChunks: string[] = [];
 
-  process.env.GOOGLE_GEMINI_API_KEY = 'test-key';
+  process.env.GCM_GEMINI_API_KEY = 'test-key';
   process.exitCode = 0;
   process.stderr.write = mock((chunk: string | Uint8Array) => {
     stderrChunks.push(String(chunk));
@@ -147,9 +147,9 @@ test('cli: --models-list uses the injected model list failure contract', async (
     process.stderr.write = originalStderrWrite;
     process.exitCode = originalExitCode ?? 0;
     if (originalApiKey === undefined) {
-      delete process.env.GOOGLE_GEMINI_API_KEY;
+      delete process.env.GCM_GEMINI_API_KEY;
     } else {
-      process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+      process.env.GCM_GEMINI_API_KEY = originalApiKey;
     }
   }
 

@@ -9,7 +9,7 @@ const {
     GCM_PROVIDER: originalProvider,
     GCM_LM_STUDIO_URL: originalUrl,
     GCM_LM_STUDIO_MODEL: originalModel,
-    GOOGLE_GEMINI_API_KEY: originalGeminiKey,
+    GCM_GEMINI_API_KEY: originalGeminiKey,
   },
 } = process;
 const repository = await mkdtemp(`${Bun.env.TMPDIR ?? '/tmp'}/gcm-lm-studio-`);
@@ -42,7 +42,7 @@ await mock.module('@clack/prompts', () => ({
 }));
 
 process.env.HOME = repository;
-delete process.env.GOOGLE_GEMINI_API_KEY;
+delete process.env.GCM_GEMINI_API_KEY;
 const { executeCommitMessageGeneration } = await import('../src/runner.js');
 
 async function runGit(...args: string[]): Promise<void> {
@@ -80,9 +80,9 @@ afterAll(async () => {
     process.env.GCM_LM_STUDIO_MODEL = originalModel;
   }
   if (originalGeminiKey === undefined) {
-    delete process.env.GOOGLE_GEMINI_API_KEY;
+    delete process.env.GCM_GEMINI_API_KEY;
   } else {
-    process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
+    process.env.GCM_GEMINI_API_KEY = originalGeminiKey;
   }
   await rm(repository, { recursive: true, force: true });
   process.exitCode = originalExitCode ?? 0;

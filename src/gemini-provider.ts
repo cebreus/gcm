@@ -74,9 +74,7 @@ export function createGeminiProvider(options: {
 
   async function loadModels(): Promise<ModelSpec[]> {
     if (apiKey === '') {
-      return await Promise.reject(
-        new Error('GOOGLE_GEMINI_API_KEY is not set.'),
-      );
+      return await Promise.reject(new Error('GCM_GEMINI_API_KEY is not set.'));
     }
     if (cataloguePromise !== null) {
       return await cataloguePromise;
@@ -143,7 +141,7 @@ export function createGeminiProvider(options: {
     label: 'Gemini',
     readinessError:
       apiKey === ''
-        ? 'Environment variable GOOGLE_GEMINI_API_KEY not set.'
+        ? 'Environment variable GCM_GEMINI_API_KEY not set.'
         : undefined,
     defaultModel: config.MODEL,
     service: options.service ?? { generate },

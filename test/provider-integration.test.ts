@@ -108,6 +108,6 @@ test('a keyless provider generates from a real staged Git snapshot', async () =>
     'Generated Commit Message',
   );
   expect(cancel).not.toHaveBeenCalledWith(
-    expect.stringContaining('GOOGLE_GEMINI_API_KEY'),
+    expect.stringContaining('GCM_GEMINI_API_KEY'),
   );
 });

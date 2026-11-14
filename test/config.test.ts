@@ -64,7 +64,7 @@ async function runCli(
 
 test('config: reads the short GCM names', async () => {
   await expect(
-    readConfig({ GCM_MODEL: 'test-model', GCM_TEMP: '0.25' }),
+    readConfig({ GCM_GEMINI_MODEL: 'test-model', GCM_TEMP: '0.25' }),
   ).resolves.toEqual({
     ...DEFAULT_CONFIG,
     model: 'test-model',
@@ -78,8 +78,8 @@ test('config: resolves provider credentials and LM Studio settings from supplied
       GCM_PROVIDER: 'lm-studio',
       GCM_LM_STUDIO_URL: 'http://127.0.0.1:4321',
       GCM_LM_STUDIO_MODEL: 'local-model',
-      LM_API_TOKEN: 'local-token',
-      GOOGLE_GEMINI_API_KEY: 'gemini-key',
+      GCM_LM_STUDIO_API_KEY: 'local-token',
+      GCM_GEMINI_API_KEY: 'gemini-key',
     }),
   ).toMatchObject({
     PROVIDER: 'lm-studio',
@@ -128,7 +128,7 @@ test('config: reads only FreeLLMAPI-specific names', async () => {
     readConfig({
       GCM_FREELLMAPI_URL: 'https://free.example/v1',
       GCM_FREELLMAPI_MODEL: 'router',
-      GCM_FREELLMAPI_TOKEN: 'free-token',
+      GCM_FREELLMAPI_API_KEY: 'free-token',
       GCM_OPENAI_URL: 'https://legacy.example/v1',
       GCM_OPENAI_MODEL: 'legacy-model',
       GCM_OPENAI_TOKEN: 'legacy-token',
@@ -148,7 +148,7 @@ test('config: reads OpenRouter names', async () => {
   await expect(
     readConfig({
       GCM_OPENROUTER_MODEL: 'openai/gpt-6-luna',
-      OPENROUTER_API_KEY: 'router-token',
+      GCM_OPENROUTER_API_KEY: 'router-token',
     }),
   ).resolves.toEqual({
     ...DEFAULT_CONFIG,
@@ -175,18 +175,18 @@ test('CLI names an invalid GCM_MAX_RETRIES setting', async () => {
   expect(result.stderr).toContain('Invalid GCM_MAX_RETRIES');
 });
 
-const UNSAFE_MODEL = { GCM_MODEL: 'bad\u001b[2Jmodel' };
+const UNSAFE_MODEL = { GCM_GEMINI_MODEL: 'bad\u001b[2Jmodel' };
 
-test('an unsafe GCM_MODEL still lets the CLI answer --version', async () => {
+test('an unsafe GCM_GEMINI_MODEL still lets the CLI answer --version', async () => {
   const result = await runCli(UNSAFE_MODEL, ['--version']);
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain('gcm ');
 });
 
-test('an unsafe GCM_MODEL stops --providers-list with the real reason', async () => {
+test('an unsafe GCM_GEMINI_MODEL stops --providers-list with the real reason', async () => {
   const result = await runCli(UNSAFE_MODEL, ['--providers-list']);
   expect(result.exitCode).not.toBe(0);
-  expect(result.stdout + result.stderr).toContain('Invalid GCM_MODEL');
+  expect(result.stdout + result.stderr).toContain('Invalid GCM_GEMINI_MODEL');
 });
 
 test('--help to a non-terminal stdout has no escape sequences', async () => {
@@ -196,11 +196,13 @@ test('--help to a non-terminal stdout has no escape sequences', async () => {
   expect(result.stdout).not.toContain('\u001b[');
 });
 
-test('an unsafe GCM_MODEL still lets the CLI answer --help', async () => {
+test('an unsafe GCM_GEMINI_MODEL still lets the CLI answer --help', async () => {
   const result = await runCli(UNSAFE_MODEL, ['--help']);
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain('Usage');
-  expect(result.stdout + result.stderr).not.toContain('Invalid GCM_MODEL');
+  expect(result.stdout + result.stderr).not.toContain(
+    'Invalid GCM_GEMINI_MODEL',
+  );
 });
 
 test('--help wins over --models-list', async () => {

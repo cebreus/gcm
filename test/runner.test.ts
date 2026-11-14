@@ -371,7 +371,7 @@ describe('Refactored Runner', () => {
       .mockResolvedValueOnce('commit');
 
     // Execute
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     await executeCommitMessageGeneration([], {
       logger: mockLogger,
       gitService: mockGitService,
@@ -423,7 +423,7 @@ describe('Refactored Runner', () => {
   });
 
   test('non-interactive generation does not prompt or write without --apply', async () => {
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['a.ts'],
@@ -460,7 +460,7 @@ describe('Refactored Runner', () => {
   });
 
   test('non-interactive --apply writes the generated message without prompting', async () => {
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['a.ts'],
@@ -497,7 +497,7 @@ describe('Refactored Runner', () => {
   });
 
   test('non-interactive --apply refuses to commit a truncated message', async () => {
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['a.ts'],
@@ -535,7 +535,7 @@ describe('Refactored Runner', () => {
     );
   });
   test('--print refuses to print a truncated message', async () => {
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['a.ts'],
@@ -568,7 +568,7 @@ describe('Refactored Runner', () => {
   });
 
   test('commit range refuses to rewrite history from a truncated message', async () => {
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     const currentHead = 'c'.repeat(40);
     mockGitService.listCommitHashes.mockResolvedValue(['a'.repeat(40)]);
     mockGitService.hasAmendment.mockResolvedValue(false);
@@ -639,7 +639,7 @@ describe('Refactored Runner', () => {
   });
 
   test('commit range applies one amend! action per frozen target without prompting', async () => {
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     const targets = ['a'.repeat(40), 'b'.repeat(40)];
     const rewordedTargets: string[] = [];
     let currentHead = 'c'.repeat(40);
@@ -712,7 +712,7 @@ describe('Refactored Runner', () => {
   });
 
   test('commit range stops before generation when the index is staged', async () => {
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     mockGitService.getRepositoryState.mockResolvedValue({
       hasStagedChanges: true,
       hasUnmergedPaths: false,
@@ -1890,10 +1890,10 @@ describe('Refactored Runner', () => {
 
   test('Should fail when Git has unresolved conflicts', async () => {
     const {
-      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      env: { GCM_GEMINI_API_KEY: originalApiKey },
       exitCode: originalExitCode,
     } = process;
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
@@ -1927,9 +1927,9 @@ describe('Refactored Runner', () => {
     } finally {
       process.exitCode = originalExitCode ?? 0;
       if (originalApiKey === undefined) {
-        delete process.env.GOOGLE_GEMINI_API_KEY;
+        delete process.env.GCM_GEMINI_API_KEY;
       } else {
-        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+        process.env.GCM_GEMINI_API_KEY = originalApiKey;
       }
     }
   });
@@ -1948,9 +1948,9 @@ describe('Refactored Runner', () => {
   ]) {
     test(`Should offer settings unless ${inputCase.name}`, async () => {
       const {
-        env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+        env: { GCM_GEMINI_API_KEY: originalApiKey },
       } = process;
-      process.env.GOOGLE_GEMINI_API_KEY = 'test';
+      process.env.GCM_GEMINI_API_KEY = 'test';
       mockGitService.retrieveStagedChanges.mockResolvedValue({
         stagedDiff: 'diff',
         stagedFiles: ['file.ts'],
@@ -1986,9 +1986,9 @@ describe('Refactored Runner', () => {
         }
       } finally {
         if (originalApiKey === undefined) {
-          delete process.env.GOOGLE_GEMINI_API_KEY;
+          delete process.env.GCM_GEMINI_API_KEY;
         } else {
-          process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+          process.env.GCM_GEMINI_API_KEY = originalApiKey;
         }
       }
     });
@@ -1996,9 +1996,9 @@ describe('Refactored Runner', () => {
 
   test('Should show the latest repository state discovered during preflight', async () => {
     const {
-      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      env: { GCM_GEMINI_API_KEY: originalApiKey },
     } = process;
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['file.ts'],
@@ -2045,18 +2045,18 @@ describe('Refactored Runner', () => {
       expect(mockSelect).toHaveBeenCalled();
     } finally {
       if (originalApiKey === undefined) {
-        delete process.env.GOOGLE_GEMINI_API_KEY;
+        delete process.env.GCM_GEMINI_API_KEY;
       } else {
-        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+        process.env.GCM_GEMINI_API_KEY = originalApiKey;
       }
     }
   });
 
   test('Should keep generation read-only while a rebase is in progress', async () => {
     const {
-      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      env: { GCM_GEMINI_API_KEY: originalApiKey },
     } = process;
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     mockGitService.commitChanges.mockClear();
     mockGitService.amendCommit.mockClear();
     mockGitService.rewordCommit.mockClear();
@@ -2110,18 +2110,18 @@ describe('Refactored Runner', () => {
       expect(mockSaveSession).not.toHaveBeenCalled();
     } finally {
       if (originalApiKey === undefined) {
-        delete process.env.GOOGLE_GEMINI_API_KEY;
+        delete process.env.GCM_GEMINI_API_KEY;
       } else {
-        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+        process.env.GCM_GEMINI_API_KEY = originalApiKey;
       }
     }
   });
 
   test('Should stop before settings when the staged snapshot changed', async () => {
     const {
-      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      env: { GCM_GEMINI_API_KEY: originalApiKey },
     } = process;
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
       stagedFiles: ['file.ts'],
@@ -2148,19 +2148,19 @@ describe('Refactored Runner', () => {
       expect(mockGeminiService.generate).not.toHaveBeenCalled();
     } finally {
       if (originalApiKey === undefined) {
-        delete process.env.GOOGLE_GEMINI_API_KEY;
+        delete process.env.GCM_GEMINI_API_KEY;
       } else {
-        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+        process.env.GCM_GEMINI_API_KEY = originalApiKey;
       }
     }
   });
 
   test('Should fail when Gemini returns malformed full output', async () => {
     const {
-      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      env: { GCM_GEMINI_API_KEY: originalApiKey },
       exitCode: originalExitCode,
     } = process;
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
@@ -2196,19 +2196,19 @@ describe('Refactored Runner', () => {
     } finally {
       process.exitCode = originalExitCode ?? 0;
       if (originalApiKey === undefined) {
-        delete process.env.GOOGLE_GEMINI_API_KEY;
+        delete process.env.GCM_GEMINI_API_KEY;
       } else {
-        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+        process.env.GCM_GEMINI_API_KEY = originalApiKey;
       }
     }
   });
 
   test('Should remove terminal controls before logging an unparseable model response', async () => {
     const {
-      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      env: { GCM_GEMINI_API_KEY: originalApiKey },
       exitCode: originalExitCode,
     } = process;
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
@@ -2241,19 +2241,19 @@ describe('Refactored Runner', () => {
     } finally {
       process.exitCode = originalExitCode ?? 0;
       if (originalApiKey === undefined) {
-        delete process.env.GOOGLE_GEMINI_API_KEY;
+        delete process.env.GCM_GEMINI_API_KEY;
       } else {
-        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+        process.env.GCM_GEMINI_API_KEY = originalApiKey;
       }
     }
   });
 
   test('Should return to review when the commit action fails', async () => {
     const {
-      env: { GOOGLE_GEMINI_API_KEY: originalApiKey },
+      env: { GCM_GEMINI_API_KEY: originalApiKey },
       exitCode: originalExitCode,
     } = process;
-    process.env.GOOGLE_GEMINI_API_KEY = 'test';
+    process.env.GCM_GEMINI_API_KEY = 'test';
     process.exitCode = 0;
     mockGitService.retrieveStagedChanges.mockResolvedValue({
       stagedDiff: 'diff',
@@ -2293,9 +2293,9 @@ describe('Refactored Runner', () => {
     } finally {
       process.exitCode = originalExitCode ?? 0;
       if (originalApiKey === undefined) {
-        delete process.env.GOOGLE_GEMINI_API_KEY;
+        delete process.env.GCM_GEMINI_API_KEY;
       } else {
-        process.env.GOOGLE_GEMINI_API_KEY = originalApiKey;
+        process.env.GCM_GEMINI_API_KEY = originalApiKey;
       }
     }
   });

@@ -257,9 +257,9 @@ test('local CLI environment drops provider credentials and keeps the rest', () =
       HOME: '/home/fake',
       ANTHROPIC_API_KEY: 'fake-anthropic',
       OPENAI_API_KEY: 'fake-openai',
-      GOOGLE_GEMINI_API_KEY: 'fake-gemini',
-      GCM_FREELLMAPI_TOKEN: 'fake-freellm',
-      LM_API_TOKEN: 'fake-lm',
+      GCM_GEMINI_API_KEY: 'fake-gemini',
+      GCM_FREELLMAPI_API_KEY: 'fake-freellm',
+      GCM_LM_STUDIO_API_KEY: 'fake-lm',
       UNSET: undefined,
     }),
   ).toEqual({

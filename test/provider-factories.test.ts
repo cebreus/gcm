@@ -41,7 +41,7 @@ test('OpenRouter factory requires its API key before any request', async () => {
   );
   const openRouter = factories.find((factory) => factory.id === 'openrouter');
   expect(openRouter?.label).toBe('OpenRouter');
-  await expect(openRouter?.create()).rejects.toThrow('OPENROUTER_API_KEY');
+  await expect(openRouter?.create()).rejects.toThrow('GCM_OPENROUTER_API_KEY');
 });
 
 test('Claude factory refuses a logged-out CLI even when status exits zero', async () => {

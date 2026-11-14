@@ -82,7 +82,7 @@ export function createProviderFactories(
       create: async function () {
         if (config.OPENROUTER_TOKEN === undefined) {
           throw createLanguageModelApiError(
-            'OpenRouter needs OPENROUTER_API_KEY',
+            'OpenRouter needs GCM_OPENROUTER_API_KEY',
           );
         }
         return await createFreeLlmApiProvider({

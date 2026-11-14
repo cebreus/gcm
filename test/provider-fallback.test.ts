@@ -19,7 +19,7 @@ for (const kind of ['gemini', 'freellmapi'] as const) {
       const notices: string[] = [];
       const names = [primary, fallback];
       const config = loadConfig({
-        GOOGLE_GEMINI_API_KEY: 'test-key',
+        GCM_GEMINI_API_KEY: 'test-key',
         GCM_MAX_RETRIES: '0',
       });
       async function respond(request: Request): Promise<Response> {
@@ -120,7 +120,7 @@ test('Gemini timeout uses availability fallback, caller cancellation does not', 
     let calls = 0;
     const provider = createGeminiProvider({
       config: loadConfig({
-        GOOGLE_GEMINI_API_KEY: 'test-key',
+        GCM_GEMINI_API_KEY: 'test-key',
         GCM_MAX_RETRIES: '0',
       }),
       logger: { log: function () {} },

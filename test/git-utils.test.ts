@@ -45,16 +45,17 @@ test('git-utils: spawnGitLines - should spawn a git command and return lines', a
 test('git-utils: removes provider credentials from Git subprocess environments', async () => {
   const {
     env: {
-      GOOGLE_GEMINI_API_KEY: originalGeminiKey,
-      GCM_FREELLMAPI_TOKEN: originalFreeLlmToken,
-      LM_API_TOKEN: originalLmToken,
+      GCM_GEMINI_API_KEY: originalGeminiKey,
+      GCM_FREELLMAPI_API_KEY: originalFreeLlmToken,
+      GCM_LM_STUDIO_API_KEY: originalLmToken,
       COMMIT_SIGNING_TOKEN: originalSigningToken,
     },
   } = process;
-  process.env.GOOGLE_GEMINI_API_KEY = 'gemini-secret';
-  process.env.GCM_FREELLMAPI_TOKEN = 'freellm-secret';
-  process.env.LM_API_TOKEN = 'lm-secret';
+  process.env.GCM_GEMINI_API_KEY = 'gemini-secret';
+  process.env.GCM_FREELLMAPI_API_KEY = 'freellm-secret';
+  process.env.GCM_LM_STUDIO_API_KEY = 'lm-secret';
   process.env.COMMIT_SIGNING_TOKEN = 'hook-secret';
+  process.env.GCM_FUTURE_API_KEY = 'future-secret';
   try {
     await spawnGitStream(['status']);
     const call = mockSpawn.mock.calls.at(-1) as unknown as [
@@ -62,25 +63,27 @@ test('git-utils: removes provider credentials from Git subprocess environments',
     ];
     const [options] = call;
     expect(options.env).toBeDefined();
-    expect(options.env?.GOOGLE_GEMINI_API_KEY).toBeUndefined();
-    expect(options.env?.GCM_FREELLMAPI_TOKEN).toBeUndefined();
-    expect(options.env?.LM_API_TOKEN).toBeUndefined();
+    expect(options.env?.GCM_GEMINI_API_KEY).toBeUndefined();
+    expect(options.env?.GCM_FREELLMAPI_API_KEY).toBeUndefined();
+    expect(options.env?.GCM_LM_STUDIO_API_KEY).toBeUndefined();
+    expect(options.env?.GCM_FUTURE_API_KEY).toBeUndefined();
     expect(options.env?.COMMIT_SIGNING_TOKEN).toBe('hook-secret');
   } finally {
+    delete process.env.GCM_FUTURE_API_KEY;
     if (originalGeminiKey === undefined) {
-      delete process.env.GOOGLE_GEMINI_API_KEY;
+      delete process.env.GCM_GEMINI_API_KEY;
     } else {
-      process.env.GOOGLE_GEMINI_API_KEY = originalGeminiKey;
+      process.env.GCM_GEMINI_API_KEY = originalGeminiKey;
     }
     if (originalFreeLlmToken === undefined) {
-      delete process.env.GCM_FREELLMAPI_TOKEN;
+      delete process.env.GCM_FREELLMAPI_API_KEY;
     } else {
-      process.env.GCM_FREELLMAPI_TOKEN = originalFreeLlmToken;
+      process.env.GCM_FREELLMAPI_API_KEY = originalFreeLlmToken;
     }
     if (originalLmToken === undefined) {
-      delete process.env.LM_API_TOKEN;
+      delete process.env.GCM_LM_STUDIO_API_KEY;
     } else {
-      process.env.LM_API_TOKEN = originalLmToken;
+      process.env.GCM_LM_STUDIO_API_KEY = originalLmToken;
     }
     if (originalSigningToken === undefined) {
       delete process.env.COMMIT_SIGNING_TOKEN;

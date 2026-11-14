@@ -323,11 +323,11 @@ async function runParsedCommand(
   const config = loadRunConfig(parsedArgs.help);
   const logger =
     opts.logger ?? createLogger(buildLoggerConfig(parsedArgs, config));
-  // Checked before any provider is built, because GCM_MODEL becomes a
+  // Checked before any provider is built, because GCM_GEMINI_MODEL becomes a
   // provider's default model and would otherwise surface as "unavailable".
   // --help never resolves a model, so it stays usable.
   if (!parsedArgs.help && !isLanguageModelName(config.MODEL)) {
-    reportCancel('Error: Invalid GCM_MODEL.');
+    reportCancel('Error: Invalid GCM_GEMINI_MODEL.');
     return 1;
   }
   const factories = createProviderFactories(

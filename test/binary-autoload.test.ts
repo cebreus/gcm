@@ -64,7 +64,7 @@ test('binary ignores bunfig.toml and .env from the working directory', async () 
   const result = await run([binaryPath], hostile, {
     PATH: Bun.env.PATH ?? '/usr/bin:/bin',
     HOME: directory,
-    GOOGLE_GEMINI_API_KEY: 'fake-key',
+    GCM_GEMINI_API_KEY: 'fake-key',
     NO_COLOR: '1',
   });
   expect(await Bun.file(`${directory}/MARK`).exists()).toBe(false);

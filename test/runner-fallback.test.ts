@@ -106,9 +106,9 @@ async function runnerFallbackStructuredOutputTest(
 
   // Ensure API key is present
   const {
-    env: { GOOGLE_GEMINI_API_KEY: origApiKey },
+    env: { GCM_GEMINI_API_KEY: origApiKey },
   } = process;
-  process.env.GOOGLE_GEMINI_API_KEY = 'fake-key';
+  process.env.GCM_GEMINI_API_KEY = 'fake-key';
   try {
     await runner.executeCommitMessageGeneration(
       ['--model', 'gemini-3.7-flash'],
@@ -136,9 +136,9 @@ async function runnerFallbackStructuredOutputTest(
     process.stderr.write = originalStderrWrite;
     process.exitCode = originalExitCode ?? 0;
     if (origApiKey === undefined) {
-      delete process.env.GOOGLE_GEMINI_API_KEY;
+      delete process.env.GCM_GEMINI_API_KEY;
     } else {
-      process.env.GOOGLE_GEMINI_API_KEY = origApiKey;
+      process.env.GCM_GEMINI_API_KEY = origApiKey;
     }
   }
 
