@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { text as readStream } from 'node:stream/consumers';
 
@@ -708,6 +709,10 @@ function runPrePush(remote, input) {
   return { code: 0 };
 }
 
+// Git removes `#` lines and the `commit -v` diff only after commit-msg hooks.
+// shortcut: a fake scissors line in `-m` text is also cut; pre-push still checks it.
+const EDITOR_NOISE = /^# -{24} >8 -{24}$[\s\S]*|^#.*(?:\r?\n|$)/gm;
+
 /**
  * @param {string[]} argv Command arguments.
  * @param {string} [input] Hook input.
@@ -717,7 +722,7 @@ function runCli(argv, input = '') {
   try {
     const [mode, ...args] = argv;
     const runners = {
-      'commit-msg': () => runCommitMessage(input),
+      'commit-msg': () => runCommitMessage(input.replaceAll(EDITOR_NOISE, '')),
       'pre-push': () => runPrePush(args[0], input),
       range: () => {
         const [base, head] = args;
@@ -765,10 +770,21 @@ async function main(argv) {
   );
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === new URL(process.argv[1], 'file:').href
-) {
+/**
+ * Check whether this file is the process entry point. Real paths are compared,
+ * so `#`, `%`, and symlinks in the path cannot silently skip the gate.
+ *
+ * @returns {boolean} True when run directly.
+ */
+function isCliEntry() {
+  try {
+    return realpathSync(import.meta.filename) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+if (isCliEntry()) {
   const result = await main(process.argv.slice(2));
   if (result.message) {
     process.stderr.write(`changeset-gate: ${result.message}\n`);
